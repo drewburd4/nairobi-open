@@ -13,6 +13,7 @@
   --good:#46704f; --good-soft:#e9efe7;
   --warn:#a8730a; --warn-soft:#f6ecd9;
   --danger:#a33d2a; --danger-soft:#f6e4de;
+  --bkline:#cfc8b8;
   --shadow:0 1px 2px rgba(38,37,31,.05);
 }
 @media (prefers-color-scheme: dark){
@@ -22,6 +23,7 @@
     --good:#8db394; --good-soft:#26302a;
     --warn:#d9a24a; --warn-soft:#33270f;
     --danger:#df8268; --danger-soft:#381d15;
+    --bkline:#575040;
     --shadow:none;
   }
 }
@@ -31,6 +33,7 @@
   --good:#46704f; --good-soft:#e9efe7;
   --warn:#a8730a; --warn-soft:#f6ecd9;
   --danger:#a33d2a; --danger-soft:#f6e4de;
+  --bkline:#cfc8b8;
   --shadow:0 1px 2px rgba(38,37,31,.05);
 }
 :root[data-theme="dark"]{
@@ -39,6 +42,7 @@
   --good:#8db394; --good-soft:#26302a;
   --warn:#d9a24a; --warn-soft:#33270f;
   --danger:#df8268; --danger-soft:#381d15;
+  --bkline:#575040;
   --shadow:none;
 }
 
@@ -48,7 +52,7 @@ html,body{margin:0;padding:0}
 body{background:var(--bg); color:var(--ink);
   font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
   font-size:15px; line-height:1.45; -webkit-font-smoothing:antialiased}
-button{font:inherit; color:inherit; background:none; border:none; padding:0; cursor:pointer; text-align:left}
+button{font:inherit; color:inherit; background:none; border:none; padding:0; cursor:pointer; text-align:left; appearance:none; -webkit-appearance:none}
 input,textarea,select{font:inherit; color:var(--ink)}
 :focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px}
 @media (prefers-reduced-motion: reduce){ *{transition:none !important; animation:none !important} }
@@ -111,9 +115,9 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .boardnotes .note{display:block; padding:2px 0}
 
 /* ---------- schedule / results ---------- */
-.gchips{display:flex; gap:6px; overflow-x:auto; padding:8px 0 2px}
-.gchip{padding:5px 10px; border-radius:999px; border:1px solid var(--line); background:var(--card); font-weight:700; font-size:12.5px; color:var(--muted); white-space:nowrap}
-.gchip[aria-current="true"]{background:var(--ink); color:var(--bg); border-color:var(--ink)}
+.subtabs{display:flex; gap:2px; overflow-x:auto; margin:12px 0 2px; padding:4px 2px 0; border-bottom:1px solid var(--line)}
+.subtab{padding:9px 12px 10px; font-weight:700; font-size:14px; color:var(--muted); border-bottom:3px solid transparent; white-space:nowrap; flex-shrink:0; margin-bottom:-1px}
+.subtab[aria-current="true"]{color:var(--ink); border-bottom-color:var(--accent)}
 .controls{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:12px 0 0}
 .search{flex:1; min-width:160px; padding:9px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card)}
 .roundblock{background:var(--card); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); padding:4px 14px 8px; margin:12px 0}
@@ -136,30 +140,33 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .standings td{padding:7px 5px; text-align:right; font-size:13.5px; border-bottom:1px solid var(--line); cursor:pointer}
 .standings tr:last-child td{border-bottom:none}
 .standings td.tname{text-align:left; font-weight:600; overflow-wrap:anywhere}
-.standings tr.adv td{background:var(--good-soft)}
 .standings .pos{color:var(--muted); font-weight:700}
 
-/* ---------- bracket ---------- */
-.bracket-scroll{overflow-x:auto; padding-bottom:10px}
-.bracket{display:flex; gap:14px; align-items:stretch; min-width:min-content}
-.bcol{display:flex; flex-direction:column; justify-content:space-around; gap:10px; min-width:190px}
-.bcol .microlabel{text-align:center; margin-bottom:2px}
-.bmatch{background:var(--card); border:1px solid var(--line); border-radius:9px; padding:8px 10px; box-shadow:var(--shadow); text-align:left; width:100%}
-.bmatch .brow{display:flex; justify-content:space-between; gap:8px; font-size:13.5px; padding:2px 0}
-.bmatch .bteam{font-weight:600; min-width:0; overflow-wrap:anywhere}
-.bmatch .bteam.tbd{color:var(--muted); font-weight:400}
-.bmatch .bteam.win{color:var(--good); font-weight:800}
-.bmatch .bscore{font-weight:800; font-variant-numeric:tabular-nums}
-.bmatch .bedit{font-size:11.5px; font-weight:700; color:var(--accent); padding-top:2px}
+/* ---------- bracket (paper style: names on lines, elbow connectors) ---------- */
+.bkwrap{overflow-x:auto; padding:4px 0 12px}
+.bk{display:flex; min-width:min-content}
+.bkcol{display:flex; flex-direction:column; min-width:170px; flex:1}
+.bkcol+.bkcol{padding-left:18px}
+.bkcol:last-child .bkpair{padding-right:0}
+.bkhead{text-align:center; margin:10px 0 8px; white-space:nowrap}
+.bkbody{flex:1; display:flex; flex-direction:column}
+.bkpair{flex:1; display:flex; flex-direction:column; position:relative; padding-right:18px}
+.bkpair.link::after{content:""; position:absolute; right:0; top:25%; height:50%; border-right:2px solid var(--bkline)}
+.bkpair.solo::after{content:none}
+/* Connectors hang off the fixed-share slots, not the match content, so the
+   elbows stay attached even if a cell renders a little taller than its twin. */
+.bkslot{flex:1; display:flex; flex-direction:column; justify-content:center; position:relative; min-width:0}
+.bkpair.link .bkslot::after{content:""; position:absolute; right:-18px; top:50%; width:18px; border-top:2px solid var(--bkline)}
+.bkcol+.bkcol .bkslot::before{content:""; position:absolute; left:-18px; top:50%; width:18px; border-top:2px solid var(--bkline)}
+.bko{display:block; position:relative; width:100%; padding:0; text-align:left}
+.bkrow{display:flex; align-items:baseline; justify-content:space-between; gap:8px; min-height:27px; border-bottom:2px solid var(--bkline); padding:3px 2px}
+.bkteam{min-width:0; flex:1; font-weight:600; font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.bkteam.tbd{color:var(--muted); font-weight:400}
+.bkteam.win{color:var(--good); font-weight:800}
+.bkscore{font-weight:800; font-variant-numeric:tabular-nums; font-size:13.5px}
+.bedit{font-size:11px; font-weight:700; color:var(--accent); white-space:nowrap; padding-left:6px}
 .champ{background:var(--good); color:#fff; border-radius:10px; padding:14px 16px; text-align:center; font-weight:800; font-size:16px}
 .champ .microlabel{color:#fff; opacity:.8}
-.seedlist{background:var(--card); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); padding:6px 14px; margin:12px 0}
-.seedrow{display:flex; align-items:center; gap:10px; padding:8px 0; border-bottom:1px solid var(--line); font-size:14px}
-.seedrow:last-child{border-bottom:none}
-.seedrow .snum{font-weight:800; color:var(--muted); min-width:22px; font-variant-numeric:tabular-nums}
-.seedrow .sname{flex:1; font-weight:600; overflow-wrap:anywhere}
-.seedrow .sname .qv{color:var(--muted); font-weight:400}
-.seedrow .stag{font-size:11px; font-weight:800; color:var(--muted); font-variant-numeric:tabular-nums}
 
 /* ---------- modal ---------- */
 .overlay{position:fixed; inset:0; background:rgba(20,17,12,.55); z-index:50; display:flex; align-items:center; justify-content:center; padding:16px}
@@ -213,9 +220,13 @@ select.mv{padding:4px 6px; border-radius:6px; border:1px solid var(--line); back
 /* ---------- print ---------- */
 @media print{
   body{background:#fff; color:#000; font-size:12px}
-  .topbar,.controls,.gchips,.demo-banner,.callout,.btn,.queue-actions,.toast,.overlay,.courtcard .cta{display:none !important}
+  .topbar,.controls,.subtabs,.demo-banner,.callout,.btn,.queue-actions,.toast,.overlay,.courtcard .cta{display:none !important}
   .wrap{max-width:100%; padding:0}
-  .roundblock,.group-card,.bmatch,.seedlist{box-shadow:none; border-color:#bbb; break-inside:avoid}
+  .roundblock,.group-card{box-shadow:none; border-color:#bbb; break-inside:avoid}
+  .bko{break-inside:avoid}
+  .bkrow{border-bottom-color:#999}
+  .bkpair.link::after{border-right-color:#999}
+  .bkpair.link .bkslot::after,.bkcol+.bkcol .bkslot::before{border-top-color:#999}
   .print-title{display:block !important; font-size:18px; font-weight:900; margin:0 0 12px}
 }
 .print-title{display:none}
@@ -226,11 +237,13 @@ select.mv{padding:4px 6px; border-radius:6px; border:1px solid var(--line); back
 
 <script>
 /* ================= CONFIG =================
-   Leave both blank to run in demo mode with sample data.
-   To go live: create a Supabase project, run supabase-schema.sql
-   in the SQL editor, then paste your project URL and anon key here. */
-const SUPABASE_URL = "";
-const SUPABASE_ANON_KEY = "";
+   Shares the Dispatch app's Supabase project for now: every tournament
+   table and function is prefixed nairobi_ so nothing collides with the
+   Dispatch tables. Go live by running supabase-schema.sql once in that
+   project's SQL editor. Clear both values to run in demo mode always,
+   or add ?demo=1 to the URL to preview the built-in sample data. */
+const SUPABASE_URL = "https://cutiomcwgicdqfgbdsnc.supabase.co";
+const SUPABASE_ANON_KEY = "sb_publishable_jsoONy5tGwX6y3b2TJaqdA_BSg5DKNR";
 </script>
 
 <script>
@@ -600,6 +613,7 @@ function assignCourtsIn(db, eventId){
       .sort((a, b) => a.play_order - b.play_order)[0];
     if (!next) break;
     next.court = c; taken.add(c);
+    next.postponed = false;
     next.called_at = new Date().toISOString();
     next.called_ack = false;
   }
@@ -686,9 +700,9 @@ function buildMockData(){
     allOther = allOther.concat(buildFor(ev, names));
   }
 
-  /* Play strictly in queue order. Doubles cutoff lands right after group A's
-     final round-5 match, so group A is complete while later groups still have
-     matches left. Singles stops mid round 4. */
+  /* Play strictly in queue order. The doubles group stage is fully played so
+     the knockout flow can be tested end to end (confirm bracket, KO scores).
+     Singles stops mid round 4 to show a live group stage. */
   const playInOrder = (rows, count, pts) => {
     rows.slice().sort((a, b) => a.play_order - b.play_order).slice(0, count).forEach(m => {
       const s1 = skills[m.entrant1_id], s2 = skills[m.entrant2_id];
@@ -701,17 +715,17 @@ function buildMockData(){
       m.status = "played";
     });
   };
-  playInOrder(matchesD, 99, 21);
+  playInOrder(matchesD, matchesD.length, 21);
   playInOrder(matchesS, 20, 21);
 
   const db = { tournament, events, entrants, matches: matchesD.concat(matchesS, allOther) };
 
-  const pendingD = matchesD.filter(m => m.status === "scheduled")
+  const pendingS = matchesS.filter(m => m.status === "scheduled")
     .sort((a, b) => a.play_order - b.play_order);
-  if (pendingD.length > 4){
-    const target = pendingD[1];
+  if (pendingS.length > 4){
+    const target = pendingS[1];
     target.postponed = true;
-    target.play_order = pendingD[Math.min(8, pendingD.length - 1)].play_order + 1;
+    target.play_order = pendingS[Math.min(8, pendingS.length - 1)].play_order + 1;
   }
 
   assignCourtsIn(db, evD.id);
@@ -789,6 +803,7 @@ function demoStore(){
       if (!m) return fail("Match not found.");
       if (m.status === "played") return fail("A score is already in. Ask the desk to change it.");
       if (!m.entrant1_id || !m.entrant2_id) return fail("Teams for this match aren't decided yet.");
+      if (m.court == null) return fail("This match isn't on a court yet. The score is entered from the Courts tab once it's called; corrections go through the desk.");
       const err = applyScore(m, s1, s2, games, false, false);
       if (err) return fail(err);
       advanceWinner(m);
@@ -1022,8 +1037,13 @@ function liveStore(){
     if (client) return client;
     await loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js");
     client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-    client.channel("db-changes")
-      .on("postgres_changes", { event: "*", schema: "public" }, debouncedNotify)
+    /* Subscribe per table: the shared project also holds the Dispatch app's
+       tables, and their changes shouldn't trigger reloads here. */
+    client.channel("nairobi-db-changes")
+      .on("postgres_changes", { event: "*", schema: "public", table: "nairobi_tournaments" }, debouncedNotify)
+      .on("postgres_changes", { event: "*", schema: "public", table: "nairobi_events" }, debouncedNotify)
+      .on("postgres_changes", { event: "*", schema: "public", table: "nairobi_entrants" }, debouncedNotify)
+      .on("postgres_changes", { event: "*", schema: "public", table: "nairobi_matches" }, debouncedNotify)
       .subscribe();
     setInterval(() => { if (document.visibilityState === "visible") notify(); }, 180000);
     document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") notify(); });
@@ -1046,28 +1066,28 @@ function liveStore(){
     async loadAll(){
       const c = await ensureClient();
       const [t, ev, en, ma] = await Promise.all([
-        c.from("tournaments").select("*").limit(1),
-        c.from("events").select("*").order("sort_order"),
-        c.from("entrants").select("*").order("group_name").order("seed"),
-        c.from("matches").select("*").order("play_order")
+        c.from("nairobi_tournaments").select("*").limit(1),
+        c.from("nairobi_events").select("*").order("sort_order"),
+        c.from("nairobi_entrants").select("*").order("group_name").order("seed"),
+        c.from("nairobi_matches").select("*").order("play_order")
       ]);
       const err = t.error || ev.error || en.error || ma.error;
       if (err) throw new Error(err.message);
       return { tournament: (t.data && t.data[0]) || null, events: ev.data || [], entrants: en.data || [], matches: ma.data || [] };
     },
-    verifyPin: pin => rpc("verify_pin", { p_pin: pin }).then(r =>
+    verifyPin: pin => rpc("nairobi_verify_pin", { p_pin: pin }).then(r =>
       r.ok && r.data === true ? { ok: true } : { ok: false, error: r.error || "Wrong PIN." }),
-    changePin: (oldPin, newPin) => rpc("change_admin_pin", { p_old: oldPin, p_new: newPin }),
-    submitScore: (id, s1, s2, games) => rpc("submit_score", { p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null }),
-    adminSubmitScore: (pin, id, s1, s2, games, walkover) => rpc("admin_submit_score", { p_pin: pin, p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null, p_walkover: !!walkover }),
-    adminClearScore: (pin, id) => rpc("admin_clear_score", { p_pin: pin, p_match_id: id }),
-    adminPostpone: (pin, id, toEnd) => rpc("admin_postpone", { p_pin: pin, p_match_id: id, p_to_end: !!toEnd }),
-    adminPlayNext: (pin, id) => rpc("admin_play_next", { p_pin: pin, p_match_id: id }),
-    adminAckCalled: (pin, id) => rpc("admin_ack_called", { p_pin: pin, p_match_id: id }),
-    adminUpdateEvent: (pin, eventId, name, settings) => rpc("admin_update_event", { p_pin: pin, p_event_id: eventId, p_name: name, p_settings: settings }),
-    adminSetActive: (pin, eventId, active) => rpc("admin_set_active", { p_pin: pin, p_event_id: eventId, p_active: !!active }),
+    changePin: (oldPin, newPin) => rpc("nairobi_change_admin_pin", { p_old: oldPin, p_new: newPin }),
+    submitScore: (id, s1, s2, games) => rpc("nairobi_submit_score", { p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null }),
+    adminSubmitScore: (pin, id, s1, s2, games, walkover) => rpc("nairobi_admin_submit_score", { p_pin: pin, p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null, p_walkover: !!walkover }),
+    adminClearScore: (pin, id) => rpc("nairobi_admin_clear_score", { p_pin: pin, p_match_id: id }),
+    adminPostpone: (pin, id, toEnd) => rpc("nairobi_admin_postpone", { p_pin: pin, p_match_id: id, p_to_end: !!toEnd }),
+    adminPlayNext: (pin, id) => rpc("nairobi_admin_play_next", { p_pin: pin, p_match_id: id }),
+    adminAckCalled: (pin, id) => rpc("nairobi_admin_ack_called", { p_pin: pin, p_match_id: id }),
+    adminUpdateEvent: (pin, eventId, name, settings) => rpc("nairobi_admin_update_event", { p_pin: pin, p_event_id: eventId, p_name: name, p_settings: settings }),
+    adminSetActive: (pin, eventId, active) => rpc("nairobi_admin_set_active", { p_pin: pin, p_event_id: eventId, p_active: !!active }),
     adminReplaceEvent: async (pin, eventId, meta, entrants, matches) => {
-      const r = await rpc("admin_replace_event", {
+      const r = await rpc("nairobi_admin_replace_event", {
         p_pin: pin, p_event_id: eventId, p_name: meta.name,
         p_sort_order: meta.sort_order != null ? meta.sort_order : 0,
         p_settings: meta.settings, p_entrants: entrants, p_matches: matches
@@ -1075,14 +1095,14 @@ function liveStore(){
       if (r.ok && typeof r.data === "string" && r.data.startsWith("OK:")) r.eventId = r.data.slice(3);
       return r;
     },
-    adminDeleteEvent: (pin, eventId) => rpc("admin_delete_event", { p_pin: pin, p_event_id: eventId }),
-    adminRenameEntrant: (pin, id, name) => rpc("admin_rename_entrant", { p_pin: pin, p_entrant_id: id, p_name: name }),
-    adminRemoveEntrant: (pin, id) => rpc("admin_remove_entrant", { p_pin: pin, p_entrant_id: id }),
-    adminAddEntrant: (pin, eventId, entrant, matches) => rpc("admin_add_entrant", { p_pin: pin, p_event_id: eventId, p_entrant: entrant, p_matches: matches }),
-    adminMoveEntrant: (pin, id, group, matches) => rpc("admin_move_entrant", { p_pin: pin, p_entrant_id: id, p_group: group, p_matches: matches }),
-    adminSetBracketTeams: (pin, matchId, e1, e2) => rpc("admin_set_bracket_teams", { p_pin: pin, p_match_id: matchId, p_entrant1_id: e1 || null, p_entrant2_id: e2 || null }),
-    adminGenerateBracket: (pin, eventId, rows) => rpc("admin_generate_bracket", { p_pin: pin, p_event_id: eventId, p_matches: rows }),
-    adminResetBracket: (pin, eventId) => rpc("admin_reset_bracket", { p_pin: pin, p_event_id: eventId })
+    adminDeleteEvent: (pin, eventId) => rpc("nairobi_admin_delete_event", { p_pin: pin, p_event_id: eventId }),
+    adminRenameEntrant: (pin, id, name) => rpc("nairobi_admin_rename_entrant", { p_pin: pin, p_entrant_id: id, p_name: name }),
+    adminRemoveEntrant: (pin, id) => rpc("nairobi_admin_remove_entrant", { p_pin: pin, p_entrant_id: id }),
+    adminAddEntrant: (pin, eventId, entrant, matches) => rpc("nairobi_admin_add_entrant", { p_pin: pin, p_event_id: eventId, p_entrant: entrant, p_matches: matches }),
+    adminMoveEntrant: (pin, id, group, matches) => rpc("nairobi_admin_move_entrant", { p_pin: pin, p_entrant_id: id, p_group: group, p_matches: matches }),
+    adminSetBracketTeams: (pin, matchId, e1, e2) => rpc("nairobi_admin_set_bracket_teams", { p_pin: pin, p_match_id: matchId, p_entrant1_id: e1 || null, p_entrant2_id: e2 || null }),
+    adminGenerateBracket: (pin, eventId, rows) => rpc("nairobi_admin_generate_bracket", { p_pin: pin, p_event_id: eventId, p_matches: rows }),
+    adminResetBracket: (pin, eventId) => rpc("nairobi_admin_reset_bracket", { p_pin: pin, p_event_id: eventId })
   };
 }
 </script>
@@ -1092,13 +1112,16 @@ function liveStore(){
 window.__APP_ERRORS = [];
 window.addEventListener("error", e => window.__APP_ERRORS.push(String(e.message)));
 
-const store = (SUPABASE_URL && SUPABASE_ANON_KEY) ? liveStore() : demoStore();
+const store = (SUPABASE_URL && SUPABASE_ANON_KEY && !new URLSearchParams(location.search).has("demo"))
+  ? liveStore() : demoStore();
 let data = { tournament: null, events: [], entrants: [], matches: [] };
 const state = {
   view: "board", eventId: null, search: "", roundFilter: "all",
+  resultsFilter: "all", standingsFilter: "all",
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null,
   setupPreview: null, adminEventId: null, loadError: null,
-  showAllQueue: false, showRedraw: false, pendingRender: false
+  showAllQueue: false, showRedraw: false, pendingRender: false,
+  dismissedCalled: {}
 };
 
 function esc(s){
@@ -1184,10 +1207,21 @@ function pendingQueue(){
 function calledMatches(){
   const now = Date.now();
   return onCourtMatches().filter(m =>
-    m.called_at && !m.called_ack && (now - Date.parse(m.called_at)) < CALLED_FRESH_MS);
+    m.called_at && !m.called_ack && (now - Date.parse(m.called_at)) < CALLED_FRESH_MS &&
+    !state.dismissedCalled[m.id + "|" + m.called_at]);
 }
 
 /* ---------- rendering ---------- */
+/* Only touch the DOM when the generated markup actually changed. Periodic and
+   realtime refreshes with no visible difference then leave the page alone, so
+   taps never land on elements that were just replaced mid-gesture. */
+let renderedHtml = null;
+function commitHtml(app, html){
+  if (html === renderedHtml) return false;
+  app.innerHTML = html;
+  renderedHtml = html;
+  return true;
+}
 function render(){
   const app = document.getElementById("app");
   const ae = document.activeElement;
@@ -1200,11 +1234,11 @@ function render(){
   const restoreVal = restoreId && ae.value;
 
   if (state.loadError){
-    app.innerHTML = '<div class="wrap"><div class="empty">Could not load tournament data.<br>' + esc(state.loadError) + '<br><br><button class="btn secondary" onclick="location.reload()">Retry</button></div></div>';
+    commitHtml(app, '<div class="wrap"><div class="empty">Could not load tournament data.<br>' + esc(state.loadError) + '<br><br><button class="btn secondary" onclick="location.reload()">Retry</button></div></div>');
     return;
   }
   if (!data.tournament){
-    app.innerHTML = '<div class="wrap"><div class="empty">Loading…</div></div>';
+    commitHtml(app, '<div class="wrap"><div class="empty">Loading…</div></div>');
     return;
   }
 
@@ -1237,18 +1271,20 @@ function render(){
   html += renderScoreModal();
   html += renderTeamModal();
   html += renderSlotModal();
-  app.innerHTML = html;
+  if (!commitHtml(app, html)) return;
 
   if (restoreId){
     const el = document.getElementById(restoreId);
-    if (el && el.tagName === "INPUT" && el.type === "text"){
+    if (el && el.tagName === "INPUT" && (el.type === "text" || el.type === "password")){
       el.focus();
       if (restoreVal != null){ el.value = restoreVal; try{ el.setSelectionRange(restoreVal.length, restoreVal.length); }catch(e){} }
     }
   }
 }
 
-/* "Go to court now" banners: fresh court assignments, auto-expire, admin ack. */
+/* "Go to court now" banners: fresh court assignments, auto-expire.
+   Tapping a banner hides it on this phone only; the admin ✓ dismisses it
+   for everyone. Scores are never entered from here. */
 function renderCallouts(){
   const called = calledMatches();
   if (!called.length) return "";
@@ -1256,10 +1292,12 @@ function renderCallouts(){
   let h = "";
   called.slice(0, 3).forEach(m => {
     const ev = eventById(m.event_id);
-    h += '<button class="callout" onclick="openMatch(\'' + m.id + '\')"><span class="cinner">' +
+    h += '<button class="callout" onclick="dismissCallout(\'' + m.id + '\')" title="Tap to dismiss"><span class="cinner">' +
       '<span class="ctext">Court ' + m.court + ' now: ' + esc(entrantName(m.entrant1_id)) + ' <span class="cdim">vs</span> ' + esc(entrantName(m.entrant2_id)) +
       (multi && ev ? ' <span class="cdim">· ' + esc(ev.name) + '</span>' : '') + '</span>' +
-      (state.adminPin ? '<span class="ack" role="button" onclick="event.stopPropagation();ackCalled(\'' + m.id + '\')">✓ On court</span>' : '') +
+      (state.adminPin
+        ? '<span class="ack" role="button" onclick="event.stopPropagation();ackCalled(\'' + m.id + '\')">✓ On court</span>'
+        : '<span class="ack" aria-hidden="true">✕</span>') +
       '</span></button>';
   });
   if (called.length > 3) h += '<div class="callout"><span class="cinner"><span class="ctext cdim">' + (called.length - 3) + ' more matches just called</span></span></div>';
@@ -1379,14 +1417,14 @@ function scheduleRow(m, withScore){
       res = '<span class="res">' + (gs ? esc(gs) : m.score1 + '-' + m.score2) + '</span>' +
         (m.walkover ? ' <span class="tag warn">W/O</span>' : '');
     }
-    else if (m.postponed) res = '<span class="res pending">Postponed</span>';
     else if (m.court != null) res = '<span class="res pending">Court ' + m.court + '</span>';
+    else if (m.postponed) res = '<span class="res pending">Postponed</span>';
   } else if (played){
     res = '<span class="res pending">✓</span>';
-  } else if (m.postponed){
-    res = '<span class="res pending">Postponed</span>';
   } else if (m.court != null){
     res = '<span class="res pending">Court ' + m.court + '</span>';
+  } else if (m.postponed){
+    res = '<span class="res pending">Postponed</span>';
   }
   const inner = '<span class="g">' + (m.group_name ? esc(m.group_name) : '') + '</span>' +
     '<span class="names">' + esc(entrantName(m.entrant1_id) || "TBD") + ' <span class="qv">vs</span> ' + esc(entrantName(m.entrant2_id) || (bye ? "BYE" : "TBD")) + '</span>' + res;
@@ -1414,17 +1452,19 @@ function renderSchedule(){
   const groupMs = evMatches.filter(m => m.stage === "group");
   const koMs = evMatches.filter(m => m.stage === "knockout");
   const maxRound = Math.max(0, ...groupMs.map(m => m.round));
+  /* Heal a filter that no longer exists (event redrawn, bracket reset). */
+  if (state.roundFilter === "ko" ? !koMs.length : state.roundFilter !== "all" && parseInt(state.roundFilter, 10) > maxRound) state.roundFilter = "all";
 
   let h = '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + ' · Schedule</span>';
   h += '<div class="controls">' +
     '<input class="search" id="search-input" type="text" placeholder="Find a name" value="' + esc(state.search) + '" oninput="setSearch(this.value)">' +
     '<button class="btn small secondary" onclick="window.print()">Print</button></div>';
-  h += '<div class="gchips">' +
-    '<button class="gchip" aria-current="' + (state.roundFilter === "all") + '" onclick="setRoundFilter(\'all\')">All</button>';
+  h += '<div class="subtabs" role="tablist">' +
+    '<button class="subtab" aria-current="' + (state.roundFilter === "all") + '" onclick="setRoundFilter(\'all\')">All</button>';
   for(let r = 1; r <= maxRound; r++){
-    h += '<button class="gchip" aria-current="' + (state.roundFilter === String(r)) + '" onclick="setRoundFilter(\'' + r + '\')">Round ' + r + '</button>';
+    h += '<button class="subtab" aria-current="' + (state.roundFilter === String(r)) + '" onclick="setRoundFilter(\'' + r + '\')">Round ' + r + '</button>';
   }
-  if (koMs.length) h += '<button class="gchip" aria-current="' + (state.roundFilter === "ko") + '" onclick="setRoundFilter(\'ko\')">Knockout</button>';
+  if (koMs.length) h += '<button class="subtab" aria-current="' + (state.roundFilter === "ko") + '" onclick="setRoundFilter(\'ko\')">Knockout</button>';
   h += '</div>';
 
   const matchesTerm = termFilterFor();
@@ -1447,7 +1487,7 @@ function renderSchedule(){
     if (!list.length) continue;
     h += '<div class="roundblock"><h3>Round ' + r + '</h3>' + list.map(m => scheduleRow(m, false)).join("") + '</div>';
   }
-  h += '<p class="note">Matches run in this order, group A first, so everyone plays round 1 before round 2 starts. Tap a match to enter its score. Scores live in Results and Standings.</p>';
+  h += '<p class="note">Matches run in this order, group A first, so everyone plays round 1 before round 2 starts. Tap a match for details; a score can be entered while the match is on a court, and corrections go through the desk. Results and Standings update live.</p>';
   return h;
 }
 
@@ -1457,28 +1497,42 @@ function renderResults(){
   const evMatches = data.matches.filter(m => m.event_id === ev.id);
   const matchesTerm = termFilterFor();
   const played = evMatches.filter(m => m.status === "played" && m.score1 != null && matchesTerm(m));
+  const koMs = evMatches.filter(m => m.stage === "knockout");
+  const groups = groupsOfEvent(ev);
+  if (state.resultsFilter === "ko" ? !koMs.length : state.resultsFilter !== "all" && !groups.includes(state.resultsFilter)) state.resultsFilter = "all";
+  const f = state.resultsFilter;
 
   let h = '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + ' · Results</span>';
   h += '<div class="controls">' +
     '<input class="search" id="search-input" type="text" placeholder="Find a name" value="' + esc(state.search) + '" oninput="setSearch(this.value)">' +
     '<button class="btn small secondary" onclick="window.print()">Print</button></div>';
+  if (groups.length > 1 || koMs.length){
+    h += '<div class="subtabs" role="tablist">' +
+      '<button class="subtab" aria-current="' + (f === "all") + '" onclick="setResultsFilter(\'all\')">All</button>' +
+      groups.map(g => '<button class="subtab" aria-current="' + (f === g) + '" onclick="setResultsFilter(\'' + esc(g) + '\')">Group ' + esc(g) + '</button>').join("") +
+      (koMs.length ? '<button class="subtab" aria-current="' + (f === "ko") + '" onclick="setResultsFilter(\'ko\')">Knockout</button>' : '') +
+      '</div>';
+  }
   if (!played.length) return h + '<div class="empty">No results yet for ' + esc(ev.name) + '.</div>';
 
-  const koMs = evMatches.filter(m => m.stage === "knockout");
-  if (koMs.some(m => m.status === "played" && m.score1 != null)){
+  let body = '';
+  if ((f === "all" || f === "ko") && koMs.some(m => m.status === "played" && m.score1 != null)){
     const total = Math.max(...koMs.map(x => x.bracket_round));
     for(let r = total; r >= 1; r--){
       const list = played.filter(m => m.stage === "knockout" && m.bracket_round === r);
       if (!list.length) continue;
-      h += '<div class="roundblock"><h3>' + roundLabelFor(r, total) + '</h3>' + list.map(m => scheduleRow(m, true)).join("") + '</div>';
+      body += '<div class="roundblock"><h3>' + roundLabelFor(r, total) + '</h3>' + list.map(m => scheduleRow(m, true)).join("") + '</div>';
     }
   }
-  for(const g of groupsOfEvent(ev)){
-    const list = played.filter(m => m.stage === "group" && m.group_name === g).sort((a, b) => a.round - b.round || a.play_order - b.play_order);
-    if (!list.length) continue;
-    h += '<div class="roundblock"><h3>Group ' + g + '</h3>' + list.map(m => scheduleRow(m, true)).join("") + '</div>';
+  if (f !== "ko"){
+    for(const g of groups){
+      if (f !== "all" && f !== g) continue;
+      const list = played.filter(m => m.stage === "group" && m.group_name === g).sort((a, b) => a.round - b.round || a.play_order - b.play_order);
+      if (!list.length) continue;
+      body += '<div class="roundblock"><h3>Group ' + g + '</h3>' + list.map(m => scheduleRow(m, true)).join("") + '</div>';
+    }
   }
-  return h;
+  return h + (body || '<div class="empty">No results here yet.</div>');
 }
 
 function renderStandings(){
@@ -1491,16 +1545,25 @@ function renderStandings(){
   }
   const field = seedFieldFor(ev);
   const adv = Math.max(1, field.guaranteed);
+  if (state.standingsFilter !== "all" && !groups.includes(state.standingsFilter)) state.standingsFilter = "all";
+  const f = state.standingsFilter;
   let h = '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + ' · Standings</span>';
   h += '<div class="section-h"><h2>' + esc(ev.name) + '</h2><span class="hint">Top ' + adv + ' per group advance' +
     (field.wildcards ? ' plus ' + field.wildcards + ' best next-placed' : '') + ' · tap a team for details</span></div>';
+  if (groups.length > 1){
+    h += '<div class="subtabs" role="tablist">' +
+      '<button class="subtab" aria-current="' + (f === "all") + '" onclick="setStandingsFilter(\'all\')">All</button>' +
+      groups.map(g => '<button class="subtab" aria-current="' + (f === g) + '" onclick="setStandingsFilter(\'' + esc(g) + '\')">Group ' + esc(g) + '</button>').join("") +
+      '</div>';
+  }
   for(const g of groups){
+    if (f !== "all" && f !== g) continue;
     const rows = standingsFor(ev, g);
     const left = data.matches.filter(m => m.event_id === ev.id && m.stage === "group" && m.group_name === g && m.status === "scheduled").length;
-    h += '<div class="group-card"><h3><span>Group ' + g + '</span>' + (left ? '<span class="tag plain">' + left + ' left</span>' : '<span class="tag good">Complete</span>') + '</h3>';
+    h += '<div class="group-card"><h3><span>Group ' + g + '</span>' + (left ? '<span class="tag plain">' + left + ' left</span>' : '<span class="tag plain">Complete</span>') + '</h3>';
     h += '<table class="standings"><thead><tr><th></th><th class="tname">Team</th><th>P</th><th>W</th><th>L</th><th>+/-</th></tr></thead><tbody>';
     rows.forEach((r, i) => {
-      h += '<tr class="' + (i < adv ? 'adv' : '') + '" onclick="openTeam(\'' + r.id + '\')"><td class="pos">' + (i + 1) + '</td><td class="tname">' + esc(r.name) + '</td>' +
+      h += '<tr onclick="openTeam(\'' + r.id + '\')"><td class="pos">' + (i + 1) + '</td><td class="tname">' + esc(r.name) + '</td>' +
         '<td>' + r.p + '</td><td>' + r.w + '</td><td>' + r.l + '</td><td>' + (r.diff > 0 ? '+' : '') + r.diff + '</td></tr>';
     });
     h += '</tbody></table></div>';
@@ -1508,6 +1571,29 @@ function renderStandings(){
   h += '<p class="note">Tiebreakers: wins, then head to head, then point difference, then points scored.</p>';
   return h;
 }
+
+/* One column of the bracket tree. Sibling matches are wrapped in a .bkpair,
+   whose CSS draws the elbow connectors into the next round. */
+function bkColumn(label, cells, feeds){
+  let h = '<div class="bkcol"><div class="bkhead"><span class="microlabel">' + label + '</span></div><div class="bkbody">';
+  if (feeds && cells.length === 1){
+    h += '<div class="bkpair link solo"><div class="bkslot">' + cells[0] + '</div></div>';
+  } else if (feeds){
+    for(let i = 0; i < cells.length; i += 2){
+      h += '<div class="bkpair link"><div class="bkslot">' + cells[i] + '</div><div class="bkslot">' + cells[i + 1] + '</div></div>';
+    }
+  } else {
+    for(const c of cells) h += '<div class="bkpair"><div class="bkslot">' + c + '</div></div>';
+  }
+  return h + '</div></div>';
+}
+/* One underlined line of a bracket cell. Every cell is exactly two of these,
+   so sibling cells stay the same height and the connector elbows line up.
+   `right` is optional markup for the line's right end (score or edit link). */
+function bkRow(inner, cls, right){
+  return '<div class="bkrow"><span class="bkteam' + (cls || '') + '">' + inner + '</span>' + (right || '') + '</div>';
+}
+function bkScore(n){ return '<span class="bkscore">' + n + '</span>'; }
 
 function renderBracket(){
   const ev = currentEvent();
@@ -1518,62 +1604,68 @@ function renderBracket(){
     const groups = groupsOfEvent(ev);
     if (!groups.length) return '<div class="empty">' + esc(ev.name) + ' has no groups yet.</div>';
     const field = seedFieldFor(ev);
+    if (field.seeds.length < 2) return '<div class="empty">Not enough teams yet.</div>';
     const left = data.matches.filter(m => m.event_id === ev.id && m.stage === "group" && m.status === "scheduled").length;
     const pairs = bracketPairs(field.seeds);
-    const seedNum = s => s ? field.seeds.indexOf(s) + 1 : null;
-    const side = s => {
-      if (!s) return '<span class="qv">BYE</span>';
-      return '<span class="stag">' + esc(s.group) + s.place + '</span> ' + esc(s.name) +
-        (s.wildcard ? ' <span class="tag warn">Best ' + ordinal(s.place) + '</span>' : '');
+    const size = nextPow2(Math.max(2, field.seeds.length));
+    const totalRounds = Math.log2(size);
+    const slotRow = s => {
+      if (!s) return bkRow('BYE', ' tbd');
+      return bkRow(esc(s.group + s.place) + (s.wildcard ? ' <span class="tag warn">Best ' + ordinal(s.place) + '</span>' : ''));
     };
-    let h = '<div class="section-h"><h2>Projected matchups</h2><span class="hint">' +
+    let h = '<div class="section-h"><h2>Projected bracket</h2><span class="hint">' +
       (left ? 'Live, ' + left + ' group matches to go' : 'Group play complete') + '</span></div>';
-    h += '<div class="seedlist">';
-    pairs.forEach((p, i) => {
-      h += '<div class="seedrow"><span class="snum">' + (seedNum(p[0]) || '') + '</span>' +
-        '<span class="sname">' + side(p[0]) + ' <span class="qv">vs</span> ' + side(p[1]) + '</span></div>';
-    });
-    h += '</div>';
-    h += '<p class="note">A1 means the group A winner, C2 the group C runner-up, based on standings right now. ' +
-      field.seeds.length + ' qualify for a ' + field.size + '-slot bracket' +
+    h += '<div class="bkwrap"><div class="bk">';
+    for(let r = 1; r <= totalRounds; r++){
+      const count = size / Math.pow(2, r);
+      const cells = r === 1
+        ? pairs.map(p => '<div class="bko">' + slotRow(p[0]) + slotRow(p[1]) + '</div>')
+        : Array.from({ length: count }, () => '<div class="bko">' + bkRow('', ' tbd') + bkRow('', ' tbd') + '</div>');
+      h += bkColumn(roundLabelFor(r, totalRounds), cells, true);
+    }
+    h += bkColumn('Champion', ['<div class="bko">' + bkRow('', ' tbd') + '</div>'], false);
+    h += '</div></div>';
+    h += '<p class="note">A1 means the group A winner, C2 the group C runner-up, from standings right now, so matchups can shift until group play ends. ' +
+      field.seeds.length + ' qualify for a ' + size + '-slot bracket' +
       (field.wildcards ? ', including ' + field.wildcards + ' wildcard' + (field.wildcards > 1 ? 's' : '') + ' from the next places' : '') +
-      '. The bracket is created when the desk confirms the group stage is finished.</p>';
+      '. Winners advance along the lines. The real bracket is created when the desk confirms the group stage is finished.</p>';
     return h;
   }
 
   const total = Math.max(...ko.map(m => m.bracket_round));
   let h = '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + ' · Bracket</span>';
-  h += '<div class="bracket-scroll" style="margin-top:14px"><div class="bracket">';
+  h += '<div class="bkwrap"><div class="bk">';
   for(let r = 1; r <= total; r++){
     const list = ko.filter(m => m.bracket_round === r).sort((a, b) => a.bracket_pos - b.bracket_pos);
-    h += '<div class="bcol"><div><span class="microlabel">' + roundLabelFor(r, total) + '</span></div>';
-    h += list.map(m => {
+    const cells = list.map(m => {
       const n1 = entrantName(m.entrant1_id), n2 = entrantName(m.entrant2_id);
       const played = m.status === "played" && m.score1 != null;
       const bye = m.status === "played" && m.score1 == null;
       const w1 = played && m.score1 > m.score2, w2 = played && m.score2 > m.score1;
       const clickable = !bye && m.entrant1_id && m.entrant2_id;
-      let c = '<' + (clickable ? 'button' : 'div') + ' class="bmatch"' + (clickable ? ' onclick="openMatch(\'' + m.id + '\')"' : '') + '>';
-      c += '<div class="brow"><span class="bteam' + (n1 ? (w1 ? ' win' : '') : ' tbd') + '">' + esc(n1 || "TBD") + '</span>' + (played ? '<span class="bscore">' + m.score1 + '</span>' : '') + '</div>';
-      c += '<div class="brow"><span class="bteam' + (n2 ? (w2 ? ' win' : '') : ' tbd') + '">' + esc(n2 || (bye ? "BYE" : "TBD")) + '</span>' + (played ? '<span class="bscore">' + m.score2 + '</span>' : '') + '</div>';
-      if (m.walkover) c += '<div class="brow"><span class="tag warn">W/O</span></div>';
-      if (state.adminPin && m.status === "scheduled" && !bye){
-        c += '<div class="bedit"><span onclick="event.stopPropagation();openSlotEditor(\'' + m.id + '\')" role="button" tabindex="0">Edit teams</span></div>';
-      }
-      c += clickable ? '</button>' : '</div>';
-      return c;
-    }).join("");
-    h += '</div>';
+      const wo = ' <span class="tag warn">W/O</span>';
+      const edit = state.adminPin && m.status === "scheduled" && !bye
+        ? '<span class="bedit" role="button" tabindex="0" onclick="event.stopPropagation();openSlotEditor(\'' + m.id + '\')">Edit teams</span>'
+        : '';
+      const inner = bkRow((n1 ? esc(n1) : '') + (m.walkover && w1 ? wo : ''), n1 ? (w1 ? ' win' : '') : ' tbd', played ? bkScore(m.score1) : '') +
+        bkRow((n2 ? esc(n2) : (bye ? 'BYE' : '')) + (m.walkover && w2 ? wo : ''), n2 ? (w2 ? ' win' : '') : ' tbd', played ? bkScore(m.score2) : edit);
+      return clickable
+        ? '<button class="bko" onclick="openMatch(\'' + m.id + '\')">' + inner + '</button>'
+        : '<div class="bko">' + inner + '</div>';
+    });
+    h += bkColumn(roundLabelFor(r, total), cells, true);
   }
   const final = ko.find(m => m.bracket_round === total);
-  h += '<div class="bcol"><div><span class="microlabel">Champion</span></div>';
+  let champCell;
   if (final && final.status === "played" && final.score1 != null){
     const champ = final.score1 > final.score2 ? final.entrant1_id : final.entrant2_id;
-    h += '<div class="champ"><span class="microlabel">' + esc(ev.name) + '</span><br>🏆 ' + esc(entrantName(champ)) + '</div>';
+    champCell = '<div class="bko"><div class="champ"><span class="microlabel">' + esc(ev.name) + '</span><br>🏆 ' + esc(entrantName(champ)) + '</div></div>';
   } else {
-    h += '<div class="bmatch"><div class="brow"><span class="bteam tbd">To be decided</span></div></div>';
+    champCell = '<div class="bko">' + bkRow('', ' tbd') + '</div>';
   }
-  h += '</div></div></div>';
+  h += bkColumn('Champion', [champCell], false);
+  h += '</div></div>';
+  h += '<p class="note">Tap a match to see or enter its result. Winners advance along the lines.</p>';
   return h;
 }
 
@@ -1701,7 +1793,8 @@ function renderAdmin(){
 
   h += '<div class="panel"><h3>Admin powers on the other tabs</h3><p class="note">' +
     'While unlocked: tap any match anywhere (Courts, Schedule, Results, a team in Standings, or the Bracket) to fix or clear its score, enter a walkover, or postpone. ' +
-    'The Courts tab has Postpone on the queue and Play next on postponed matches, plus ✓ On court to dismiss a "go to court" banner. ' +
+    'Players can only enter a score while a match is on a court; admins can score anything from anywhere. ' +
+    'The Courts tab has Postpone on the queue and Play next on postponed matches. On a "go to court" banner, ✓ On court dismisses it for everyone; a plain tap hides it only on that phone. ' +
     'On the Bracket tab, unplayed matches have an Edit teams link for manual fixes. ' +
     'Everything updates live on everyone\'s phone.</p></div>';
 
@@ -1723,12 +1816,16 @@ function renderScoreModal(){
   const n1 = entrantName(m.entrant1_id) || "TBD", n2 = entrantName(m.entrant2_id) || "TBD";
   const played = m.status === "played" && m.score1 != null;
   const isAdmin = !!state.adminPin;
+  /* Players can only enter scores for matches currently on a court; everything
+     else is read-only for them (admins can score any match from anywhere). */
+  const onCourt = m.status === "scheduled" && m.court != null;
+  const infoOnly = !isAdmin && !played && !onCourt;
   const pts = matchPts(m);
   const bo = matchBestOf(m);
   const ev = eventById(m.event_id);
 
   let h = '<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" role="dialog" aria-modal="true">';
-  h += '<h3>' + (played ? 'Match result' : 'Enter score') + '</h3>';
+  h += '<h3>' + (played ? 'Match result' : infoOnly ? 'Upcoming match' : 'Enter score') + '</h3>';
   h += '<div class="sub">' + esc(ev ? ev.name : '') + ' · ' + esc(roundName(m)) + (m.court != null && !played ? ' · Court ' + m.court : '') +
     ' · ' + (bo > 1 ? 'best of ' + bo + ', games' : 'first') + ' to ' + pts + '</div>';
 
@@ -1756,6 +1853,12 @@ function renderScoreModal(){
     if (gs) h += '<p class="note">Games: ' + esc(gs) + '</p>';
     if (m.walkover) h += '<p class="note">Walkover.</p>';
     h += '<p class="note">Score already recorded. Spot a mistake? Ask at the desk and an organizer can fix it.</p>';
+    h += '<div class="actions"><span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Close</button></div>';
+  } else if (infoOnly){
+    h += '<div class="score-line"><label>' + esc(n1) + '</label></div>';
+    h += '<div class="score-line"><label>' + esc(n2) + '</label></div>';
+    h += '<p class="note">' + (m.postponed ? 'Postponed: waiting lower in the queue.' : 'Waiting for a court.') +
+      ' When the match is called, it appears on the Courts tab and the score can be entered. Anything wrong? Ask at the desk.</p>';
     h += '<div class="actions"><span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Close</button></div>';
   } else if (bo > 1){
     h += '<div class="game-line"><span class="glabel"></span><span style="flex:1;font-size:12px;font-weight:700;color:var(--muted);overflow-wrap:anywhere">' + esc(n1) + '</span><span style="flex:1;font-size:12px;font-weight:700;color:var(--muted);overflow-wrap:anywhere;text-align:right">' + esc(n2) + '</span></div>';
@@ -1861,9 +1964,16 @@ function renderSlotModal(){
 
 /* ---------- actions ---------- */
 function setView(v){ state.view = v; state.setupPreview = null; render(); }
-function setEvent(id){ state.eventId = id; state.roundFilter = "all"; render(); }
+function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.resultsFilter = "all"; state.standingsFilter = "all"; render(); }
 function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; render(); }
 function setRoundFilter(r){ state.roundFilter = String(r); render(); }
+function setResultsFilter(v){ state.resultsFilter = v; render(); }
+function setStandingsFilter(v){ state.standingsFilter = v; render(); }
+function dismissCallout(id){
+  const m = data.matches.find(x => x.id === id);
+  if (m) state.dismissedCalled[m.id + "|" + m.called_at] = true;
+  render();
+}
 function toggleAllQueue(){ state.showAllQueue = !state.showAllQueue; render(); }
 function toggleRedraw(){ state.showRedraw = !state.showRedraw; state.setupPreview = null; render(); }
 let searchT = null;
@@ -1895,8 +2005,17 @@ async function reload(){
     state.loadError = null;
     if (state.eventId && !eventById(state.eventId)) state.eventId = null;
     if (state.adminEventId && !eventById(state.adminEventId)) state.adminEventId = null;
+    /* Drop modal state whose record vanished (deleted on another device),
+       otherwise a dead modalMatchId silently blocks the team modal forever. */
+    if (state.modalMatchId && !data.matches.some(m => m.id === state.modalMatchId)) state.modalMatchId = null;
+    if (state.slotEditId && !data.matches.some(m => m.id === state.slotEditId)) state.slotEditId = null;
+    if (state.teamModalId && !data.entrants.some(e => e.id === state.teamModalId)) state.teamModalId = null;
   }catch(e){
-    state.loadError = e.message || String(e);
+    let msg = e.message || String(e);
+    if (/does not exist|schema cache/i.test(msg)){
+      msg = "The database tables aren't set up yet. Run supabase-schema.sql once in the Supabase SQL editor, then refresh.";
+    }
+    state.loadError = msg;
   }
   render();
 }
@@ -1956,6 +2075,9 @@ async function clearScore(matchId){
   await reload();
 }
 async function postpone(matchId, toEnd, fromModal){
+  const m = data.matches.find(x => x.id === matchId);
+  if (m && m.court != null &&
+      !confirm("This match is on Court " + m.court + ". Pull it off the court and postpone it?")) return;
   const r = await store.adminPostpone(state.adminPin, matchId, toEnd);
   if (!r.ok){ toast(r.error || "Could not postpone."); return; }
   if (fromModal) state.modalMatchId = null;
@@ -2235,7 +2357,7 @@ async function doChangePin(){
   setInterval(() => {
     const ae = document.activeElement;
     const typing = ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
-    if (!document.hidden && !typing && !state.modalMatchId && !state.slotEditId && state.view !== "admin") render();
+    if (!document.hidden && !typing && !state.modalMatchId && !state.slotEditId && !state.teamModalId && state.view !== "admin") render();
   }, 45000);
   window.__APP_READY = true;
 })();
