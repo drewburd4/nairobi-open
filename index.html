@@ -239,9 +239,9 @@ select.mv{padding:4px 6px; border-radius:6px; border:1px solid var(--line); back
 /* ================= CONFIG =================
    Shares the Dispatch app's Supabase project for now: every tournament
    table and function is prefixed nairobi_ so nothing collides with the
-   Dispatch tables. Go live by running supabase-schema.sql once in that
-   project's SQL editor. Clear both values to run in demo mode always,
-   or add ?demo=1 to the URL to preview the built-in sample data. */
+   Dispatch tables. Setup: run supabase-schema.sql once in that project's
+   SQL editor, then supabase-testdata.sql for the sample tournament.
+   Clearing both values below falls back to local sample data (dev only). */
 const SUPABASE_URL = "https://cutiomcwgicdqfgbdsnc.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_jsoONy5tGwX6y3b2TJaqdA_BSg5DKNR";
 </script>
@@ -1112,8 +1112,7 @@ function liveStore(){
 window.__APP_ERRORS = [];
 window.addEventListener("error", e => window.__APP_ERRORS.push(String(e.message)));
 
-const store = (SUPABASE_URL && SUPABASE_ANON_KEY && !new URLSearchParams(location.search).has("demo"))
-  ? liveStore() : demoStore();
+const store = (SUPABASE_URL && SUPABASE_ANON_KEY) ? liveStore() : demoStore();
 let data = { tournament: null, events: [], entrants: [], matches: [] };
 const state = {
   view: "board", eventId: null, search: "", roundFilter: "all",

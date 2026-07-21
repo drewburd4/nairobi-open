@@ -2,15 +2,21 @@
 
 A one-file tournament app: group stages, court assignments, public score entry, live standings, and knockout brackets. Built for phones at the courts.
 
-- `index.html`: the whole app. With no Supabase keys it runs in demo mode with sample data (admin PIN 0727).
+- `index.html`: the whole app.
 - `supabase-schema.sql`: database schema plus all server-side rules. Run once in the Supabase SQL editor.
+- `supabase-testdata.sql`: the sample tournament data (generated). Run after the schema; re-run any time to reset the samples.
 - Live site: https://drewburd4.github.io/nairobi-open/ (GitHub repo: drewburd4/nairobi-open, deploys from `main`).
 
 ## Current status
 
-**Wired to the Dispatch app's Supabase project (shared for now), one step left.** The free plan's project slots are used by duara and dispatch, so the tournament runs inside the dispatch project: every table and function is prefixed `nairobi_`, so nothing touches or collides with the Dispatch tables. The app already has that project's URL and publishable key baked in.
+**Wired to the Dispatch app's Supabase project (shared for now); two SQL files to run.** The free plan's project slots are used by duara and dispatch, so the tournament runs inside the dispatch project: every table and function is prefixed `nairobi_`, so nothing touches or collides with the Dispatch tables. The app has that project's URL and publishable key baked in. There is one live site for everyone, no separate demo mode.
 
-The one remaining step: open the **dispatch** project on supabase.com → SQL Editor → paste all of `supabase-schema.sql` → Run. Run it once; it creates the `nairobi_` tables, all the write rules, the 13 category events, and sets the admin PIN to 0727. Until then the live site shows a "database tables aren't set up yet" message. After running it, refresh the site, unlock Admin with 0727, and enter one test score to confirm it syncs. Then the link can be shared.
+Setup, in the **dispatch** project on supabase.com → SQL Editor:
+
+1. Run all of `supabase-schema.sql` once. It creates the `nairobi_` tables, all the write rules, the 13 category events, and sets the admin PIN to 0727.
+2. Run all of `supabase-testdata.sql`. It loads the sample tournament so there is something real to play with: Open Doubles (Men) with 50 teams and its pools fully played (ready to test "Confirm group stage finished" and the knockout), Open Singles (Women) live on court 4 with one postponed match, and small fields in the other 11 events. Re-run it any time to reset the samples.
+
+Then refresh the site: everyone with the link sees the same sample tournament and every change syncs live. Unlock Admin with 0727 and change the PIN to something private (0727 is public in this repo). When real rosters arrive, replace each event's sample data from the Admin tab ("Start over with a new list"); the commented block at the top of `supabase-testdata.sql` wipes all sample data at once.
 
 The key in `index.html` is Supabase's publishable key, designed to be public; every write rule is enforced in the database. After the tournament, the whole thing can be removed from the shared project with the cleanup block commented out at the bottom of `supabase-schema.sql` (it only drops `nairobi_` objects). Moving to a dedicated project later is the same schema file, minus the prefix expectations in `index.html` (ask Claude).
 
@@ -44,4 +50,4 @@ Not built yet; feasibility notes so the thinking is saved:
 
 ## Development
 
-No build step. Open `index.html` in a browser. With live keys wired in, add `?demo=1` to the URL (works on the live site too) to preview the built-in sample data instead: the men's doubles pools are complete there, ready for testing the knockout flow end to end. Tournament logic (grouping, round robin, standings, seeding, brackets, court assignment) lives in a marked pure-logic script block that can be unit tested in node.
+No build step. Open `index.html` in a browser; with the keys wired in it talks to the live database. Blanking the two keys at the top of the file gives a local, offline, non-syncing copy with built-in sample data (dev convenience only). `supabase-testdata.sql` is generated from the app's own mock data builder, so the seeded database matches that built-in sample exactly. Tournament logic (grouping, round robin, standings, seeding, brackets, court assignment) lives in a marked pure-logic script block that can be unit tested in node.
