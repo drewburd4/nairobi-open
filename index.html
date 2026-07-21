@@ -1236,6 +1236,7 @@ function renderBoard(){
       return row;
     }).join("");
     h += '</div>';
+    h += '<p style="margin-top:8px"><button class="btn small secondary" onclick="setView(\'schedule\')">Show all matches</button></p>';
   }
 
   const postponedList = data.matches.filter(m => m.status === "scheduled" && m.postponed &&
