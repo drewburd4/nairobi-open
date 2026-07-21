@@ -20,7 +20,13 @@
 -- at the very bottom of this file.
 -- ============================================================
 
-create extension if not exists pgcrypto;
+-- pgcrypto provides crypt()/gen_salt() for the bcrypt-hashed admin PIN.
+-- Supabase preinstalls it in the "extensions" schema (where this is a
+-- no-op); the search_path line makes it visible to this script's seed
+-- insert at the bottom. The two PIN functions carry their own
+-- "public, extensions" search_path for the same reason.
+create extension if not exists pgcrypto with schema extensions;
+set search_path = public, extensions;
 
 -- ---------- tables ----------
 
@@ -99,7 +105,7 @@ create policy "public read nairobi_matches" on nairobi_matches for select using 
 
 create or replace function nairobi_verify_pin(p_pin text)
 returns boolean
-language sql stable security definer set search_path = public
+language sql stable security definer set search_path = public, extensions
 as $$
   select exists (
     select 1 from nairobi_tournaments
@@ -110,7 +116,7 @@ $$;
 
 create or replace function nairobi_change_admin_pin(p_old text, p_new text)
 returns text
-language plpgsql security definer set search_path = public
+language plpgsql security definer set search_path = public, extensions
 as $$
 begin
   if not nairobi_verify_pin(p_old) then return 'Wrong PIN.'; end if;
