@@ -2,9 +2,9 @@
 
 A one-file tournament app: group stages, court assignments, public score entry, live standings, and knockout brackets. Built for phones at the courts.
 
-- `index.html`: the whole app. With no Supabase keys it runs in demo mode with sample data (admin PIN 0218).
+- `index.html`: the whole app. With no Supabase keys it runs in demo mode with sample data (admin PIN 0727).
 - `supabase-schema.sql`: database schema plus all server-side rules. Run once in the Supabase SQL editor.
-- Live site: https://drewburd4.github.io/pickleball/ (GitHub repo: drewburd4/pickleball, deploys from `main`).
+- Live site: https://drewburd4.github.io/nairobi-open/ (GitHub repo: drewburd4/nairobi-open, deploys from `main`).
 
 ## Current status
 
@@ -20,11 +20,11 @@ The free plan allows 2 active projects per organization, and both slots are used
 
 Then:
 
-1. In the new project: SQL Editor → paste all of `supabase-schema.sql` → Run. This is the only thing to run, once. It creates the tables, all the rules, the 13 category events, and sets the admin PIN to 0218.
+1. In the new project: SQL Editor → paste all of `supabase-schema.sql` → Run. This is the only thing to run, once. It creates the tables, all the rules, the 13 category events, and sets the admin PIN to 0727.
 2. Project Settings → API → copy the **Project URL** and the **anon public** key.
 3. Paste them into `SUPABASE_URL` and `SUPABASE_ANON_KEY` at the top of the first `<script>` block in `index.html` (or hand them to Claude to wire in and verify).
 4. Commit and push. GitHub Pages redeploys in about a minute.
-5. Open the site, unlock Admin with 0218, and enter one test score to confirm it syncs. Then share the link.
+5. Open the site, unlock Admin with 0727, and enter one test score to confirm it syncs. Then share the link.
 
 The anon key is designed to be public; every write rule is enforced in the database.
 

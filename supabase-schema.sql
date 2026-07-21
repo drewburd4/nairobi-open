@@ -1,7 +1,7 @@
 -- ============================================================
 -- Nairobi Open: full Supabase schema
 -- Run this once in the Supabase SQL editor on a fresh project.
--- The admin PIN is set to 0218 near the bottom; change it later
+-- The admin PIN is set to 0727 near the bottom; change it later
 -- any time from the app's Admin tab.
 --
 -- Security model:
@@ -61,6 +61,9 @@ create table if not exists matches (
   play_order numeric,
   postponed boolean not null default false,
   court int,                                  -- assigned court while waiting/playing
+  walkover boolean not null default false,    -- won by default (no-show)
+  called_at timestamptz,                      -- when the match was called to a court
+  called_ack boolean not null default false,  -- desk confirmed players are on court
   next_match_id uuid,
   next_slot int,
   updated_at timestamptz not null default now()
@@ -173,7 +176,8 @@ begin
       and entrant1_id is not null and entrant2_id is not null
     order by play_order limit 1;
     exit when next_id is null;
-    update matches set court = c, updated_at = now() where id = next_id;
+    update matches set court = c, called_at = now(), called_ack = false, updated_at = now()
+    where id = next_id;
   end loop;
 end;
 $$;
@@ -263,7 +267,7 @@ begin
 
   update matches
   set score1 = chk.o_score1, score2 = chk.o_score2, games = chk.o_games,
-      status = 'played', postponed = false, court = null, updated_at = now()
+      status = 'played', postponed = false, court = null, walkover = false, updated_at = now()
   where id = p_match_id;
 
   perform advance_winner(p_match_id);
@@ -274,7 +278,7 @@ $$;
 
 -- ---------- admin functions ----------
 
-create or replace function admin_submit_score(p_pin text, p_match_id uuid, p_score1 int, p_score2 int, p_games jsonb default null)
+create or replace function admin_submit_score(p_pin text, p_match_id uuid, p_score1 int, p_score2 int, p_games jsonb default null, p_walkover boolean default false)
 returns text
 language plpgsql security definer set search_path = public
 as $$
@@ -284,16 +288,25 @@ declare
   chk record;
   old_w uuid;
   new_w uuid;
+  v_s1 int;
+  v_s2 int;
+  v_games jsonb;
 begin
   if not verify_pin(p_pin) then return 'Wrong PIN.'; end if;
   select * into m from matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.entrant1_id is null or m.entrant2_id is null then return 'Teams for this match are not decided yet.'; end if;
 
-  select * into chk from check_score(m.event_id, m.stage, p_score1, p_score2, p_games, true);
-  if chk.o_err is not null then return chk.o_err; end if;
+  if coalesce(p_walkover, false) then
+    if p_score1 is null or p_score2 is null or p_score1 = p_score2 then return 'Bad walkover score.'; end if;
+    v_s1 := p_score1; v_s2 := p_score2; v_games := null;
+  else
+    select * into chk from check_score(m.event_id, m.stage, p_score1, p_score2, p_games, true);
+    if chk.o_err is not null then return chk.o_err; end if;
+    v_s1 := chk.o_score1; v_s2 := chk.o_score2; v_games := chk.o_games;
+  end if;
 
-  new_w := case when chk.o_score1 > chk.o_score2 then m.entrant1_id else m.entrant2_id end;
+  new_w := case when v_s1 > v_s2 then m.entrant1_id else m.entrant2_id end;
   if m.next_match_id is not null then
     select * into nm from matches where id = m.next_match_id;
     if found and nm.status = 'played' then
@@ -306,11 +319,46 @@ begin
   end if;
 
   update matches
-  set score1 = chk.o_score1, score2 = chk.o_score2, games = chk.o_games,
-      status = 'played', postponed = false, court = null, updated_at = now()
+  set score1 = v_s1, score2 = v_s2, games = v_games,
+      status = 'played', postponed = false, court = null,
+      walkover = coalesce(p_walkover, false), updated_at = now()
   where id = p_match_id;
 
   perform advance_winner(p_match_id);
+  perform assign_courts(m.event_id);
+  return 'OK';
+end;
+$$;
+
+-- Dismiss the "go to court" banner: desk confirms players are on court.
+create or replace function admin_ack_called(p_pin text, p_match_id uuid)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  update matches set called_ack = true, updated_at = now() where id = p_match_id;
+  if not found then return 'Match not found.'; end if;
+  return 'OK';
+end;
+$$;
+
+-- Move a postponed (or any unplayed) match to the front of its event's queue.
+create or replace function admin_play_next(p_pin text, p_match_id uuid)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  m matches;
+  front numeric;
+begin
+  if not verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  select * into m from matches where id = p_match_id for update;
+  if not found then return 'Match not found.'; end if;
+  if m.status <> 'scheduled' then return 'That match already has a score.'; end if;
+  select coalesce(min(play_order), m.play_order) - 1 into front
+  from matches where event_id = m.event_id and status = 'scheduled' and id <> m.id;
+  update matches set play_order = front, postponed = false, updated_at = now() where id = p_match_id;
   perform assign_courts(m.event_id);
   return 'OK';
 end;
@@ -343,7 +391,8 @@ begin
   end if;
 
   update matches
-  set score1 = null, score2 = null, games = null, status = 'scheduled', court = null, updated_at = now()
+  set score1 = null, score2 = null, games = null, walkover = false,
+      status = 'scheduled', court = null, updated_at = now()
   where id = p_match_id;
   perform assign_courts(m.event_id);
   return 'OK';
@@ -578,6 +627,40 @@ begin
 end;
 $$;
 
+-- Move an entrant to another group: their group matches are replaced with
+-- client-built catch-up matches against the new group's members.
+create or replace function admin_move_entrant(p_pin text, p_entrant_id uuid, p_group text, p_matches jsonb)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  e entrants;
+begin
+  if not verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  select * into e from entrants where id = p_entrant_id;
+  if not found then return 'Team not found.'; end if;
+  if exists (select 1 from matches where stage = 'knockout' and (entrant1_id = p_entrant_id or entrant2_id = p_entrant_id)) then
+    return 'They are in the knockout bracket. Edit the bracket or reset it first.';
+  end if;
+
+  delete from matches where stage = 'group' and (entrant1_id = p_entrant_id or entrant2_id = p_entrant_id);
+  update entrants set group_name = p_group where id = p_entrant_id;
+
+  insert into matches (id, event_id, stage, group_name, round, bracket_round, bracket_pos,
+                       entrant1_id, entrant2_id, score1, score2, games, status, play_order, postponed,
+                       court, next_match_id, next_slot)
+  select (x ->> 'id')::uuid, e.event_id, 'group', p_group,
+         (x ->> 'round')::int, null, null,
+         (x ->> 'entrant1_id')::uuid, (x ->> 'entrant2_id')::uuid,
+         null, null, null, 'scheduled', (x ->> 'play_order')::numeric, false,
+         null, null, null
+  from jsonb_array_elements(coalesce(p_matches, '[]'::jsonb)) x;
+
+  perform assign_courts(e.event_id);
+  return 'OK';
+end;
+$$;
+
 -- Manual bracket fix: set either slot of an unplayed knockout match.
 create or replace function admin_set_bracket_teams(p_pin text, p_match_id uuid, p_entrant1_id uuid, p_entrant2_id uuid)
 returns text
@@ -652,9 +735,12 @@ revoke execute on function courts_conflict(uuid, jsonb) from public, anon, authe
 grant execute on function verify_pin(text) to anon, authenticated;
 grant execute on function change_admin_pin(text, text) to anon, authenticated;
 grant execute on function submit_score(uuid, int, int, jsonb) to anon, authenticated;
-grant execute on function admin_submit_score(text, uuid, int, int, jsonb) to anon, authenticated;
+grant execute on function admin_submit_score(text, uuid, int, int, jsonb, boolean) to anon, authenticated;
 grant execute on function admin_clear_score(text, uuid) to anon, authenticated;
 grant execute on function admin_postpone(text, uuid, boolean) to anon, authenticated;
+grant execute on function admin_play_next(text, uuid) to anon, authenticated;
+grant execute on function admin_ack_called(text, uuid) to anon, authenticated;
+grant execute on function admin_move_entrant(text, uuid, text, jsonb) to anon, authenticated;
 grant execute on function admin_update_event(text, uuid, text, jsonb) to anon, authenticated;
 grant execute on function admin_set_active(text, uuid, boolean) to anon, authenticated;
 grant execute on function admin_replace_event(text, uuid, text, int, jsonb, jsonb, jsonb) to anon, authenticated;
@@ -682,10 +768,10 @@ do $$ begin
 exception when others then null; end $$;
 
 -- ---------- seed data ----------
--- Tournament row with admin PIN 0218 (change any time from the Admin tab).
+-- Tournament row with admin PIN 0727 (change any time from the Admin tab).
 
 insert into tournaments (name, admin_pin_hash)
-select 'Nairobi Open', crypt('0218', gen_salt('bf'))
+select 'Nairobi Open', crypt('0727', gen_salt('bf'))
 where not exists (select 1 from tournaments);
 
 -- All category events, ready to fill with entrants from the Admin tab.

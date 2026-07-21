@@ -63,13 +63,15 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .tab{padding:8px 12px 10px; font-weight:700; font-size:14px; color:var(--muted); border-bottom:3px solid transparent; white-space:nowrap; border-radius:6px 6px 0 0}
 .tab[aria-current="true"]{color:var(--ink); border-bottom-color:var(--accent)}
 .demo-banner{background:var(--warn-soft); color:var(--warn); font-size:12.5px; font-weight:600; text-align:center; padding:6px 12px}
+.callout{display:flex; align-items:center; gap:10px; width:100%; background:var(--good); color:#fff; padding:9px 14px; font-weight:700; font-size:14px; border-top:1px solid rgba(255,255,255,.25)}
+.callout .cinner{max-width:820px; margin:0 auto; width:100%; display:flex; align-items:center; gap:10px}
+.callout .ctext{flex:1; min-width:0; overflow-wrap:anywhere}
+.callout .cdim{opacity:.85; font-weight:600}
+.callout .ack{background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.4); color:#fff; border-radius:6px; padding:4px 9px; font-size:12.5px; font-weight:700; white-space:nowrap}
 
 /* ---------- shared ---------- */
 .eventpick{margin:14px 0 4px}
 .eventpick select{width:100%; padding:10px 12px; border-radius:9px; border:1px solid var(--line); background:var(--card); font-weight:700}
-.eventbar{display:flex; gap:8px; overflow-x:auto; padding:14px 0 4px}
-.eventchip{padding:6px 12px; border-radius:999px; border:1px solid var(--line); background:var(--card); font-weight:700; font-size:13.5px; color:var(--muted); white-space:nowrap}
-.eventchip[aria-current="true"]{background:var(--accent); border-color:var(--accent); color:var(--accent-ink)}
 .section-h{display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin:20px 0 10px}
 .section-h h2{margin:0; font-size:13px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--muted)}
 .section-h .hint{font-size:12.5px; color:var(--muted)}
@@ -99,7 +101,8 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .courtcard.idle .team{color:var(--muted); font-weight:500}
 .queue-row{display:flex; align-items:center; gap:10px; padding:9px 4px; border-bottom:1px solid var(--line); font-size:14.5px; width:100%}
 .queue-row:last-child{border-bottom:none}
-.queue-row .qpos{font-size:12px; font-weight:800; color:var(--muted); min-width:16px}
+.queue-row.click{cursor:pointer}
+.queue-row .qpos{font-size:12px; font-weight:800; color:var(--muted); min-width:20px}
 .queue-row .qnames{flex:1; min-width:0; font-weight:600; overflow-wrap:anywhere}
 .queue-row .qv{color:var(--muted); font-weight:400}
 .queue-row .qtag{font-size:11.5px; color:var(--muted); white-space:nowrap}
@@ -107,8 +110,7 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .boardnotes{margin-top:16px}
 .boardnotes .note{display:block; padding:2px 0}
 
-/* ---------- schedule ---------- */
-.viewchips{display:flex; gap:6px; margin:0 0 4px}
+/* ---------- schedule / results ---------- */
 .gchips{display:flex; gap:6px; overflow-x:auto; padding:8px 0 2px}
 .gchip{padding:5px 10px; border-radius:999px; border:1px solid var(--line); background:var(--card); font-weight:700; font-size:12.5px; color:var(--muted); white-space:nowrap}
 .gchip[aria-current="true"]{background:var(--ink); color:var(--bg); border-color:var(--ink)}
@@ -156,7 +158,8 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .seedrow:last-child{border-bottom:none}
 .seedrow .snum{font-weight:800; color:var(--muted); min-width:22px; font-variant-numeric:tabular-nums}
 .seedrow .sname{flex:1; font-weight:600; overflow-wrap:anywhere}
-.seedrow .srec{color:var(--muted); font-size:12.5px; white-space:nowrap}
+.seedrow .sname .qv{color:var(--muted); font-weight:400}
+.seedrow .stag{font-size:11px; font-weight:800; color:var(--muted); font-variant-numeric:tabular-nums}
 
 /* ---------- modal ---------- */
 .overlay{position:fixed; inset:0; background:rgba(20,17,12,.55); z-index:50; display:flex; align-items:center; justify-content:center; padding:16px}
@@ -195,9 +198,11 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .preview-box{background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:13.5px; margin:10px 0; white-space:pre-line}
 .courtchecks{display:flex; gap:12px; flex-wrap:wrap; padding:4px 0}
 .courtchecks label{display:flex; align-items:center; gap:6px; font-weight:600; font-size:14px}
+.courtchecks .holder{font-size:11px; color:var(--muted); font-weight:600}
 .statusline{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px}
 details.teamlist{margin:10px 0}
 details.teamlist summary{cursor:pointer; font-weight:700; font-size:13.5px; padding:4px 0}
+select.mv{padding:4px 6px; border-radius:6px; border:1px solid var(--line); background:var(--bg); font-size:12px; max-width:96px}
 .addteam{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px}
 .addteam input{flex:2; min-width:140px; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg)}
 .addteam select{flex:1; min-width:90px; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg)}
@@ -208,7 +213,7 @@ details.teamlist summary{cursor:pointer; font-weight:700; font-size:13.5px; padd
 /* ---------- print ---------- */
 @media print{
   body{background:#fff; color:#000; font-size:12px}
-  .topbar,.controls,.viewchips,.gchips,.demo-banner,.btn,.queue-actions,.toast,.overlay,.courtcard .cta{display:none !important}
+  .topbar,.controls,.gchips,.demo-banner,.callout,.btn,.queue-actions,.toast,.overlay,.courtcard .cta{display:none !important}
   .wrap{max-width:100%; padding:0}
   .roundblock,.group-card,.bmatch,.seedlist{box-shadow:none; border-color:#bbb; break-inside:avoid}
   .print-title{display:block !important; font-size:18px; font-weight:900; margin:0 0 12px}
@@ -231,6 +236,8 @@ const SUPABASE_ANON_KEY = "";
 <script>
 /*__LOGIC_START__*/
 /* Pure tournament logic. No DOM access in this block, so it can be unit tested in node. */
+
+const CALLED_FRESH_MS = 4 * 60 * 1000;   // "go to court" banner lifetime
 
 function mulberry32(seed){
   return function(){
@@ -255,16 +262,17 @@ function uid(){
   return "id-" + __uidCounter + "-" + Math.floor(Math.random() * 1e9);
 }
 function groupLetter(i){ return String.fromCharCode(65 + i); }
+function ordinal(n){ return n + (n === 1 ? "st" : n === 2 ? "nd" : n === 3 ? "rd" : "th"); }
 
-/* Split n entrants into groups near the target size.
-   e.g. 50 with target 6 gives [7,7,6,6,6,6,6,6]. */
+/* Split n entrants into groups near the target size. Larger groups go last,
+   e.g. 50 with target 6 gives [6,6,6,6,6,6,7,7]. */
 function groupSizes(n, target){
   target = Math.max(2, target || 6);
   const g = Math.max(1, Math.round(n / target));
   const base = Math.floor(n / g);
   const extra = n % g;
   const sizes = [];
-  for(let i = 0; i < g; i++) sizes.push(base + (i < extra ? 1 : 0));
+  for(let i = 0; i < g; i++) sizes.push(base + (i >= g - extra ? 1 : 0));
   return sizes;
 }
 
@@ -316,6 +324,7 @@ function buildEventMatches(eventId, groups, startOrder){
           round: r + 1, bracket_round: null, bracket_pos: null,
           entrant1_id: a, entrant2_id: b, score1: null, score2: null, games: null,
           status: "scheduled", play_order: ord, postponed: false, court: null,
+          walkover: false, called_at: null, called_ack: false,
           next_match_id: null, next_slot: null
         });
       }
@@ -324,14 +333,15 @@ function buildEventMatches(eventId, groups, startOrder){
   return rows;
 }
 
-/* Catch-up matches for a team added to an existing group: one match against
-   each current member, appended after the group's existing rounds. */
+/* Catch-up matches for a team added to (or moved into) a group: one match
+   against each current member, appended after the group's existing rounds. */
 function buildCatchupMatches(eventId, groupName, newId, memberIds, startRound, startOrder){
   return memberIds.map((oppId, i) => ({
     id: uid(), event_id: eventId, stage: "group", group_name: groupName,
     round: startRound + i, bracket_round: null, bracket_pos: null,
     entrant1_id: newId, entrant2_id: oppId, score1: null, score2: null, games: null,
     status: "scheduled", play_order: startOrder + (i + 1) * 10, postponed: false, court: null,
+    walkover: false, called_at: null, called_ack: false,
     next_match_id: null, next_slot: null
   }));
 }
@@ -402,9 +412,7 @@ function computeStandings(entrants, matches){
    sizeOverride null ("auto"): top `adv` per group, filled to the next power of
    two with best next-placed finishers. sizeOverride N: exactly N spots, whole
    place-tiers first, then best-of-the-next-tier to fill.
-   Partial-tier qualifiers are marked wildcard ("best 3rd" etc).
-   Cross-group comparison uses win rate then average point diff, since group
-   sizes can differ. groupsStandings: [{group, rows}] from computeStandings. */
+   Partial-tier qualifiers are marked wildcard ("best 3rd" etc). */
 function seedField(groupsStandings, adv, sizeOverride){
   const tierList = t => groupsStandings
     .map(g => g.rows[t] ? { row: g.rows[t], group: g.group } : null)
@@ -465,24 +473,14 @@ function bracketOrder(size){
   return r;
 }
 
-function roundLabelFor(bracketRound, totalRounds){
-  const teams = Math.pow(2, totalRounds - bracketRound + 1);
-  if (teams === 2) return "Final";
-  if (teams === 4) return "Semifinals";
-  if (teams === 8) return "Quarterfinals";
-  if (teams === 16) return "Round of 16";
-  return "Round of " + teams;
-}
-
-/* Builds all knockout rounds with linkage, avoids same-group matchups in
-   round 1 where a swap can fix it, and resolves any byes immediately. */
-function buildBracket(eventId, seeds, startOrder){
+/* First-round pairings for a seed list, padded to a full bracket with nulls,
+   with same-group matchups swapped apart where possible. */
+function bracketPairs(seeds){
   const size = nextPow2(Math.max(2, seeds.length));
   const order = bracketOrder(size);
   const slot = n => seeds[n - 1] || null;
   const pairs = [];
   for(let i = 0; i < order.length; i += 2) pairs.push([slot(order[i]), slot(order[i + 1])]);
-
   const clash = p => p[0] && p[1] && p[0].group === p[1].group;
   for(let pass = 0; pass < 3; pass++){
     let fixed = true;
@@ -498,7 +496,22 @@ function buildBracket(eventId, seeds, startOrder){
     }
     if (fixed) break;
   }
+  return pairs;
+}
 
+function roundLabelFor(bracketRound, totalRounds){
+  const teams = Math.pow(2, totalRounds - bracketRound + 1);
+  if (teams === 2) return "Final";
+  if (teams === 4) return "Semifinals";
+  if (teams === 8) return "Quarterfinals";
+  if (teams === 16) return "Round of 16";
+  return "Round of " + teams;
+}
+
+/* Builds all knockout rounds with linkage and resolves any byes immediately. */
+function buildBracket(eventId, seeds, startOrder){
+  const size = nextPow2(Math.max(2, seeds.length));
+  const pairs = bracketPairs(seeds);
   const totalRounds = Math.log2(size);
   let ord = startOrder || 0;
   const rows = [];
@@ -513,6 +526,7 @@ function buildBracket(eventId, seeds, startOrder){
         round: r, bracket_round: r, bracket_pos: i,
         entrant1_id: null, entrant2_id: null, score1: null, score2: null, games: null,
         status: "scheduled", play_order: ord, postponed: false, court: null,
+        walkover: false, called_at: null, called_ack: false,
         next_match_id: null, next_slot: null
       };
       list.push(row); rows.push(row);
@@ -565,8 +579,6 @@ function validateGames(games, pts, isAdmin, bestOf){
   return { w1, w2 };
 }
 
-function estRounds(totalMatches, courts){ return Math.ceil(totalMatches / Math.max(1, courts)); }
-
 /* Give free courts to the next matches in line for one event.
    Mutates db.matches. Mirrors the SQL function of the same name. */
 function assignCourtsIn(db, eventId){
@@ -588,6 +600,8 @@ function assignCourtsIn(db, eventId){
       .sort((a, b) => a.play_order - b.play_order)[0];
     if (!next) break;
     next.court = c; taken.add(c);
+    next.called_at = new Date().toISOString();
+    next.called_ack = false;
   }
 }
 
@@ -633,10 +647,6 @@ function buildMockData(){
   for(let i = 5; i <= 9; i++) events[i].settings.schedule_note = "Day 3";
   for(let i = 10; i <= 12; i++) events[i].settings.schedule_note = "Day 4";
 
-  const firsts = shuffled(MOCK_FIRSTS, rand);
-  const teamNames = [];
-  for(let i = 0; i < 50; i++) teamNames.push(firsts[2 * i] + " & " + firsts[2 * i + 1]);
-
   const entrants = [];
   const skills = {};
   let en = 0;
@@ -650,22 +660,37 @@ function buildMockData(){
       });
     });
   };
-
-  const groupsD = makeGroups(teamNames, evD.settings.group_size, rand);
-  const groupsS = makeGroups(MOCK_WOMEN_SINGLES, evS.settings.group_size, rand);
-  mkEntrants(evD, groupsD);
-  mkEntrants(evS, groupsS);
-
   const idsByGroup = (evId, gname) => entrants.filter(e => e.event_id === evId && e.group_name === gname).map(e => e.id);
-  const matchesD = buildEventMatches(evD.id, groupsD.map(g => ({ name: g.name, entrantIds: idsByGroup(evD.id, g.name) })), 0);
-  const matchesS = buildEventMatches(evS.id, groupsS.map(g => ({ name: g.name, entrantIds: idsByGroup(evS.id, g.name) })), 0);
+  const buildFor = (ev, names) => {
+    const groups = makeGroups(names, ev.settings.group_size, rand);
+    mkEntrants(ev, groups);
+    return buildEventMatches(ev.id, groups.map(g => ({ name: g.name, entrantIds: idsByGroup(ev.id, g.name) })), 0);
+  };
 
-  const fracD = { A: 1, B: 1, C: 0.8, D: 0.6, E: 0.5, F: 0.35, G: 0.15, H: 0 };
-  const fracS = { A: 0.9, B: 0.5, C: 0.2 };
-  const playOut = (rows, fracs, pts) => {
-    for(const m of rows){
-      const f = fracs[m.group_name] != null ? fracs[m.group_name] : 0.5;
-      if (rand() >= f) continue;
+  const firsts = shuffled(MOCK_FIRSTS, rand);
+  const teamNames = [];
+  for(let i = 0; i < 50; i++) teamNames.push(firsts[2 * i] + " & " + firsts[2 * i + 1]);
+  const matchesD = buildFor(evD, teamNames);
+  const matchesS = buildFor(evS, MOCK_WOMEN_SINGLES);
+
+  /* Small fields for every other category so their schedules render. */
+  const SURNAMES = "KMWPRSTBGD";
+  let allOther = [];
+  for(let i = 2; i < events.length; i++){
+    const ev = events[i];
+    ev.settings.group_size = 4;
+    const pool = shuffled(MOCK_FIRSTS, rand);
+    const names = ev.name.includes("Singles")
+      ? pool.slice(0, 8).map(n => n + " " + SURNAMES[(i - 2) % SURNAMES.length] + ".")
+      : Array.from({ length: 8 }, (_, k) => pool[2 * k] + " & " + pool[2 * k + 1]);
+    allOther = allOther.concat(buildFor(ev, names));
+  }
+
+  /* Play strictly in queue order. Doubles cutoff lands right after group A's
+     final round-5 match, so group A is complete while later groups still have
+     matches left. Singles stops mid round 4. */
+  const playInOrder = (rows, count, pts) => {
+    rows.slice().sort((a, b) => a.play_order - b.play_order).slice(0, count).forEach(m => {
       const s1 = skills[m.entrant1_id], s2 = skills[m.entrant2_id];
       const p1 = s1 / (s1 + s2);
       const oneWins = rand() < p1;
@@ -674,12 +699,12 @@ function buildMockData(){
       m.score1 = oneWins ? pts : loserPts;
       m.score2 = oneWins ? loserPts : pts;
       m.status = "played";
-    }
+    });
   };
-  playOut(matchesD, fracD, evD.settings.points_to_group);
-  playOut(matchesS, fracS, evS.settings.points_to_group);
+  playInOrder(matchesD, 99, 21);
+  playInOrder(matchesS, 20, 21);
 
-  const db = { tournament, events, entrants, matches: matchesD.concat(matchesS) };
+  const db = { tournament, events, entrants, matches: matchesD.concat(matchesS, allOther) };
 
   const pendingD = matchesD.filter(m => m.status === "scheduled")
     .sort((a, b) => a.play_order - b.play_order);
@@ -703,7 +728,7 @@ function buildMockData(){
 
 function demoStore(){
   const db = buildMockData();
-  const PIN = "0218";
+  const PIN = "0727";
   const subs = [];
   const notify = () => subs.forEach(f => { try{ f(); }catch(e){} });
   const ok = () => ({ ok: true });
@@ -734,10 +759,12 @@ function demoStore(){
     }
   }
 
-  function applyScore(m, s1, s2, games, isAdmin){
+  function applyScore(m, s1, s2, games, isAdmin, walkover){
     const pts = settingFor(m, "points_to");
     const bo = settingFor(m, "best_of");
-    if (bo > 1){
+    if (walkover){
+      m.score1 = s1; m.score2 = s2; m.games = null;
+    } else if (bo > 1){
       const v = validateGames(games || [], pts, isAdmin, bo);
       if (v.error) return v.error;
       m.score1 = v.w1; m.score2 = v.w2; m.games = games;
@@ -746,7 +773,8 @@ function demoStore(){
       if (err) return err;
       m.score1 = s1; m.score2 = s2; m.games = null;
     }
-    m.status = "played"; m.postponed = false;
+    m.status = "played"; m.postponed = false; m.court = null;
+    m.walkover = !!walkover;
     return null;
   }
 
@@ -761,20 +789,23 @@ function demoStore(){
       if (!m) return fail("Match not found.");
       if (m.status === "played") return fail("A score is already in. Ask the desk to change it.");
       if (!m.entrant1_id || !m.entrant2_id) return fail("Teams for this match aren't decided yet.");
-      const err = applyScore(m, s1, s2, games, false);
+      const err = applyScore(m, s1, s2, games, false, false);
       if (err) return fail(err);
       advanceWinner(m);
       assignCourtsIn(db, m.event_id);
       notify(); return ok();
     },
-    async adminSubmitScore(pin, matchId, s1, s2, games){
+    async adminSubmitScore(pin, matchId, s1, s2, games, walkover){
       if (!checkPin(pin)) return fail("Wrong PIN.");
       const m = findMatch(matchId);
       if (!m) return fail("Match not found.");
       if (!m.entrant1_id || !m.entrant2_id) return fail("Teams for this match aren't decided yet.");
       const bo = settingFor(m, "best_of");
       let newW;
-      if (bo > 1){
+      if (walkover){
+        if (!Number.isInteger(s1) || !Number.isInteger(s2) || s1 === s2) return fail("Bad walkover score.");
+        newW = s1 > s2 ? m.entrant1_id : m.entrant2_id;
+      } else if (bo > 1){
         const v = validateGames(games || [], settingFor(m, "points_to"), true, bo);
         if (v.error) return fail(v.error);
         newW = v.w1 > v.w2 ? m.entrant1_id : m.entrant2_id;
@@ -789,7 +820,7 @@ function demoStore(){
         if (nm && nm.status === "played" && oldW !== newW)
           return fail("The next round already has a score. Clear it first.");
       }
-      applyScore(m, s1, s2, games, true);
+      applyScore(m, s1, s2, games, true, walkover);
       if (m.next_match_id){
         const nm = findMatch(m.next_match_id);
         if (nm && nm.status === "scheduled"){
@@ -810,7 +841,8 @@ function demoStore(){
           if (m.next_slot === 1) nm.entrant1_id = null; else nm.entrant2_id = null;
         }
       }
-      m.score1 = null; m.score2 = null; m.games = null; m.status = "scheduled"; m.court = null;
+      m.score1 = null; m.score2 = null; m.games = null; m.walkover = false;
+      m.status = "scheduled"; m.court = null;
       assignCourtsIn(db, m.event_id);
       notify(); return ok();
     },
@@ -831,6 +863,24 @@ function demoStore(){
       }
       m.postponed = true; m.court = null;
       assignCourtsIn(db, m.event_id);
+      notify(); return ok();
+    },
+    async adminPlayNext(pin, matchId){
+      if (!checkPin(pin)) return fail("Wrong PIN.");
+      const m = findMatch(matchId);
+      if (!m) return fail("Match not found.");
+      if (m.status !== "scheduled") return fail("That match already has a score.");
+      const pending = db.matches.filter(x => x.event_id === m.event_id && x.status === "scheduled" && x.id !== m.id);
+      m.play_order = (pending.length ? Math.min(...pending.map(x => x.play_order)) : m.play_order) - 1;
+      m.postponed = false;
+      assignCourtsIn(db, m.event_id);
+      notify(); return ok();
+    },
+    async adminAckCalled(pin, matchId){
+      if (!checkPin(pin)) return fail("Wrong PIN.");
+      const m = findMatch(matchId);
+      if (!m) return fail("Match not found.");
+      m.called_ack = true;
       notify(); return ok();
     },
     async adminUpdateEvent(pin, eventId, name, settings){
@@ -907,6 +957,18 @@ function demoStore(){
       db.entrants.push(Object.assign({}, entrant, { event_id: eventId }));
       matches.forEach(m => db.matches.push(Object.assign({}, m, { event_id: eventId, court: null })));
       assignCourtsIn(db, eventId);
+      notify(); return ok();
+    },
+    async adminMoveEntrant(pin, entrantId, newGroup, matches){
+      if (!checkPin(pin)) return fail("Wrong PIN.");
+      const e = db.entrants.find(x => x.id === entrantId);
+      if (!e) return fail("Team not found.");
+      if (db.matches.some(m => m.stage === "knockout" && (m.entrant1_id === entrantId || m.entrant2_id === entrantId)))
+        return fail("They're in the knockout bracket. Edit the bracket or reset it first.");
+      db.matches = db.matches.filter(m => !(m.stage === "group" && (m.entrant1_id === entrantId || m.entrant2_id === entrantId)));
+      e.group_name = newGroup;
+      matches.forEach(m => db.matches.push(Object.assign({}, m, { event_id: e.event_id, court: null })));
+      assignCourtsIn(db, e.event_id);
       notify(); return ok();
     },
     async adminSetBracketTeams(pin, matchId, e1, e2){
@@ -997,9 +1059,11 @@ function liveStore(){
       r.ok && r.data === true ? { ok: true } : { ok: false, error: r.error || "Wrong PIN." }),
     changePin: (oldPin, newPin) => rpc("change_admin_pin", { p_old: oldPin, p_new: newPin }),
     submitScore: (id, s1, s2, games) => rpc("submit_score", { p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null }),
-    adminSubmitScore: (pin, id, s1, s2, games) => rpc("admin_submit_score", { p_pin: pin, p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null }),
+    adminSubmitScore: (pin, id, s1, s2, games, walkover) => rpc("admin_submit_score", { p_pin: pin, p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null, p_walkover: !!walkover }),
     adminClearScore: (pin, id) => rpc("admin_clear_score", { p_pin: pin, p_match_id: id }),
     adminPostpone: (pin, id, toEnd) => rpc("admin_postpone", { p_pin: pin, p_match_id: id, p_to_end: !!toEnd }),
+    adminPlayNext: (pin, id) => rpc("admin_play_next", { p_pin: pin, p_match_id: id }),
+    adminAckCalled: (pin, id) => rpc("admin_ack_called", { p_pin: pin, p_match_id: id }),
     adminUpdateEvent: (pin, eventId, name, settings) => rpc("admin_update_event", { p_pin: pin, p_event_id: eventId, p_name: name, p_settings: settings }),
     adminSetActive: (pin, eventId, active) => rpc("admin_set_active", { p_pin: pin, p_event_id: eventId, p_active: !!active }),
     adminReplaceEvent: async (pin, eventId, meta, entrants, matches) => {
@@ -1015,6 +1079,7 @@ function liveStore(){
     adminRenameEntrant: (pin, id, name) => rpc("admin_rename_entrant", { p_pin: pin, p_entrant_id: id, p_name: name }),
     adminRemoveEntrant: (pin, id) => rpc("admin_remove_entrant", { p_pin: pin, p_entrant_id: id }),
     adminAddEntrant: (pin, eventId, entrant, matches) => rpc("admin_add_entrant", { p_pin: pin, p_event_id: eventId, p_entrant: entrant, p_matches: matches }),
+    adminMoveEntrant: (pin, id, group, matches) => rpc("admin_move_entrant", { p_pin: pin, p_entrant_id: id, p_group: group, p_matches: matches }),
     adminSetBracketTeams: (pin, matchId, e1, e2) => rpc("admin_set_bracket_teams", { p_pin: pin, p_match_id: matchId, p_entrant1_id: e1 || null, p_entrant2_id: e2 || null }),
     adminGenerateBracket: (pin, eventId, rows) => rpc("admin_generate_bracket", { p_pin: pin, p_event_id: eventId, p_matches: rows }),
     adminResetBracket: (pin, eventId) => rpc("admin_reset_bracket", { p_pin: pin, p_event_id: eventId })
@@ -1030,9 +1095,10 @@ window.addEventListener("error", e => window.__APP_ERRORS.push(String(e.message)
 const store = (SUPABASE_URL && SUPABASE_ANON_KEY) ? liveStore() : demoStore();
 let data = { tournament: null, events: [], entrants: [], matches: [] };
 const state = {
-  view: "board", eventId: null, search: "", groupFilter: "all", schedMode: "rounds",
+  view: "board", eventId: null, search: "", roundFilter: "all",
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null,
-  setupPreview: null, adminEventId: null, loadError: null
+  setupPreview: null, adminEventId: null, loadError: null,
+  showAllQueue: false, showRedraw: false, pendingRender: false
 };
 
 function esc(s){
@@ -1109,18 +1175,29 @@ function onCourtMatches(){
     .filter(m => { const ev = eventById(m.event_id); return ev && ev.active; })
     .sort((a, b) => a.court - b.court);
 }
-function upNextMatches(n){
+function pendingQueue(){
   const lists = activeEvents().map(ev => data.matches
     .filter(m => m.event_id === ev.id && m.status === "scheduled" && m.court == null && m.entrant1_id && m.entrant2_id)
     .sort((a, b) => a.play_order - b.play_order));
-  return weaveQueues(lists).slice(0, n);
+  return weaveQueues(lists);
+}
+function calledMatches(){
+  const now = Date.now();
+  return onCourtMatches().filter(m =>
+    m.called_at && !m.called_ack && (now - Date.parse(m.called_at)) < CALLED_FRESH_MS);
 }
 
 /* ---------- rendering ---------- */
 function render(){
   const app = document.getElementById("app");
-  const restoreId = document.activeElement && document.activeElement.id;
-  const restoreVal = restoreId && document.activeElement.value;
+  const ae = document.activeElement;
+  const typingInForm = ae && app.contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && ae.id !== "pin-input" && ae.id !== "search-input";
+  if (typingInForm && (state.view === "admin" || state.modalMatchId || state.slotEditId)){
+    state.pendingRender = true;
+    return;
+  }
+  const restoreId = ae && ae.id;
+  const restoreVal = restoreId && ae.value;
 
   if (state.loadError){
     app.innerHTML = '<div class="wrap"><div class="empty">Could not load tournament data.<br>' + esc(state.loadError) + '<br><br><button class="btn secondary" onclick="location.reload()">Retry</button></div></div>';
@@ -1132,23 +1209,26 @@ function render(){
   }
 
   const tabs = [
-    ["board", "Courts"], ["schedule", "Schedule"], ["standings", "Standings"],
-    ["bracket", "Bracket"], ["admin", "Admin"]
+    ["board", "Courts"], ["schedule", "Schedule"], ["results", "Results"],
+    ["standings", "Standings"], ["bracket", "Bracket"], ["admin", "Admin"]
   ];
   let html = '<div class="topbar">';
-  if (store.mode === "demo") html += '<div class="demo-banner">Demo with sample data. Changes reset on refresh. Admin PIN: 0218</div>';
+  if (store.mode === "demo") html += '<div class="demo-banner">Demo with sample data. Changes reset on refresh. Admin PIN: 0727</div>';
   html += '<div class="masthead"><div class="wordmark">' + esc(data.tournament.name) + '</div>' +
     '<div class="stagechip">' + courtsCount() + ' courts</div></div>';
   html += '<nav class="tabs">' + tabs.map(([id, label]) =>
     '<button class="tab" aria-current="' + (state.view === id) + '" onclick="setView(\'' + id + '\')">' + label + '</button>'
-  ).join("") + '</nav></div>';
+  ).join("") + '</nav>';
+  html += renderCallouts();
+  html += '</div>';
 
   html += '<main class="wrap">';
-  if (["schedule", "standings", "bracket"].includes(state.view) && data.events.length > 1){
+  if (["schedule", "results", "standings", "bracket"].includes(state.view) && data.events.length > 1){
     html += renderEventPicker();
   }
   if (state.view === "board") html += renderBoard();
   else if (state.view === "schedule") html += renderSchedule();
+  else if (state.view === "results") html += renderResults();
   else if (state.view === "standings") html += renderStandings();
   else if (state.view === "bracket") html += renderBracket();
   else if (state.view === "admin") html += renderAdmin();
@@ -1168,6 +1248,24 @@ function render(){
   }
 }
 
+/* "Go to court now" banners: fresh court assignments, auto-expire, admin ack. */
+function renderCallouts(){
+  const called = calledMatches();
+  if (!called.length) return "";
+  const multi = activeEvents().length > 1;
+  let h = "";
+  called.slice(0, 3).forEach(m => {
+    const ev = eventById(m.event_id);
+    h += '<button class="callout" onclick="openMatch(\'' + m.id + '\')"><span class="cinner">' +
+      '<span class="ctext">Court ' + m.court + ' now: ' + esc(entrantName(m.entrant1_id)) + ' <span class="cdim">vs</span> ' + esc(entrantName(m.entrant2_id)) +
+      (multi && ev ? ' <span class="cdim">· ' + esc(ev.name) + '</span>' : '') + '</span>' +
+      (state.adminPin ? '<span class="ack" role="button" onclick="event.stopPropagation();ackCalled(\'' + m.id + '\')">✓ On court</span>' : '') +
+      '</span></button>';
+  });
+  if (called.length > 3) h += '<div class="callout"><span class="cinner"><span class="ctext cdim">' + (called.length - 3) + ' more matches just called</span></span></div>';
+  return h;
+}
+
 function eventLabel(ev){
   let l = ev.name;
   if (ev.active) l += " · running";
@@ -1177,14 +1275,25 @@ function eventLabel(ev){
 function renderEventPicker(){
   const cur = currentEvent();
   const evs = data.events.slice().sort((a, b) => a.sort_order - b.sort_order);
-  if (evs.length > 4){
-    return '<div class="eventpick"><select onchange="setEvent(this.value)" aria-label="Event">' +
-      evs.map(ev => '<option value="' + ev.id + '"' + (cur && ev.id === cur.id ? ' selected' : '') + '>' + esc(eventLabel(ev)) + '</option>').join("") +
-      '</select></div>';
-  }
-  return '<div class="eventbar">' + evs.map(ev =>
-    '<button class="eventchip" aria-current="' + (cur && ev.id === cur.id) + '" onclick="setEvent(\'' + ev.id + '\')">' + esc(ev.name) + '</button>'
-  ).join("") + '</div>';
+  return '<div class="eventpick"><select onchange="setEvent(this.value)" aria-label="Event">' +
+    evs.map(ev => '<option value="' + ev.id + '"' + (cur && ev.id === cur.id ? ' selected' : '') + '>' + esc(eventLabel(ev)) + '</option>').join("") +
+    '</select></div>';
+}
+
+function queueRow(m, opts){
+  opts = opts || {};
+  const ev = eventById(m.event_id);
+  let row = '<div class="queue-row click" onclick="openMatch(\'' + m.id + '\')">';
+  if (opts.pos != null) row += '<span class="qpos">' + opts.pos + '</span>';
+  row += '<span class="qnames">' + esc(entrantName(m.entrant1_id)) + ' <span class="qv">vs</span> ' + esc(entrantName(m.entrant2_id)) + '</span>';
+  if (m.postponed && !opts.inPostponed) row += '<span class="qtag">Postponed</span>';
+  if (opts.showEvent && ev) row += '<span class="qtag">' + esc(ev.name) + '</span>';
+  if (state.adminPin && opts.action === "postpone")
+    row += '<span class="queue-actions"><button class="btn small secondary" onclick="event.stopPropagation();postpone(\'' + m.id + '\', false)">Postpone</button></span>';
+  if (state.adminPin && opts.action === "playnext")
+    row += '<span class="queue-actions"><button class="btn small secondary" onclick="event.stopPropagation();playNext(\'' + m.id + '\')">Play next</button></span>';
+  row += '</div>';
+  return row;
 }
 
 function renderBoard(){
@@ -1223,34 +1332,28 @@ function renderBoard(){
   }
   h += '</div>';
 
-  const nxt = upNextMatches(4);
-  if (nxt.length){
+  const q = pendingQueue();
+  const upNext = q.slice(0, 8);
+  if (upNext.length){
     h += '<div class="section-h"><h2>Up next</h2></div><div class="roundblock" style="padding-top:2px">';
-    h += nxt.map((m, i) => {
-      const ev = eventById(m.event_id);
-      let row = '<div class="queue-row"><span class="qpos">' + (i + 1) + '</span>' +
-        '<span class="qnames">' + esc(entrantName(m.entrant1_id)) + ' <span class="qv">vs</span> ' + esc(entrantName(m.entrant2_id)) + '</span>';
-      if (multi) row += '<span class="qtag">' + esc(ev.name) + '</span>';
-      if (state.adminPin) row += '<span class="queue-actions"><button class="btn small secondary" onclick="postpone(\'' + m.id + '\', false)">Postpone</button></span>';
-      row += '</div>';
-      return row;
-    }).join("");
+    h += upNext.map((m, i) => queueRow(m, { pos: i + 1, showEvent: multi, action: "postpone" })).join("");
     h += '</div>';
-    h += '<p style="margin-top:8px"><button class="btn small secondary" onclick="setView(\'schedule\')">Show all matches</button></p>';
+    if (q.length > upNext.length || state.showAllQueue){
+      h += '<p style="margin-top:8px"><button class="btn small secondary" onclick="toggleAllQueue()">' +
+        (state.showAllQueue ? 'Show fewer' : 'Show all matches (' + q.length + ' waiting)') + '</button></p>';
+    }
+    if (state.showAllQueue && q.length > upNext.length){
+      h += '<div class="roundblock" style="padding-top:2px">';
+      h += q.slice(8).map((m, i) => queueRow(m, { pos: i + 9, showEvent: multi, action: "postpone" })).join("");
+      h += '</div>';
+    }
   }
 
   const postponedList = data.matches.filter(m => m.status === "scheduled" && m.postponed &&
     (eventById(m.event_id) || {}).active);
   if (postponedList.length){
-    h += '<div class="section-h"><h2>Postponed</h2><span class="hint">Still to be played, moved down the queue</span></div><div class="roundblock" style="padding-top:2px">';
-    h += postponedList.map(m => {
-      const ev = eventById(m.event_id);
-      let row = '<div class="queue-row"><span class="qnames">' + esc(entrantName(m.entrant1_id)) + ' <span class="qv">vs</span> ' + esc(entrantName(m.entrant2_id)) + '</span>';
-      if (multi) row += '<span class="qtag">' + esc(ev.name) + '</span>';
-      if (state.adminPin) row += '<span class="queue-actions"><button class="btn small secondary" onclick="postpone(\'' + m.id + '\', true)">To end</button></span>';
-      row += '</div>';
-      return row;
-    }).join("");
+    h += '<div class="section-h"><h2>Postponed</h2><span class="hint">Waiting lower in the queue</span></div><div class="roundblock" style="padding-top:2px">';
+    h += postponedList.map(m => queueRow(m, { showEvent: multi, action: "playnext", inPostponed: true })).join("");
     h += '</div>';
   }
 
@@ -1265,6 +1368,41 @@ function renderBoard(){
   return h;
 }
 
+function scheduleRow(m, withScore){
+  const played = m.status === "played" && m.score1 != null;
+  const bye = m.stage === "knockout" && m.status === "played" && m.score1 == null;
+  const clickable = !bye && m.entrant1_id && m.entrant2_id;
+  let res = '';
+  if (withScore){
+    if (played){
+      const gs = gamesStr(m);
+      res = '<span class="res">' + (gs ? esc(gs) : m.score1 + '-' + m.score2) + '</span>' +
+        (m.walkover ? ' <span class="tag warn">W/O</span>' : '');
+    }
+    else if (m.postponed) res = '<span class="res pending">Postponed</span>';
+    else if (m.court != null) res = '<span class="res pending">Court ' + m.court + '</span>';
+  } else if (played){
+    res = '<span class="res pending">✓</span>';
+  } else if (m.postponed){
+    res = '<span class="res pending">Postponed</span>';
+  } else if (m.court != null){
+    res = '<span class="res pending">Court ' + m.court + '</span>';
+  }
+  const inner = '<span class="g">' + (m.group_name ? esc(m.group_name) : '') + '</span>' +
+    '<span class="names">' + esc(entrantName(m.entrant1_id) || "TBD") + ' <span class="qv">vs</span> ' + esc(entrantName(m.entrant2_id) || (bye ? "BYE" : "TBD")) + '</span>' + res;
+  return clickable
+    ? '<button class="srow' + (played ? ' done' : '') + '" onclick="openMatch(\'' + m.id + '\')">' + inner + '</button>'
+    : '<div class="srow' + (played ? ' done' : '') + '">' + inner + '</div>';
+}
+function termFilterFor(){
+  const term = state.search.trim().toLowerCase();
+  return m => {
+    if (!term) return true;
+    const n1 = entrantName(m.entrant1_id) || "", n2 = entrantName(m.entrant2_id) || "";
+    return n1.toLowerCase().includes(term) || n2.toLowerCase().includes(term);
+  };
+}
+
 function renderSchedule(){
   const ev = currentEvent();
   if (!ev) return '<div class="empty">No events yet.</div>';
@@ -1275,94 +1413,71 @@ function renderSchedule(){
   }
   const groupMs = evMatches.filter(m => m.stage === "group");
   const koMs = evMatches.filter(m => m.stage === "knockout");
-  const groups = groupsOfEvent(ev);
+  const maxRound = Math.max(0, ...groupMs.map(m => m.round));
 
   let h = '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + ' · Schedule</span>';
-  h += '<div class="viewchips" style="margin-top:12px">' +
-    '<button class="gchip" aria-current="' + (state.schedMode === "rounds") + '" onclick="setSchedMode(\'rounds\')">Rounds</button>' +
-    '<button class="gchip" aria-current="' + (state.schedMode === "results") + '" onclick="setSchedMode(\'results\')">Results</button>' +
-    '</div>';
   h += '<div class="controls">' +
     '<input class="search" id="search-input" type="text" placeholder="Find a name" value="' + esc(state.search) + '" oninput="setSearch(this.value)">' +
     '<button class="btn small secondary" onclick="window.print()">Print</button></div>';
   h += '<div class="gchips">' +
-    '<button class="gchip" aria-current="' + (state.groupFilter === "all") + '" onclick="setGroupFilter(\'all\')">All</button>' +
-    groups.map(g => '<button class="gchip" aria-current="' + (state.groupFilter === g) + '" onclick="setGroupFilter(\'' + g + '\')">' + g + '</button>').join("") +
-    (koMs.length ? '<button class="gchip" aria-current="' + (state.groupFilter === "ko") + '" onclick="setGroupFilter(\'ko\')">Knockout</button>' : '') +
-    '</div>';
-
-  const term = state.search.trim().toLowerCase();
-  const matchesTerm = m => {
-    if (!term) return true;
-    const n1 = entrantName(m.entrant1_id) || "", n2 = entrantName(m.entrant2_id) || "";
-    return n1.toLowerCase().includes(term) || n2.toLowerCase().includes(term);
-  };
-  const srow = (m, withScore) => {
-    const played = m.status === "played" && m.score1 != null;
-    const bye = m.stage === "knockout" && m.status === "played" && m.score1 == null;
-    const clickable = !bye && m.entrant1_id && m.entrant2_id;
-    let res = '';
-    if (withScore){
-      if (played){
-        const gs = gamesStr(m);
-        res = '<span class="res">' + (gs ? esc(gs) : m.score1 + '-' + m.score2) + '</span>';
-      }
-      else if (m.postponed) res = '<span class="res pending">Postponed</span>';
-      else if (m.court != null) res = '<span class="res pending">Court ' + m.court + '</span>';
-    } else if (played){
-      res = '<span class="res pending">✓</span>';
-    } else if (m.postponed){
-      res = '<span class="res pending">Postponed</span>';
-    } else if (m.court != null){
-      res = '<span class="res pending">Court ' + m.court + '</span>';
-    }
-    const inner = '<span class="g">' + (m.group_name ? esc(m.group_name) : '') + '</span>' +
-      '<span class="names">' + esc(entrantName(m.entrant1_id) || "TBD") + ' <span class="qv">vs</span> ' + esc(entrantName(m.entrant2_id) || (bye ? "BYE" : "TBD")) + '</span>' + res;
-    return clickable
-      ? '<button class="srow' + (played ? ' done' : '') + '" onclick="openMatch(\'' + m.id + '\')">' + inner + '</button>'
-      : '<div class="srow' + (played ? ' done' : '') + '">' + inner + '</div>';
-  };
-
-  if (state.schedMode === "results"){
-    const played = evMatches.filter(m => m.status === "played" && m.score1 != null && matchesTerm(m));
-    if (!played.length) return h + '<div class="empty">No results yet.</div>';
-    if (koMs.some(m => m.status === "played" && m.score1 != null)){
-      const total = Math.max(...koMs.map(x => x.bracket_round));
-      for(let r = total; r >= 1; r--){
-        const list = played.filter(m => m.stage === "knockout" && m.bracket_round === r);
-        if (!list.length) continue;
-        h += '<div class="roundblock"><h3>' + roundLabelFor(r, total) + '</h3>' + list.map(m => srow(m, true)).join("") + '</div>';
-      }
-    }
-    for(const g of groups){
-      if (state.groupFilter !== "all" && state.groupFilter !== g) continue;
-      const list = played.filter(m => m.stage === "group" && m.group_name === g).sort((a, b) => a.round - b.round || a.play_order - b.play_order);
-      if (!list.length) continue;
-      h += '<div class="roundblock"><h3>Group ' + g + '</h3>' + list.map(m => srow(m, true)).join("") + '</div>';
-    }
-    return h;
+    '<button class="gchip" aria-current="' + (state.roundFilter === "all") + '" onclick="setRoundFilter(\'all\')">All</button>';
+  for(let r = 1; r <= maxRound; r++){
+    h += '<button class="gchip" aria-current="' + (state.roundFilter === String(r)) + '" onclick="setRoundFilter(\'' + r + '\')">Round ' + r + '</button>';
   }
+  if (koMs.length) h += '<button class="gchip" aria-current="' + (state.roundFilter === "ko") + '" onclick="setRoundFilter(\'ko\')">Knockout</button>';
+  h += '</div>';
 
-  if (state.groupFilter === "ko"){
+  const matchesTerm = termFilterFor();
+
+  if (state.roundFilter === "ko"){
     if (!koMs.length) return h + '<div class="empty">No knockout matches yet.</div>';
     const total = Math.max(...koMs.map(x => x.bracket_round));
     for(let r = 1; r <= total; r++){
       const list = koMs.filter(m => m.bracket_round === r && matchesTerm(m)).sort((a, b) => a.bracket_pos - b.bracket_pos);
       if (!list.length) continue;
-      h += '<div class="roundblock"><h3>' + roundLabelFor(r, total) + '</h3>' + list.map(m => srow(m, true)).join("") + '</div>';
+      h += '<div class="roundblock"><h3>' + roundLabelFor(r, total) + '</h3>' + list.map(m => scheduleRow(m, true)).join("") + '</div>';
     }
     return h;
   }
 
-  const shown = groupMs.filter(m => (state.groupFilter === "all" || m.group_name === state.groupFilter) && matchesTerm(m));
+  const shown = groupMs.filter(m => (state.roundFilter === "all" || String(m.round) === state.roundFilter) && matchesTerm(m));
   if (!shown.length) return h + '<div class="empty">No matches found.</div>';
-  const maxRound = Math.max(...shown.map(m => m.round));
   for(let r = 1; r <= maxRound; r++){
     const list = shown.filter(m => m.round === r).sort((a, b) => a.play_order - b.play_order);
     if (!list.length) continue;
-    h += '<div class="roundblock"><h3>Round ' + r + '</h3>' + list.map(m => srow(m, false)).join("") + '</div>';
+    h += '<div class="roundblock"><h3>Round ' + r + '</h3>' + list.map(m => scheduleRow(m, false)).join("") + '</div>';
   }
-  h += '<p class="note">Matches run in this order, group A first, so everyone plays round 1 before round 2 starts. Tap a match to enter its score. Scores live under Results and in Standings.</p>';
+  h += '<p class="note">Matches run in this order, group A first, so everyone plays round 1 before round 2 starts. Tap a match to enter its score. Scores live in Results and Standings.</p>';
+  return h;
+}
+
+function renderResults(){
+  const ev = currentEvent();
+  if (!ev) return '<div class="empty">No events yet.</div>';
+  const evMatches = data.matches.filter(m => m.event_id === ev.id);
+  const matchesTerm = termFilterFor();
+  const played = evMatches.filter(m => m.status === "played" && m.score1 != null && matchesTerm(m));
+
+  let h = '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + ' · Results</span>';
+  h += '<div class="controls">' +
+    '<input class="search" id="search-input" type="text" placeholder="Find a name" value="' + esc(state.search) + '" oninput="setSearch(this.value)">' +
+    '<button class="btn small secondary" onclick="window.print()">Print</button></div>';
+  if (!played.length) return h + '<div class="empty">No results yet for ' + esc(ev.name) + '.</div>';
+
+  const koMs = evMatches.filter(m => m.stage === "knockout");
+  if (koMs.some(m => m.status === "played" && m.score1 != null)){
+    const total = Math.max(...koMs.map(x => x.bracket_round));
+    for(let r = total; r >= 1; r--){
+      const list = played.filter(m => m.stage === "knockout" && m.bracket_round === r);
+      if (!list.length) continue;
+      h += '<div class="roundblock"><h3>' + roundLabelFor(r, total) + '</h3>' + list.map(m => scheduleRow(m, true)).join("") + '</div>';
+    }
+  }
+  for(const g of groupsOfEvent(ev)){
+    const list = played.filter(m => m.stage === "group" && m.group_name === g).sort((a, b) => a.round - b.round || a.play_order - b.play_order);
+    if (!list.length) continue;
+    h += '<div class="roundblock"><h3>Group ' + g + '</h3>' + list.map(m => scheduleRow(m, true)).join("") + '</div>';
+  }
   return h;
 }
 
@@ -1404,17 +1519,24 @@ function renderBracket(){
     if (!groups.length) return '<div class="empty">' + esc(ev.name) + ' has no groups yet.</div>';
     const field = seedFieldFor(ev);
     const left = data.matches.filter(m => m.event_id === ev.id && m.stage === "group" && m.status === "scheduled").length;
-    let h = '<div class="section-h"><h2>Projected seeding</h2><span class="hint">' +
+    const pairs = bracketPairs(field.seeds);
+    const seedNum = s => s ? field.seeds.indexOf(s) + 1 : null;
+    const side = s => {
+      if (!s) return '<span class="qv">BYE</span>';
+      return '<span class="stag">' + esc(s.group) + s.place + '</span> ' + esc(s.name) +
+        (s.wildcard ? ' <span class="tag warn">Best ' + ordinal(s.place) + '</span>' : '');
+    };
+    let h = '<div class="section-h"><h2>Projected matchups</h2><span class="hint">' +
       (left ? 'Live, ' + left + ' group matches to go' : 'Group play complete') + '</span></div>';
     h += '<div class="seedlist">';
-    field.seeds.forEach((s, i) => {
-      h += '<div class="seedrow"><span class="snum">' + (i + 1) + '</span>' +
-        '<span class="sname">' + esc(s.name) + (s.wildcard ? ' <span class="tag warn">Best ' + ordinal(s.place) + '</span>' : '') + '</span>' +
-        '<span class="srec">Group ' + esc(s.group) + ' · ' + s.w + '-' + s.l + '</span></div>';
+    pairs.forEach((p, i) => {
+      h += '<div class="seedrow"><span class="snum">' + (seedNum(p[0]) || '') + '</span>' +
+        '<span class="sname">' + side(p[0]) + ' <span class="qv">vs</span> ' + side(p[1]) + '</span></div>';
     });
     h += '</div>';
-    h += '<p class="note">' + field.seeds.length + ' qualify for a ' + field.size + '-slot bracket' +
-      (field.wildcards ? ', including ' + field.wildcards + ' wildcard' + (field.wildcards > 1 ? 's' : '') + ' from the next places to fill it' : '') +
+    h += '<p class="note">A1 means the group A winner, C2 the group C runner-up, based on standings right now. ' +
+      field.seeds.length + ' qualify for a ' + field.size + '-slot bracket' +
+      (field.wildcards ? ', including ' + field.wildcards + ' wildcard' + (field.wildcards > 1 ? 's' : '') + ' from the next places' : '') +
       '. The bracket is created when the desk confirms the group stage is finished.</p>';
     return h;
   }
@@ -1434,6 +1556,7 @@ function renderBracket(){
       let c = '<' + (clickable ? 'button' : 'div') + ' class="bmatch"' + (clickable ? ' onclick="openMatch(\'' + m.id + '\')"' : '') + '>';
       c += '<div class="brow"><span class="bteam' + (n1 ? (w1 ? ' win' : '') : ' tbd') + '">' + esc(n1 || "TBD") + '</span>' + (played ? '<span class="bscore">' + m.score1 + '</span>' : '') + '</div>';
       c += '<div class="brow"><span class="bteam' + (n2 ? (w2 ? ' win' : '') : ' tbd') + '">' + esc(n2 || (bye ? "BYE" : "TBD")) + '</span>' + (played ? '<span class="bscore">' + m.score2 + '</span>' : '') + '</div>';
+      if (m.walkover) c += '<div class="brow"><span class="tag warn">W/O</span></div>';
       if (state.adminPin && m.status === "scheduled" && !bye){
         c += '<div class="bedit"><span onclick="event.stopPropagation();openSlotEditor(\'' + m.id + '\')" role="button" tabindex="0">Edit teams</span></div>';
       }
@@ -1453,7 +1576,6 @@ function renderBracket(){
   h += '</div></div></div>';
   return h;
 }
-function ordinal(n){ return n + (n === 1 ? "st" : n === 2 ? "nd" : n === 3 ? "rd" : "th"); }
 
 /* ---------- admin ---------- */
 function renderAdmin(){
@@ -1481,6 +1603,7 @@ function renderAdmin(){
     const koCount = data.matches.filter(m => m.event_id === ev.id && m.stage === "knockout").length;
     const alloc = evSetting(ev, "courts", []);
     const evEntrants = data.entrants.filter(e => e.event_id === ev.id);
+    const groups = groupsOfEvent(ev);
     const bog = evSetting(ev, "best_of_group", 1), bok = evSetting(ev, "best_of_knockout", 1);
     const ksize = String(evSetting(ev, "knockout_size", "auto"));
 
@@ -1489,73 +1612,87 @@ function renderAdmin(){
       (ev.active ? '<span class="tag good">Running · courts ' + alloc.join(", ") + '</span>' : '<span class="tag plain">Not started</span>') +
       (koCount ? '<span class="tag">Knockout</span>' : '') + '</div>';
 
-    h += '<h4>1 · Players and groups</h4>';
-    if (hasMatches){
-      h += '<p class="note">' + evEntrants.length + ' entrants in ' + groupsOfEvent(ev).length + ' groups. Rebuilding below replaces everything for this event, including scores. For small fixes use the team list instead.</p>';
-    } else {
-      h += '<p class="note">Paste entrants one per line. For doubles use one line per team, e.g. "Maya &amp; Owen".</p>';
-    }
-    h += '<div class="field"><label for="adm-teams">Entrants (one per line)</label><textarea id="adm-teams" placeholder="One team or player per line"></textarea></div>' +
-      '<div class="fieldrow">' +
-      '<div class="field"><label for="adm-gsize">Target group size</label><input id="adm-gsize" type="number" min="3" max="10" value="' + evSetting(ev, "group_size", 6) + '"></div>' +
+    h += '<h4>1 · Format and rules</h4>';
+    h += '<div class="fieldrow">' +
       '<div class="field"><label for="adm-ptg">Group games to</label><input id="adm-ptg" type="number" min="5" max="51" value="' + evSetting(ev, "points_to_group", 21) + '"></div>' +
       '<div class="field"><label for="adm-bog">Group format</label><select id="adm-bog">' +
         [1,3,5].map(n => '<option value="' + n + '"' + (bog == n ? ' selected' : '') + '>Best of ' + n + '</option>').join("") + '</select></div>' +
-      '</div><div class="fieldrow">' +
       '<div class="field"><label for="adm-ptk">Knockout games to</label><input id="adm-ptk" type="number" min="5" max="51" value="' + evSetting(ev, "points_to_knockout", 21) + '"></div>' +
       '<div class="field"><label for="adm-bok">Knockout format</label><select id="adm-bok">' +
         [1,3,5].map(n => '<option value="' + n + '"' + (bok == n ? ' selected' : '') + '>Best of ' + n + '</option>').join("") + '</select></div>' +
+      '</div><div class="fieldrow">' +
       '<div class="field"><label for="adm-ksize">Knockout size</label><select id="adm-ksize">' +
         ['auto',4,8,16,32].map(v => '<option value="' + v + '"' + (ksize == String(v) ? ' selected' : '') + '>' + (v === 'auto' ? 'Auto' : v + ' teams') + '</option>').join("") + '</select></div>' +
       '<div class="field"><label for="adm-adv">Advance per group (auto)</label><input id="adm-adv" type="number" min="1" max="4" value="' + evSetting(ev, "advance_per_group", 2) + '"></div>' +
       '</div>' +
-      '<label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-bottom:10px"><input type="checkbox" id="adm-shuffle" checked> Random draw</label>' +
-      '<button class="btn small secondary" onclick="previewSetup()">Preview</button> ' +
-      '<button class="btn small ' + (hasMatches ? 'danger' : '') + '" onclick="applySetup()">' + (hasMatches ? 'Rebuild groups' : 'Draw groups') + '</button>' +
-      ' <button class="btn small secondary" onclick="saveEventSettings()">Save settings only</button>' +
-      (state.setupPreview ? '<div class="preview-box">' + esc(state.setupPreview) + '</div>' : '') +
-      '<p class="note" style="margin-top:8px">Formats, point targets, and knockout size can be changed any time with "Save settings only". Group size needs a rebuild. "Auto" knockout size takes the top ' + evSetting(ev, "advance_per_group", 2) + ' per group and fills to a full bracket with the best next-placed teams.</p>';
+      '<button class="btn small secondary" onclick="saveEventSettings()">Save settings</button>' +
+      '<p class="note" style="margin-top:8px">Changes apply right away. "Auto" knockout size takes the top ' + evSetting(ev, "advance_per_group", 2) + ' per group and fills to a full bracket with best next-placed teams; a fixed size does the same math for that exact number.</p>';
+
+    if (!hasMatches || state.showRedraw){
+      h += '<div class="divider"></div><h4>' + (hasMatches ? 'Start over with a new list' : '2 · Draw groups') + '</h4>';
+      h += '<p class="note">Paste entrants one per line. For doubles use one line per team, e.g. "Maya &amp; Owen".</p>';
+      h += '<div class="field"><label for="adm-teams">Entrants (one per line)</label><textarea id="adm-teams" placeholder="One team or player per line"></textarea></div>' +
+        '<div class="fieldrow"><div class="field"><label for="adm-gsize">Target group size</label><input id="adm-gsize" type="number" min="3" max="10" value="' + evSetting(ev, "group_size", 6) + '"></div>' +
+        '<div class="field" style="display:flex;align-items:flex-end"><label style="display:flex;align-items:center;gap:6px;margin:0;padding-bottom:10px"><input type="checkbox" id="adm-shuffle" checked> Random draw</label></div></div>' +
+        '<button class="btn small secondary" onclick="previewSetup()">Preview</button> ' +
+        (hasMatches
+          ? '<button class="btn small danger" onclick="applySetup()">Draw new groups (wipes this event)</button> <button class="btn small secondary" onclick="toggleRedraw()">Cancel</button>'
+          : '<button class="btn small" onclick="applySetup()">Draw groups</button>') +
+        (state.setupPreview ? '<div class="preview-box">' + esc(state.setupPreview) + '</div>' : '');
+    }
 
     if (evEntrants.length){
-      h += '<details class="teamlist"><summary>Team list (' + evEntrants.length + ') · rename, remove, add</summary>';
+      const nextLetter = groupLetter(groups.length);
+      h += '<div class="divider"></div><h4>' + (hasMatches ? '2 · Teams and groups' : 'Teams') + '</h4>';
+      h += '<details class="teamlist"><summary>Team list (' + evEntrants.length + ' in ' + groups.length + ' groups) · rename, move, remove, add</summary>';
       const byGroup = {};
       evEntrants.forEach(e => { (byGroup[e.group_name] = byGroup[e.group_name] || []).push(e); });
       Object.keys(byGroup).sort().forEach(g => {
         byGroup[g].forEach(e => {
           h += '<div class="queue-row"><span class="qnames">' + esc(e.name) + '</span><span class="qtag">Group ' + esc(g) + '</span>' +
-            '<span class="queue-actions"><button class="btn small secondary" onclick="renameEntrant(\'' + e.id + '\')">Rename</button>' +
+            '<span class="queue-actions">' +
+            '<select class="mv" onchange="moveEntrant(\'' + e.id + '\', this.value); this.value=\'\'">' +
+            '<option value="">Move…</option>' +
+            groups.filter(x => x !== g).map(x => '<option value="' + x + '">To ' + x + '</option>').join("") +
+            '<option value="__new">New group ' + nextLetter + '</option></select>' +
+            '<button class="btn small secondary" onclick="renameEntrant(\'' + e.id + '\')">Rename</button>' +
             '<button class="btn small danger" onclick="removeEntrant(\'' + e.id + '\')">Remove</button></span></div>';
         });
       });
       h += '<div class="addteam"><input id="add-team-name" type="text" placeholder="New team or player">' +
-        '<select id="add-team-group">' + groupsOfEvent(ev).map(g => '<option value="' + g + '">Group ' + g + '</option>').join("") + '</select>' +
-        '<button class="btn small" onclick="addTeamToGroup()">Add</button></div>' +
-      '<p class="note" style="margin-top:6px">Removing a team also removes its matches and results. Adding one creates catch-up matches against everyone in the group, added to the end of the queue.</p></details>';
+        '<select id="add-team-group">' + groups.map(g => '<option value="' + g + '">Group ' + g + '</option>').join("") + '</select>' +
+        '<button class="btn small secondary" onclick="addTeamToGroup()">Add</button></div>' +
+        '<p class="note" style="margin-top:6px">Moving or removing a team also removes its matches (and results). New or moved teams get catch-up matches at the end of the queue.</p></details>';
+      if (hasMatches && !state.showRedraw){
+        h += '<p class="note"><button class="btn small secondary" onclick="toggleRedraw()">Start over with a new list</button></p>';
+      }
     }
 
-    h += '<div class="divider"></div><h4>2 · Courts and start</h4>';
+    h += '<div class="divider"></div><h4>3 · Courts and start</h4>';
     h += '<div class="courtchecks">';
     for(let c = 1; c <= courtsCount(); c++){
-      h += '<label><input type="checkbox" class="adm-court" value="' + c + '"' + (alloc.includes(c) ? ' checked' : '') + '> Court ' + c + '</label>';
+      const holder = data.events.find(e => e.active && e.id !== ev.id && (evSetting(e, "courts", [])).includes(c));
+      h += '<label><input type="checkbox" class="adm-court" value="' + c + '"' + (alloc.includes(c) ? ' checked' : '') + '> Court ' + c +
+        (holder ? ' <span class="holder">(' + esc(holder.name) + ')</span>' : '') + '</label>';
     }
     h += '</div>';
     h += '<div class="field" style="margin-top:6px"><label for="adm-note">Schedule note (shown to players, e.g. "Sat 9am")</label>' +
       '<input id="adm-note" type="text" value="' + esc(evSetting(ev, "schedule_note", "")) + '"></div>';
     h += '<button class="btn small secondary" onclick="saveCourts()">Save courts and note</button> ';
     h += ev.active
-      ? '<button class="btn small danger" onclick="setActive(false)">Pause event</button>'
+      ? '<button class="btn small secondary" onclick="setActive(false)">Pause event</button>'
       : '<button class="btn small" onclick="setActive(true)">Start event</button>';
-    h += '<p class="note" style="margin-top:8px">Starting fills its courts from the queue. Court changes apply immediately, so two events can split the 4 courts and be rebalanced mid-day. Pausing frees its courts.</p>';
+    h += '<p class="note" style="margin-top:8px">Ticking a court another running event holds will ask to take it over, no pausing needed. Court changes apply immediately.</p>';
 
-    h += '<div class="divider"></div><h4>3 · Finish group stage</h4>';
+    h += '<div class="divider"></div><h4>4 · Finish group stage</h4>';
     if (koCount){
       h += '<p class="note">Knockout bracket is live (' + koCount + ' matches).</p>' +
         '<button class="btn small secondary" onclick="confirmGroupStage()">Redo bracket from standings</button> ' +
-        '<button class="btn small danger" onclick="resetBracket()">Back to group stage</button>';
+        '<button class="btn small secondary" onclick="resetBracket()">Back to group stage</button>';
     } else {
       h += '<p class="note">' + (groupLeft ? groupLeft + ' group matches still unplayed. ' : 'Group play is complete. ') +
-        'Check the projected seeding on the Bracket tab, then confirm to create the knockout.</p>' +
-        '<button class="btn small" ' + (hasMatches ? '' : 'disabled') + ' onclick="confirmGroupStage()">Confirm group stage finished</button>';
+        'Check the projected matchups on the Bracket tab, then confirm to create the knockout.</p>' +
+        '<button class="btn small' + (groupLeft ? ' secondary' : '') + '" ' + (hasMatches ? '' : 'disabled') + ' onclick="confirmGroupStage()">Confirm group stage finished</button>';
     }
 
     h += '<div class="divider"></div><button class="btn small danger" onclick="deleteEvent()">Delete this event</button>';
@@ -1563,16 +1700,16 @@ function renderAdmin(){
   }
 
   h += '<div class="panel"><h3>Admin powers on the other tabs</h3><p class="note">' +
-    'While unlocked: tap any match anywhere (Courts, Schedule, Results, a team in Standings, or the Bracket) to fix or clear its score. ' +
-    'Postpone no-shows from the Courts tab. ' +
-    'On the Bracket tab, unplayed matches have an "Edit teams" link for manual fixes. ' +
+    'While unlocked: tap any match anywhere (Courts, Schedule, Results, a team in Standings, or the Bracket) to fix or clear its score, enter a walkover, or postpone. ' +
+    'The Courts tab has Postpone on the queue and Play next on postponed matches, plus ✓ On court to dismiss a "go to court" banner. ' +
+    'On the Bracket tab, unplayed matches have an Edit teams link for manual fixes. ' +
     'Everything updates live on everyone\'s phone.</p></div>';
 
   if (store.mode === "live"){
     h += '<div class="panel"><h3>Change PIN</h3><div class="fieldrow">' +
       '<div class="field"><label for="adm-oldpin">Current PIN</label><input id="adm-oldpin" type="password"></div>' +
       '<div class="field"><label for="adm-newpin">New PIN</label><input id="adm-newpin" type="password"></div></div>' +
-      '<button class="btn small" onclick="doChangePin()">Change PIN</button></div>';
+      '<button class="btn small secondary" onclick="doChangePin()">Change PIN</button></div>';
   }
   h += '<p style="margin-top:6px"><button class="btn secondary small" onclick="adminSignOut()">Sign out of admin</button></p>';
   return h;
@@ -1595,11 +1732,29 @@ function renderScoreModal(){
   h += '<div class="sub">' + esc(ev ? ev.name : '') + ' · ' + esc(roundName(m)) + (m.court != null && !played ? ' · Court ' + m.court : '') +
     ' · ' + (bo > 1 ? 'best of ' + bo + ', games' : 'first') + ' to ' + pts + '</div>';
 
+  const adminExtras = () => {
+    let x = '';
+    if (isAdmin && m.status === "scheduled"){
+      x += '<button class="btn small secondary" onclick="postpone(\'' + m.id + '\', false, true)">Postpone</button>' +
+        '<button class="btn small secondary" onclick="postpone(\'' + m.id + '\', true, true)">To end</button>';
+    }
+    if (isAdmin && played) x += '<button class="btn small danger" onclick="clearScore(\'' + m.id + '\')">Clear score</button>';
+    return x;
+  };
+  const walkoverRow = () => {
+    if (!isAdmin || !m.entrant1_id || !m.entrant2_id) return '';
+    return '<p class="note" style="margin-top:10px">No-show? Record a walkover win:</p>' +
+      '<div class="actions" style="margin-top:4px">' +
+      '<button class="btn small secondary" onclick="walkover(\'' + m.id + '\', 1)">W/O · ' + esc(n1) + '</button>' +
+      '<button class="btn small secondary" onclick="walkover(\'' + m.id + '\', 2)">W/O · ' + esc(n2) + '</button></div>';
+  };
+
   if (played && !isAdmin){
     h += '<div class="score-line"><label>' + esc(n1) + '</label><span style="font-size:22px;font-weight:800;font-variant-numeric:tabular-nums">' + m.score1 + '</span></div>';
     h += '<div class="score-line"><label>' + esc(n2) + '</label><span style="font-size:22px;font-weight:800;font-variant-numeric:tabular-nums">' + m.score2 + '</span></div>';
     const gs = gamesStr(m);
     if (gs) h += '<p class="note">Games: ' + esc(gs) + '</p>';
+    if (m.walkover) h += '<p class="note">Walkover.</p>';
     h += '<p class="note">Score already recorded. Spot a mistake? Ask at the desk and an organizer can fix it.</p>';
     h += '<div class="actions"><span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Close</button></div>';
   } else if (bo > 1){
@@ -1613,27 +1768,19 @@ function renderScoreModal(){
     h += '<div class="err" id="score-err"></div>';
     h += '<p class="note">Fill games in order and leave unplayed games blank. First to ' + (Math.floor(bo / 2) + 1) + ' game wins takes the match.</p>';
     if (!isAdmin) h += '<p class="note">One entry per match: after that, corrections go through the desk.</p>';
-    h += '<div class="actions">';
-    if (isAdmin && m.status === "scheduled"){
-      h += '<button class="btn small secondary" onclick="postpone(\'' + m.id + '\', false, true)">Postpone</button>' +
-        '<button class="btn small secondary" onclick="postpone(\'' + m.id + '\', true, true)">To end</button>';
-    }
-    if (isAdmin && played) h += '<button class="btn small danger" onclick="clearScore(\'' + m.id + '\')">Clear score</button>';
-    h += '<span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Cancel</button>' +
+    h += '<div class="actions">' + adminExtras() +
+      '<span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Cancel</button>' +
       '<button class="btn" onclick="saveScore(\'' + m.id + '\')">' + (isAdmin ? 'Save (admin)' : 'Save score') + '</button></div>';
+    h += walkoverRow();
   } else {
     h += '<div class="score-line"><label for="score1">' + esc(n1) + '</label><input class="score-in" id="score1" type="number" inputmode="numeric" min="0" value="' + (played ? m.score1 : '') + '"></div>';
     h += '<div class="score-line"><label for="score2">' + esc(n2) + '</label><input class="score-in" id="score2" type="number" inputmode="numeric" min="0" value="' + (played ? m.score2 : '') + '"></div>';
     h += '<div class="err" id="score-err"></div>';
     if (!isAdmin) h += '<p class="note">Winners report the score. One entry per match: after that, corrections go through the desk.</p>';
-    h += '<div class="actions">';
-    if (isAdmin && m.status === "scheduled"){
-      h += '<button class="btn small secondary" onclick="postpone(\'' + m.id + '\', false, true)">Postpone</button>' +
-        '<button class="btn small secondary" onclick="postpone(\'' + m.id + '\', true, true)">To end</button>';
-    }
-    if (isAdmin && played) h += '<button class="btn small danger" onclick="clearScore(\'' + m.id + '\')">Clear score</button>';
-    h += '<span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Cancel</button>' +
+    h += '<div class="actions">' + adminExtras() +
+      '<span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Cancel</button>' +
       '<button class="btn" onclick="saveScore(\'' + m.id + '\')">' + (isAdmin ? 'Save (admin)' : 'Save score') + '</button></div>';
+    h += walkoverRow();
   }
   h += '</div></div>';
   return h;
@@ -1668,6 +1815,7 @@ function renderTeamModal(){
       const theirs = m.entrant1_id === e.id ? m.score2 : m.score1;
       const gs = gamesStr(m);
       res = '<span class="tmres ' + (mine > theirs ? 'w' : 'l') + '">' + (mine > theirs ? 'W' : 'L') + ' ' + mine + '-' + theirs +
+        (m.walkover ? ' <span class="tmgames">W/O</span>' : '') +
         (gs ? ' <span class="tmgames">(' + esc(gs) + ')</span>' : '') + '</span>';
     } else if (bye){
       res = '<span class="tmres pending">Bye</span>';
@@ -1713,10 +1861,11 @@ function renderSlotModal(){
 
 /* ---------- actions ---------- */
 function setView(v){ state.view = v; state.setupPreview = null; render(); }
-function setEvent(id){ state.eventId = id; state.groupFilter = "all"; render(); }
-function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; render(); }
-function setGroupFilter(g){ state.groupFilter = g; render(); }
-function setSchedMode(m){ state.schedMode = m; render(); }
+function setEvent(id){ state.eventId = id; state.roundFilter = "all"; render(); }
+function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; render(); }
+function setRoundFilter(r){ state.roundFilter = String(r); render(); }
+function toggleAllQueue(){ state.showAllQueue = !state.showAllQueue; render(); }
+function toggleRedraw(){ state.showRedraw = !state.showRedraw; state.setupPreview = null; render(); }
 let searchT = null;
 function setSearch(v){ state.search = v; clearTimeout(searchT); searchT = setTimeout(render, 150); }
 function openMatch(id){ state.modalMatchId = id; render(); }
@@ -1731,6 +1880,13 @@ document.addEventListener("keydown", e => {
     else if (state.slotEditId) closeSlotEditor();
     else if (state.teamModalId) closeTeam();
   }
+});
+document.addEventListener("focusout", () => {
+  setTimeout(() => {
+    const ae = document.activeElement;
+    const typing = ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
+    if (state.pendingRender && !typing){ state.pendingRender = false; render(); }
+  }, 60);
 });
 
 async function reload(){
@@ -1763,18 +1919,32 @@ async function saveScore(matchId){
   if (bo > 1){
     const games = collectGames(bo);
     r = state.adminPin
-      ? await store.adminSubmitScore(state.adminPin, matchId, null, null, games)
+      ? await store.adminSubmitScore(state.adminPin, matchId, null, null, games, false)
       : await store.submitScore(matchId, null, null, games);
   } else {
     const s1 = parseInt(document.getElementById("score1").value, 10);
     const s2 = parseInt(document.getElementById("score2").value, 10);
     r = state.adminPin
-      ? await store.adminSubmitScore(state.adminPin, matchId, s1, s2)
+      ? await store.adminSubmitScore(state.adminPin, matchId, s1, s2, null, false)
       : await store.submitScore(matchId, s1, s2);
   }
   if (!r.ok){ errEl.textContent = r.error || "Something went wrong."; return; }
   state.modalMatchId = null;
   toast("Score saved");
+  await reload();
+}
+async function walkover(matchId, side){
+  const m = data.matches.find(x => x.id === matchId);
+  if (!m) return;
+  const winner = entrantName(side === 1 ? m.entrant1_id : m.entrant2_id);
+  if (!confirm("Record a walkover win for " + winner + "?")) return;
+  const bo = matchBestOf(m);
+  const pts = bo > 1 ? Math.floor(bo / 2) + 1 : matchPts(m);
+  const s1 = side === 1 ? pts : 0, s2 = side === 1 ? 0 : pts;
+  const r = await store.adminSubmitScore(state.adminPin, matchId, s1, s2, null, true);
+  if (!r.ok){ const errEl = document.getElementById("score-err"); if (errEl) errEl.textContent = r.error; else toast(r.error); return; }
+  state.modalMatchId = null;
+  toast("Walkover recorded");
   await reload();
 }
 async function clearScore(matchId){
@@ -1790,6 +1960,17 @@ async function postpone(matchId, toEnd, fromModal){
   if (!r.ok){ toast(r.error || "Could not postpone."); return; }
   if (fromModal) state.modalMatchId = null;
   toast(toEnd ? "Moved to the end of the queue" : "Postponed");
+  await reload();
+}
+async function playNext(matchId){
+  const r = await store.adminPlayNext(state.adminPin, matchId);
+  if (!r.ok){ toast(r.error || "Could not move it."); return; }
+  toast("Moved to the front of the queue");
+  await reload();
+}
+async function ackCalled(matchId){
+  const r = await store.adminAckCalled(state.adminPin, matchId);
+  if (!r.ok){ toast(r.error); return; }
   await reload();
 }
 async function saveSlots(matchId){
@@ -1815,17 +1996,17 @@ async function tryUnlock(){
 function adminSignOut(){ state.adminPin = null; safeSession("pb_admin_pin", null); render(); }
 
 function readEventSettings(ev){
-  const gsizeEl = document.getElementById("adm-gsize");
+  const num = (id, dflt) => { const el = document.getElementById(id); return el ? (parseInt(el.value, 10) || dflt) : dflt; };
   const ksEl = document.getElementById("adm-ksize");
-  const ks = ksEl ? ksEl.value : "auto";
+  const ks = ksEl ? ksEl.value : String(evSetting(ev, "knockout_size", "auto"));
   return Object.assign({}, ev.settings, {
-    points_to_group: Math.max(1, parseInt(document.getElementById("adm-ptg").value, 10) || 21),
-    points_to_knockout: Math.max(1, parseInt(document.getElementById("adm-ptk").value, 10) || 21),
-    best_of_group: parseInt(document.getElementById("adm-bog").value, 10) || 1,
-    best_of_knockout: parseInt(document.getElementById("adm-bok").value, 10) || 1,
+    points_to_group: Math.max(1, num("adm-ptg", evSetting(ev, "points_to_group", 21))),
+    points_to_knockout: Math.max(1, num("adm-ptk", evSetting(ev, "points_to_knockout", 21))),
+    best_of_group: num("adm-bog", evSetting(ev, "best_of_group", 1)),
+    best_of_knockout: num("adm-bok", evSetting(ev, "best_of_knockout", 1)),
     knockout_size: ks === "auto" ? "auto" : parseInt(ks, 10),
-    advance_per_group: Math.max(1, parseInt(document.getElementById("adm-adv").value, 10) || 2),
-    group_size: Math.max(3, parseInt(gsizeEl ? gsizeEl.value : 6, 10) || 6)
+    advance_per_group: Math.max(1, num("adm-adv", evSetting(ev, "advance_per_group", 2))),
+    group_size: Math.max(3, num("adm-gsize", evSetting(ev, "group_size", 6)))
   });
 }
 async function saveEventSettings(){
@@ -1840,6 +2021,21 @@ async function saveCourts(){
   if (!ev) return;
   const courts = [...document.querySelectorAll(".adm-court:checked")].map(el => parseInt(el.value, 10));
   const note = document.getElementById("adm-note").value.trim();
+
+  const others = data.events.filter(e => e.active && e.id !== ev.id);
+  const conflicts = others
+    .map(o => ({ o, overlap: (evSetting(o, "courts", [])).filter(c => courts.includes(c)) }))
+    .filter(x => x.overlap.length);
+  if (conflicts.length){
+    const desc = conflicts.map(x => "court " + x.overlap.join(", ") + " from " + x.o.name).join(" and ");
+    if (!confirm("Take " + desc + " and give it to " + ev.name + "?")) return;
+    for(const x of conflicts){
+      const ns = Object.assign({}, x.o.settings, { courts: (evSetting(x.o, "courts", [])).filter(c => !x.overlap.includes(c)) });
+      const rr = await store.adminUpdateEvent(state.adminPin, x.o.id, x.o.name, ns);
+      if (!rr.ok){ toast(rr.error); return; }
+    }
+  }
+
   const settings = Object.assign({}, ev.settings, { courts, schedule_note: note });
   const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, settings);
   if (!r.ok){ toast(r.error); return; }
@@ -1889,6 +2085,23 @@ async function removeEntrant(id){
   const r = await store.adminRemoveEntrant(state.adminPin, id);
   if (!r.ok){ toast(r.error); return; }
   toast("Removed"); await reload();
+}
+async function moveEntrant(id, target){
+  if (!target) return;
+  const e = entrantById(id);
+  if (!e) return;
+  const ev = eventById(e.event_id);
+  const group = target === "__new" ? groupLetter(groupsOfEvent(ev).length) : target;
+  if (!confirm('Move "' + e.name + '" to group ' + group + '? Their existing matches and results are replaced with catch-up matches.')) { render(); return; }
+  const members = data.entrants.filter(x => x.event_id === e.event_id && x.group_name === group && x.id !== id);
+  const groupMs = data.matches.filter(m => m.event_id === e.event_id && m.stage === "group" && m.group_name === group);
+  const startRound = Math.max(0, ...groupMs.map(m => m.round || 0)) + 1;
+  const maxOrder = Math.max(0, ...data.matches.filter(m => m.event_id === e.event_id).map(m => m.play_order || 0));
+  const matches = buildCatchupMatches(e.event_id, group, id, members.map(x => x.id), startRound, maxOrder);
+  const r = await store.adminMoveEntrant(state.adminPin, id, group, matches);
+  if (!r.ok){ toast(r.error); return; }
+  toast(e.name + " moved to group " + group);
+  await reload();
 }
 async function addTeamToGroup(){
   const ev = eventById(state.adminEventId);
@@ -1949,7 +2162,7 @@ async function applySetup(){
   if (dupes.length){ state.setupPreview = "Duplicate entries: " + [...new Set(dupes)].join(", "); render(); return; }
   const hasMatches = data.matches.some(m => m.event_id === ev.id);
   const msg = hasMatches
-    ? 'Rebuild "' + ev.name + '" with ' + names.length + ' entrants? This wipes its groups, matches, and scores, and pauses it.'
+    ? 'Draw new groups for "' + ev.name + '" with ' + names.length + ' entrants? This wipes its current groups, matches, and scores, and pauses it.'
     : 'Draw groups for "' + ev.name + '" with ' + names.length + ' entrants?';
   if (!confirm(msg)) return;
   const settings = readEventSettings(ev);
@@ -1964,6 +2177,7 @@ async function applySetup(){
   const r = await store.adminReplaceEvent(state.adminPin, ev.id, { name: ev.name, sort_order: ev.sort_order, settings }, entrants, matches);
   if (!r.ok){ toast(r.error); return; }
   state.setupPreview = null;
+  state.showRedraw = false;
   toast("Groups drawn. Pick courts and start when ready.");
   await reload();
 }
@@ -2017,6 +2231,12 @@ async function doChangePin(){
   }
   store.subscribe(reload);
   await reload();
+  /* Refresh so "go to court" banners expire on time, without stomping on forms. */
+  setInterval(() => {
+    const ae = document.activeElement;
+    const typing = ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
+    if (!document.hidden && !typing && !state.modalMatchId && !state.slotEditId && state.view !== "admin") render();
+  }, 45000);
   window.__APP_READY = true;
 })();
 </script>
