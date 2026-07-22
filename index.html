@@ -123,9 +123,9 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .boardnotes .note{display:block; padding:2px 0}
 
 /* ---------- schedule / results ---------- */
-.subtabs{display:flex; gap:2px; overflow-x:auto; margin:12px 0 2px; padding:4px 2px 0; border-bottom:1px solid var(--line)}
-.subtab{padding:9px 12px 10px; font-weight:700; font-size:14px; color:var(--muted); border-bottom:3px solid transparent; white-space:nowrap; flex-shrink:0; margin-bottom:-1px}
-.subtab[aria-current="true"]{color:var(--ink); border-bottom-color:var(--accent)}
+.subtabs{display:flex; flex-wrap:wrap; gap:6px; margin:12px 0 4px; padding:2px 0}
+.subtab{padding:6px 12px; font-weight:700; font-size:13.5px; color:var(--muted); background:var(--card); border:1px solid var(--line); border-radius:999px; white-space:nowrap}
+.subtab[aria-current="true"]{color:var(--accent); background:var(--accent-soft); border-color:var(--accent)}
 .controls{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin:12px 0 0}
 .search{flex:1; min-width:160px; padding:9px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card)}
 .roundblock{background:var(--card); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); padding:4px 14px 8px; margin:12px 0}
@@ -156,69 +156,58 @@ details.roundblock .hint{font-weight:600; letter-spacing:0; text-transform:none}
 .standings td.tname{text-align:left; font-weight:600; overflow-wrap:anywhere}
 .standings .pos{color:var(--muted); font-weight:700}
 
-/* ---------- bracket (split: rounds flow in from both edges, final in the center) ----------
-   Geometry rules that keep the elbows attached, do not break casually:
-   every column stretches to the same height; connectors hang off the
-   fixed-share slots (never off cell content); the champion block has a
-   fixed height that is mirrored as bottom padding on every other column. */
-.bkwrap{overflow-x:auto; padding:4px 0 12px; position:relative}
-.bk{display:flex; align-items:stretch; min-width:min-content;
-  --bk-gutter:18px; --bk-w-compact:150px; --bk-w-mid:160px; --bk-w-inner:172px; --bk-w-center:212px; --bk-champ-h:104px}
-@media (max-width:480px){
-  .bk{--bk-gutter:14px; --bk-w-compact:118px; --bk-w-mid:128px; --bk-w-inner:140px; --bk-w-center:168px}
-}
-.bkcol{display:flex; flex-direction:column; flex:1; position:relative}
-.bkcol[data-tier="compact"]{min-width:var(--bk-w-compact)}
-.bkcol[data-tier="mid"]{min-width:var(--bk-w-mid)}
-.bkcol[data-tier="inner"]{min-width:var(--bk-w-inner)}
-.bkcol[data-tier="center"]{min-width:var(--bk-w-center); z-index:0; padding:0 var(--bk-gutter)}
-.bkcenter-bg{position:absolute; inset:4px 2px 0; background:var(--court-soft); border-radius:16px; z-index:-1}
-.bkhead{text-align:center; margin:10px 0 8px; white-space:nowrap}
-.bkcol[data-tier="center"] .bkhead .microlabel{color:var(--court); font-size:12px}
-.bkbody{flex:1; display:flex; flex-direction:column}
-.bkcol:not([data-tier="center"]) .bkbody{padding-bottom:var(--bk-champ-h)}
-.bkpair{flex:1; display:flex; flex-direction:column; position:relative; min-width:0}
-.bkslot{flex:1; display:flex; flex-direction:column; justify-content:center; position:relative; min-width:0}
-.bkcol.out-right .bkpair{padding-right:var(--bk-gutter)}
-.bkcol.out-left .bkpair{padding-left:var(--bk-gutter)}
-.bkcol.out-right .bkpair.link::after{content:""; position:absolute; right:0; top:25%; height:50%; border-right:2px solid var(--bkline)}
-.bkcol.out-left .bkpair.link::after{content:""; position:absolute; left:0; top:25%; height:50%; border-left:2px solid var(--bkline)}
-.bkpair.solo::after{content:none}
-.bkcol.out-right .bkpair.link .bkslot::after{content:""; position:absolute; right:calc(-1*var(--bk-gutter)); top:50%; width:var(--bk-gutter); border-top:2px solid var(--bkline)}
-.bkcol.out-left .bkpair.link .bkslot::after{content:""; position:absolute; left:calc(-1*var(--bk-gutter)); top:50%; width:var(--bk-gutter); border-top:2px solid var(--bkline)}
-.bkcol.in-left{padding-left:var(--bk-gutter)}
-.bkcol.in-right{padding-right:var(--bk-gutter)}
-.bkcol.in-left .bkslot::before{content:""; position:absolute; left:calc(-1*var(--bk-gutter)); top:50%; width:var(--bk-gutter); border-top:2px solid var(--bkline)}
-.bkcol.in-right .bkslot::before{content:""; position:absolute; right:calc(-1*var(--bk-gutter)); top:50%; width:var(--bk-gutter); border-top:2px solid var(--bkline)}
-.bko{display:block; position:relative; width:100%; padding:0; text-align:left; border-radius:6px}
-/* Fixed row height (not a floor): no tag, score, or link can make one
-   sibling cell taller than the other, so pair splits stay exactly 50/50. */
-.bkrow{display:flex; align-items:flex-end; justify-content:space-between; gap:8px; height:27px; border-bottom:2px solid var(--bkline); padding:0 2px 3px; overflow:hidden}
-.bkcol[data-tier="center"] .bkrow{height:32px}
-.bkteam{min-width:0; flex:1; font-weight:600; font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-.bkteam.tbd{color:var(--muted); font-weight:400}
-.bkteam.win{color:var(--good); font-weight:800}
-.bkteam.seed{text-align:center}
-.bkscore{font-weight:800; font-variant-numeric:tabular-nums; font-size:13.5px}
-.bko.editable{padding-right:64px}
-.bkmain{display:block; width:100%; padding:0; text-align:left}
-.bedit{position:absolute; inset:0 0 0 auto; width:64px; display:flex; align-items:center; justify-content:center; text-align:center; font-size:11px; font-weight:700; color:var(--accent); line-height:1.2; padding:2px; border-radius:0 6px 6px 0}
-.bedit:hover,.bedit:focus-visible{background:var(--accent-soft)}
-.bkcol[data-tier="mid"] .bkteam{font-size:14px}
-.bkcol[data-tier="inner"] .bko{background:var(--card); border:1px solid var(--line); box-shadow:var(--shadow); padding:5px 6px}
-.bkcol[data-tier="inner"] .bkteam{font-size:14.5px}
-.bkcol[data-tier="inner"] .bko.editable{padding-right:66px}
-.bkcol[data-tier="center"] .bko{background:var(--card); border:1px solid var(--line); box-shadow:var(--shadow); padding:8px 10px; border-radius:10px}
-.bkcol[data-tier="center"] .bkteam{font-size:16px; font-weight:800}
-.bkcol[data-tier="center"] .bkscore{font-size:16px}
-.bkcol[data-tier="center"] .bko.editable{padding-right:70px}
-.bkchamp-wrap{height:var(--bk-champ-h); padding-top:2px}
-.bkchamp-tick{width:2px; height:14px; background:var(--bkline); margin:0 auto}
-.champ{background:var(--good); color:#fff; border-radius:10px; padding:12px 14px; text-align:center; font-weight:800; font-size:15px; border-top:3px solid var(--ball); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; animation:bkchamp .5s ease-out}
-@keyframes bkchamp{from{opacity:0; transform:scale(.92)} to{opacity:1; transform:scale(1)}}
-.champ .microlabel{color:#fff; opacity:.85}
-.champ.tbd{background:var(--card); color:var(--muted); border:1px dashed var(--bkline); font-weight:600; font-size:13px; border-top:1px dashed var(--bkline)}
-.champ.tbd .microlabel{color:var(--muted); opacity:1}
+/* ---------- bracket (single-sided, left to right: round 1 to champion) ----------
+   Matches are absolutely positioned inside each round's fixed-height body at
+   computed centres, so the elbow connectors always meet at the exact midpoint
+   between a pair and land on the next round's slot, at any bracket size. */
+.bkwrap{overflow-x:auto; -webkit-overflow-scrolling:touch; padding:2px 0 14px}
+.bk{display:flex; align-items:flex-start; width:max-content}
+.bkcol,.bkconn{display:flex; flex-direction:column; flex:0 0 auto}
+.bkhead{height:40px; margin-bottom:14px; display:flex; align-items:flex-end; padding-bottom:8px;
+  border-bottom:2px solid var(--court-soft); font-size:11.5px; font-weight:800; letter-spacing:.08em;
+  text-transform:uppercase; color:var(--court); white-space:nowrap}
+.bkconn .bkhead{border-bottom-color:transparent}
+.bkbody{position:relative; overflow:visible}
+.bkmatch{position:absolute; left:0; right:0; height:76px; background:var(--card); border:1px solid var(--line);
+  border-radius:12px; box-shadow:var(--shadow); overflow:hidden; display:block; text-align:left}
+button.bkmatch,.bkmatch .bkmain{cursor:pointer}
+.bkmatch .bkmain{display:block; width:100%; text-align:left}
+.bkmatch.editable .bkteam:first-child{padding-right:46px}
+.bkteam{height:38px; display:flex; align-items:center; gap:6px; padding:0 9px; min-width:0}
+.bkteam + .bkteam{border-top:1px solid var(--line)}
+.bkseed{flex:0 0 auto; font-size:10px; font-weight:800; letter-spacing:.02em; padding:2px 5px; border-radius:5px;
+  background:var(--accent); color:var(--accent-ink); line-height:1.3}
+.bkname{flex:1 1 auto; min-width:0; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
+.bkscore{flex:0 0 auto; font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; min-width:18px; text-align:right}
+.bkteam.bkm-win{background:var(--good-soft)}
+.bkteam.bkm-win .bkname,.bkteam.bkm-win .bkscore{color:var(--good); font-weight:800}
+.bkteam.bkm-lose .bkname,.bkteam.bkm-lose .bkscore{color:var(--muted); font-weight:500}
+.bkteam.bkm-pending .bkname{color:var(--ink); font-weight:700}
+.bkteam.bkm-tbd .bkname{color:var(--muted); font-style:italic; font-weight:500}
+.bkteam.bkm-seed .bkname{font-weight:700}
+.bedit{position:absolute; top:0; right:0; z-index:2; font-size:10.5px; font-weight:800; letter-spacing:.02em;
+  color:var(--accent); background:var(--accent-soft); border-bottom-left-radius:8px; padding:3px 7px; line-height:1.2}
+.bedit:hover,.bedit:focus-visible{background:var(--accent); color:var(--accent-ink)}
+.bkelbow{position:absolute; left:0; width:16px; box-sizing:border-box;
+  border-top:2px solid var(--bkline); border-right:2px solid var(--bkline); border-bottom:2px solid var(--bkline);
+  border-top-right-radius:8px; border-bottom-right-radius:8px}
+.bkarrow{position:absolute; left:16px; right:0; height:2px; background:var(--bkline)}
+.bkarrow.bkarrow-champ{left:0; height:3px; border-radius:2px; background:linear-gradient(to right,var(--bkline),var(--ball))}
+.bkchamp{position:absolute; left:0; right:0}
+.bkchamp-card{box-sizing:border-box; background:var(--good-soft); border:1.5px solid var(--good); border-radius:16px;
+  overflow:hidden; position:relative; display:flex; flex-direction:column; align-items:center; justify-content:center;
+  padding:12px 8px 10px; text-align:center; min-height:88px; animation:bkchamp .5s ease-out}
+@keyframes bkchamp{from{opacity:0; transform:scale(.94)} to{opacity:1; transform:scale(1)}}
+.bkchamp-card::before{content:""; position:absolute; top:0; left:0; right:0; height:4px; background:var(--ball)}
+.bkchamp-card.tbd{background:var(--card); border:1.5px dashed var(--bkline)}
+.bkchamp-card.tbd::before{background:var(--bkline)}
+.bkchamp-trophy{font-size:26px; line-height:1; margin-bottom:2px}
+.bkchamp-label{font-size:11px; font-weight:800; letter-spacing:.07em; text-transform:uppercase; color:var(--good)}
+.bkchamp-card.tbd .bkchamp-label{color:var(--muted)}
+.bkchamp-name{margin-top:6px; padding-top:6px; width:100%; border-top:1px dashed var(--line); font-size:13px; overflow-wrap:anywhere}
+.bkchamp-name.win{color:var(--good); font-weight:800}
+.bkchamp-name.tbd{color:var(--muted); font-style:italic}
+.bktag{font-size:10px; font-weight:700; padding:1px 5px; border-radius:4px; background:var(--warn-soft); color:var(--warn); white-space:nowrap; margin-left:4px}
 
 /* ---------- modal ---------- */
 .overlay{position:fixed; inset:0; background:rgba(20,17,12,.55); z-index:50; display:flex; align-items:center; justify-content:center; padding:16px}
@@ -272,13 +261,10 @@ select.mv{padding:4px 6px; border-radius:6px; border:1px solid var(--line); back
   .topbar,.controls,.subtabs,.demo-banner,.callout,.btn,.queue-actions,.toast,.overlay,.courtcard .cta{display:none !important}
   .wrap{max-width:100%; padding:0}
   .roundblock,.group-card{box-shadow:none; border-color:#bbb; break-inside:avoid}
-  .bko{break-inside:avoid}
-  .bkrow{border-bottom-color:#999}
-  .bkcol.out-right .bkpair.link::after,.bkcol.out-left .bkpair.link::after{border-color:#999}
-  .bkcol.out-right .bkpair.link .bkslot::after,.bkcol.out-left .bkpair.link .bkslot::after,
-  .bkcol.in-left .bkslot::before,.bkcol.in-right .bkslot::before{border-top-color:#999}
-  .bkchamp-tick{background:#999}
-  .bkcenter-bg{display:none}
+  .bkmatch{break-inside:avoid; box-shadow:none; border-color:#bbb}
+  .bkelbow{border-color:#999}
+  .bkarrow{background:#999}
+  .bkhead{color:#000; border-bottom-color:#bbb}
   .print-title{display:block !important; font-size:18px; font-weight:900; margin:0 0 12px}
 }
 .print-title{display:none}
@@ -1342,20 +1328,6 @@ function render(){
   html += renderSlotModal();
   if (!commitHtml(app, html)) return;
 
-  const curTab = app.querySelector('.evtabs [aria-current="true"]');
-  if (curTab && curTab.scrollIntoView) curTab.scrollIntoView({ block: "nearest", inline: "nearest" });
-
-  /* On first look at a live bracket, start the scroll at the Final in the
-     center; the projected view starts at round 1 on the left instead. */
-  if (state.view === "bracket" && !state.bkCentered){
-    state.bkCentered = true;
-    const wrap = app.querySelector(".bkwrap");
-    const cc = app.querySelector('.bk.real .bkcol[data-tier="center"]');
-    if (wrap && cc && wrap.scrollWidth > wrap.clientWidth){
-      wrap.scrollLeft = cc.offsetLeft - (wrap.clientWidth - cc.offsetWidth) / 2;
-    }
-  }
-
   if (restoreId){
     const el = document.getElementById(restoreId);
     if (el && el.tagName === "INPUT" && (el.type === "text" || el.type === "password")){
@@ -1373,7 +1345,7 @@ function renderCallouts(){
   if (!called.length) return "";
   const multi = activeEvents().length > 1;
   let h = "";
-  called.slice(0, 3).forEach(m => {
+  called.slice(0, 4).forEach(m => {
     const ev = eventById(m.event_id);
     h += '<button class="callout" onclick="dismissCallout(\'' + m.id + '\')" title="Tap to dismiss"><span class="cinner">' +
       '<span class="ctext">Court ' + m.court + ' now: ' + esc(entrantName(m.entrant1_id)) + ' <span class="cdim">vs</span> ' + esc(entrantName(m.entrant2_id)) +
@@ -1383,7 +1355,7 @@ function renderCallouts(){
         : '<span class="ack" aria-hidden="true">✕</span>') +
       '</span></button>';
   });
-  if (called.length > 3) h += '<div class="callout"><span class="cinner"><span class="ctext cdim">' + (called.length - 3) + ' more matches just called</span></span></div>';
+  if (called.length > 4) h += '<div class="callout"><span class="cinner"><span class="ctext cdim">' + (called.length - 4) + ' more matches just called</span></span></div>';
   return h;
 }
 
@@ -1619,52 +1591,51 @@ function renderStandings(){
   return h;
 }
 
-/* One underlined line of a bracket cell. Every cell is exactly two of these,
-   so sibling cells stay the same height and the connector elbows line up.
-   `right` is optional markup for the line's right end (the score). */
-function bkRow(inner, cls, right){
-  return '<div class="bkrow"><span class="bkteam' + (cls || '') + '">' + inner + '</span>' + (right || '') + '</div>';
+/* Single-sided bracket geometry. Round r (0-based) match j sits at a fixed
+   vertical centre; the spacing doubles each round so a pair's elbow always
+   meets at the next round's slot. Mirrors design 4 from the mockups. */
+const BK_P = 114, BK_MH = 76, BK_HALF = 38, BK_COLW = 152;
+function bkCenter(r, j){ return BK_HALF + BK_P * (Math.pow(2, r) - 1) / 2 + j * BK_P * Math.pow(2, r); }
+function bkBodyH(totalRounds){ return BK_MH + (Math.pow(2, totalRounds - 1) - 1) * BK_P; }
+function bkTeamRow(name, cls, score, extra){
+  return '<div class="bkteam ' + (cls || '') + '"><span class="bkname">' + name + (extra || '') + '</span>' +
+    (score != null ? '<span class="bkscore">' + score + '</span>' : '') + '</div>';
 }
-function bkScore(n){ return '<span class="bkscore">' + n + '</span>'; }
-/* Rounds nearer the final get wider, weightier columns so sparse rounds
-   read as the main event rather than as lost boxes in empty space. */
-function bkTier(bracketRound, totalRounds){
-  const rf = totalRounds - bracketRound;
-  if (rf >= 3) return "compact";
-  if (rf === 2) return "mid";
-  return "inner";
+function bkRoundCol(label, cells, bodyH){
+  return '<div class="bkcol" style="width:' + BK_COLW + 'px"><div class="bkhead">' + esc(label) + '</div>' +
+    '<div class="bkbody" style="height:' + bodyH + 'px">' + cells.join('') + '</div></div>';
 }
-/* One side column of the split bracket. Sibling matches share a .bkpair,
-   whose CSS draws the elbow connectors toward the center. */
-function bkSideColumn(label, cells, tier, side, hasIncoming){
-  const cls = (side === "left" ? "out-right" : "out-left") +
-    (hasIncoming ? (side === "left" ? " in-left" : " in-right") : "");
-  let h = '<div class="bkcol ' + cls + '" data-tier="' + tier + '">' +
-    '<div class="bkhead"><span class="microlabel">' + esc(label) + '</span></div><div class="bkbody">';
-  if (cells.length === 1){
-    h += '<div class="bkpair link solo"><div class="bkslot">' + cells[0] + '</div></div>';
-  } else {
-    for(let i = 0; i < cells.length; i += 2){
-      h += '<div class="bkpair link"><div class="bkslot">' + cells[i] + '</div><div class="bkslot">' + cells[i + 1] + '</div></div>';
-    }
+/* Connector column between round r and r+1, where round r+1 has nNext matches. */
+function bkConnCol(r, nNext, bodyH){
+  let h = '<div class="bkconn"><div class="bkhead">&nbsp;</div><div class="bkbody" style="height:' + bodyH + 'px">';
+  for(let j = 0; j < nNext; j++){
+    const top = bkCenter(r, 2 * j), bot = bkCenter(r, 2 * j + 1);
+    h += '<div class="bkelbow" style="top:' + top + 'px;height:' + (bot - top) + 'px"></div>';
+    h += '<div class="bkarrow" style="top:' + bkCenter(r + 1, j) + 'px"></div>';
   }
   return h + '</div></div>';
 }
-/* The centerpiece: the Final with the Champion beneath it. */
-function bkCenterColumn(finalCell, champCell, hasSides){
-  return '<div class="bkcol' + (hasSides ? ' in-left in-right' : '') + '" data-tier="center"><div class="bkcenter-bg"></div>' +
-    '<div class="bkhead"><span class="microlabel">Final</span></div><div class="bkbody">' +
-    '<div class="bkpair solo"><div class="bkslot">' + finalCell + '</div></div></div>' +
-    '<div class="bkchamp-wrap"><div class="bkchamp-tick"></div>' + champCell + '</div>' +
-    '</div>';
+function bkChampCol(champHtml, totalRounds, bodyH){
+  const cy = bkCenter(totalRounds - 1, 0);
+  return '<div class="bkconn"><div class="bkhead">&nbsp;</div><div class="bkbody" style="height:' + bodyH + 'px">' +
+      '<div class="bkarrow bkarrow-champ" style="top:' + cy + 'px"></div></div></div>' +
+    '<div class="bkcol" style="width:' + BK_COLW + 'px"><div class="bkhead">Champion</div>' +
+      '<div class="bkbody" style="height:' + bodyH + 'px"><div class="bkchamp" style="top:' + (cy - 44) + 'px">' + champHtml + '</div></div></div>';
 }
-function bkSplitHalf(list){ const half = list.length / 2; return [list.slice(0, half), list.slice(half)]; }
+function bkSideCls(hasName, isWin, played){
+  if (!hasName) return 'bkm-tbd';
+  if (isWin) return 'bkm-win';
+  if (played) return 'bkm-lose';
+  return 'bkm-pending';
+}
+const bkChampTbd = '<div class="bkchamp-card tbd"><div class="bkchamp-trophy">🏆</div><div class="bkchamp-label">Champion</div><div class="bkchamp-name tbd">To be decided</div></div>';
 
 function renderBracket(){
   const ev = currentEvent();
   if (!ev) return '<div class="empty">No events yet.</div>';
   const ko = data.matches.filter(m => m.event_id === ev.id && m.stage === "knockout");
 
+  /* Projected bracket: before the desk confirms the knockout, show the seeds. */
   if (!ko.length){
     const groups = groupsOfEvent(ev);
     if (!groups.length) return '<div class="empty">' + esc(ev.name) + ' has no groups yet.</div>';
@@ -1674,92 +1645,83 @@ function renderBracket(){
     const pairs = bracketPairs(field.seeds);
     const size = nextPow2(Math.max(2, field.seeds.length));
     const totalRounds = Math.log2(size);
-    const slotRow = s => !s ? bkRow('BYE', ' tbd')
-      : bkRow(esc(s.group + s.place) + (s.wildcard ? ' <span class="tag warn">Best ' + ordinal(s.place) + '</span>' : ''), ' seed');
-    const champTbd = '<div class="champ tbd"><span class="microlabel">' + esc(ev.name) + '</span><br>Champion TBD</div>';
+    const bodyH = bkBodyH(totalRounds);
+    const seedRow = s => !s ? bkTeamRow('BYE', 'bkm-tbd')
+      : bkTeamRow(esc(s.group + s.place), 'bkm-seed', null, s.wildcard ? ' <span class="bktag">Best ' + ordinal(s.place) + '</span>' : '');
+    const tbdRow = () => bkTeamRow('TBD', 'bkm-tbd');
 
     let h = '<div class="section-h"><h2>Projected bracket</h2><span class="hint">' +
       (left ? 'Live, ' + left + ' group matches to go' : 'Group play complete') + '</span></div>';
     h += '<div class="bkwrap"><div class="bk">';
-    if (totalRounds === 1){
-      h += bkCenterColumn('<div class="bko">' + slotRow(pairs[0][0]) + slotRow(pairs[0][1]) + '</div>', champTbd, false);
-    } else {
-      const r1cells = pairs.map(p => '<div class="bko">' + slotRow(p[0]) + slotRow(p[1]) + '</div>');
-      const [l1, r1] = bkSplitHalf(r1cells);
-      const leftCols = [bkSideColumn(roundLabelFor(1, totalRounds), l1, bkTier(1, totalRounds), "left", false)];
-      const rightCols = [bkSideColumn(roundLabelFor(1, totalRounds), r1, bkTier(1, totalRounds), "right", false)];
-      for(let r = 2; r < totalRounds; r++){
-        const count = size / Math.pow(2, r);
-        const cells = Array.from({ length: count }, () => '<div class="bko">' + bkRow('TBD', ' tbd') + bkRow('TBD', ' tbd') + '</div>');
-        const [l, rr] = bkSplitHalf(cells);
-        leftCols.push(bkSideColumn(roundLabelFor(r, totalRounds), l, bkTier(r, totalRounds), "left", true));
-        rightCols.push(bkSideColumn(roundLabelFor(r, totalRounds), rr, bkTier(r, totalRounds), "right", true));
+    for(let r = 0; r < totalRounds; r++){
+      const count = size / Math.pow(2, r + 1);
+      const cells = [];
+      for(let j = 0; j < count; j++){
+        const top = bkCenter(r, j) - BK_HALF;
+        const rows = r === 0 ? (seedRow(pairs[j][0]) + seedRow(pairs[j][1])) : (tbdRow() + tbdRow());
+        cells.push('<div class="bkmatch" style="top:' + top + 'px">' + rows + '</div>');
       }
-      const finalCell = '<div class="bko">' + bkRow('TBD', ' tbd') + bkRow('TBD', ' tbd') + '</div>';
-      h += leftCols.join('') + bkCenterColumn(finalCell, champTbd, true) + rightCols.slice().reverse().join('');
+      h += bkRoundCol(roundLabelFor(r + 1, totalRounds), cells, bodyH);
+      if (r < totalRounds - 1) h += bkConnCol(r, size / Math.pow(2, r + 2), bodyH);
     }
+    h += bkChampCol(bkChampTbd, totalRounds, bodyH);
     h += '</div></div>';
     h += '<p class="note">A1 means the group A winner, C2 the group C runner-up, from standings right now, so matchups can shift until group play ends. ' +
-      'Round 1 sits at the outer edges and winners move toward the middle, where the final and champion live. ' +
+      'Round 1 is on the left and winners move to the right, toward the final and champion. ' +
       field.seeds.length + ' qualify for a ' + size + '-slot bracket' +
       (field.wildcards ? ', including ' + field.wildcards + ' wildcard' + (field.wildcards > 1 ? 's' : '') + ' from the next places' : '') +
       '. The real bracket is created when the desk confirms the group stage is finished.</p>';
     return h;
   }
 
+  /* Live bracket. */
   const total = Math.max(...ko.map(m => m.bracket_round));
-  const cellFor = m => {
+  const bodyH = bkBodyH(total);
+  const wo = ' <span class="bktag">W/O</span>';
+  const matchCell = (m, r, j) => {
     const n1 = entrantName(m.entrant1_id), n2 = entrantName(m.entrant2_id);
     const played = m.status === "played" && m.score1 != null;
     const bye = m.status === "played" && m.score1 == null;
     const w1 = played && m.score1 > m.score2, w2 = played && m.score2 > m.score1;
-    const clickable = !bye && m.entrant1_id && m.entrant2_id;
-    const wo = ' <span class="tag warn">W/O</span>';
-    const editable = !!(state.adminPin && m.status === "scheduled" && !bye);
     const rows =
-      bkRow((n1 ? esc(n1) : 'TBD') + (m.walkover && w1 ? wo : ''), n1 ? (w1 ? ' win' : '') : ' tbd', played ? bkScore(m.score1) : '') +
-      bkRow((n2 ? esc(n2) : (bye ? 'BYE' : 'TBD')) + (m.walkover && w2 ? wo : ''), n2 ? (w2 ? ' win' : '') : ' tbd', played ? bkScore(m.score2) : '');
-    /* Editable cells are a plain container with two sibling buttons, so no
-       interactive element ever nests inside another (screen readers choke
-       on a button-in-button). */
+      bkTeamRow(n1 ? esc(n1) : 'TBD', bkSideCls(!!n1, w1, played), played ? m.score1 : null, m.walkover && w1 ? wo : '') +
+      bkTeamRow(n2 ? esc(n2) : (bye ? 'BYE' : 'TBD'), bkSideCls(!!n2, w2, played), played ? m.score2 : null, m.walkover && w2 ? wo : '');
+    const top = bkCenter(r, j) - BK_HALF;
+    const clickable = !bye && m.entrant1_id && m.entrant2_id;
+    const editable = !!(state.adminPin && m.status === "scheduled" && !bye);
+    /* Editable cells keep the two buttons as siblings, never nested. */
     if (editable){
       const main = clickable
         ? '<button class="bkmain" onclick="openMatch(\'' + m.id + '\')">' + rows + '</button>'
         : rows;
-      return '<div class="bko editable">' + main +
-        '<button class="bedit" onclick="openSlotEditor(\'' + m.id + '\')">Edit teams</button></div>';
+      return '<div class="bkmatch editable" style="top:' + top + 'px">' + main +
+        '<button class="bedit" onclick="openSlotEditor(\'' + m.id + '\')">Edit</button></div>';
     }
     return clickable
-      ? '<button class="bko" onclick="openMatch(\'' + m.id + '\')">' + rows + '</button>'
-      : '<div class="bko">' + rows + '</div>';
+      ? '<button class="bkmatch" style="top:' + top + 'px" onclick="openMatch(\'' + m.id + '\')">' + rows + '</button>'
+      : '<div class="bkmatch" style="top:' + top + 'px">' + rows + '</div>';
   };
 
   const final = ko.find(m => m.bracket_round === total);
-  let champCell;
+  let champHtml;
   if (final && final.status === "played" && final.score1 != null){
     const champ = final.score1 > final.score2 ? final.entrant1_id : final.entrant2_id;
-    champCell = '<div class="champ"><span class="microlabel">' + esc(ev.name) + '</span><br>🏆 ' + esc(entrantName(champ)) + '</div>';
+    champHtml = '<div class="bkchamp-card"><div class="bkchamp-trophy">🏆</div><div class="bkchamp-label">Champion</div><div class="bkchamp-name win">' + esc(entrantName(champ)) + '</div></div>';
   } else {
-    champCell = '<div class="champ tbd"><span class="microlabel">' + esc(ev.name) + '</span><br>Champion TBD</div>';
+    champHtml = bkChampTbd;
   }
 
   let h = '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + ' · Bracket</span>';
-  h += '<div class="bkwrap"><div class="bk real">';
-  if (total === 1){
-    h += bkCenterColumn(cellFor(final), champCell, false);
-  } else {
-    const leftCols = [], rightColsAsc = [];
-    for(let r = 1; r < total; r++){
-      const list = ko.filter(m => m.bracket_round === r).sort((a, b) => a.bracket_pos - b.bracket_pos);
-      const [leftList, rightList] = bkSplitHalf(list);
-      const tier = bkTier(r, total);
-      leftCols.push(bkSideColumn(roundLabelFor(r, total), leftList.map(cellFor), tier, "left", r > 1));
-      rightColsAsc.push(bkSideColumn(roundLabelFor(r, total), rightList.map(cellFor), tier, "right", r > 1));
-    }
-    h += leftCols.join('') + bkCenterColumn(cellFor(final), champCell, true) + rightColsAsc.slice().reverse().join('');
+  h += '<div class="bkwrap"><div class="bk">';
+  for(let r = 1; r <= total; r++){
+    const list = ko.filter(m => m.bracket_round === r).sort((a, b) => a.bracket_pos - b.bracket_pos);
+    h += bkRoundCol(roundLabelFor(r, total), list.map((m, j) => matchCell(m, r - 1, j)), bodyH);
+    if (r < total) h += bkConnCol(r - 1, ko.filter(m => m.bracket_round === r + 1).length, bodyH);
   }
+  h += bkChampCol(champHtml, total, bodyH);
   h += '</div></div>';
-  h += '<p class="note">Tap a match to see or enter its result. Winners advance toward the middle from both sides.</p>';
+  h += '<p class="note">Winners move to the right, round by round, toward the champion. Tap a match to see or enter its result.' +
+    (state.adminPin ? ' Unplayed matches have an Edit link to fix the teams by hand.' : '') + '</p>';
   return h;
 }
 
@@ -1836,8 +1798,6 @@ function renderAdmin(){
         byGroup[g].forEach(e => {
           h += '<div class="queue-row"><span class="qnames">' + esc(e.name) + '</span><span class="qtag">Group ' + esc(g) + '</span>' +
             '<span class="queue-actions">' +
-            '<button class="btn small secondary" title="SMS numbers" onclick="editContacts(\'' + e.id + '\')">☎' +
-            ((state.contacts[e.id] || []).length ? ' ' + state.contacts[e.id].length : '') + '</button>' +
             '<select class="mv" onchange="moveEntrant(\'' + e.id + '\', this.value); this.value=\'\'">' +
             '<option value="">Move…</option>' +
             groups.filter(x => x !== g).map(x => '<option value="' + x + '">To ' + x + '</option>').join("") +
@@ -1849,8 +1809,7 @@ function renderAdmin(){
       h += '<div class="addteam"><input id="add-team-name" type="text" placeholder="New team or player">' +
         '<select id="add-team-group">' + groups.map(g => '<option value="' + g + '">Group ' + g + '</option>').join("") + '</select>' +
         '<button class="btn small secondary" onclick="addTeamToGroup()">Add</button></div>' +
-        '<p class="note" style="margin-top:6px">Moving or removing a team also removes its matches (and results). New or moved teams get catch-up matches at the end of the queue. ' +
-        '☎ saves phone numbers for "you\'re on court" texts (live site with the SMS add-on set up; numbers stay private).</p></details>';
+        '<p class="note" style="margin-top:6px">Moving or removing a team also removes its matches (and results). New or moved teams get catch-up matches at the end of the queue.</p></details>';
       if (hasMatches && !state.showRedraw){
         h += '<p class="note"><button class="btn small secondary" onclick="toggleRedraw()">Start over with a new list</button></p>';
       }
