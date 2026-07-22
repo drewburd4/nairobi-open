@@ -74,8 +74,8 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .callout .ack{background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.4); color:#fff; border-radius:6px; padding:4px 9px; font-size:12.5px; font-weight:700; white-space:nowrap}
 
 /* ---------- shared ---------- */
-.eventpick{margin:14px 0 4px}
-.eventpick select{width:100%; padding:10px 12px; border-radius:9px; border:1px solid var(--line); background:var(--card); font-weight:700}
+.evtabs{margin-top:14px}
+.livedot{color:var(--good); font-size:9px; vertical-align:2px}
 .section-h{display:flex; align-items:baseline; justify-content:space-between; gap:10px; margin:20px 0 10px}
 .section-h h2{margin:0; font-size:13px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--muted)}
 .section-h .hint{font-size:12.5px; color:var(--muted)}
@@ -122,6 +122,12 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .search{flex:1; min-width:160px; padding:9px 12px; border-radius:8px; border:1px solid var(--line); background:var(--card)}
 .roundblock{background:var(--card); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); padding:4px 14px 8px; margin:12px 0}
 .roundblock h3{font-size:13px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--muted); margin:10px 0 4px}
+details.roundblock summary{cursor:pointer; list-style:none}
+details.roundblock summary::-webkit-details-marker{display:none}
+details.roundblock summary h3{display:inline-block}
+details.roundblock summary h3::after{content:"▸"; margin-left:6px; font-size:11px}
+details.roundblock[open] summary h3::after{content:"▾"}
+details.roundblock .hint{font-weight:600; letter-spacing:0; text-transform:none}
 .srow{display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid var(--line); font-size:14.5px; width:100%}
 .srow:last-child{border-bottom:none}
 .srow .g{font-size:11.5px; font-weight:800; color:var(--muted); min-width:14px}
@@ -203,9 +209,6 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .fieldrow .field{flex:1; min-width:110px}
 .divider{border-top:1px solid var(--line); margin:16px 0}
 .preview-box{background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px 12px; font-size:13.5px; margin:10px 0; white-space:pre-line}
-.courtchecks{display:flex; gap:12px; flex-wrap:wrap; padding:4px 0}
-.courtchecks label{display:flex; align-items:center; gap:6px; font-weight:600; font-size:14px}
-.courtchecks .holder{font-size:11px; color:var(--muted); font-weight:600}
 .statusline{display:flex; gap:8px; align-items:center; flex-wrap:wrap; margin-bottom:10px}
 details.teamlist{margin:10px 0}
 details.teamlist summary{cursor:pointer; font-weight:700; font-size:13.5px; padding:4px 0}
@@ -592,25 +595,32 @@ function validateGames(games, pts, isAdmin, bestOf){
   return { w1, w2 };
 }
 
-/* Give free courts to the next matches in line for one event.
-   Mutates db.matches. Mirrors the SQL function of the same name. */
-function assignCourtsIn(db, eventId){
-  const ev = db.events.find(e => e.id === eventId);
-  if (!ev) return;
-  const alloc = (ev.settings && ev.settings.courts) || [];
-  if (!ev.active){
-    db.matches.forEach(m => { if (m.event_id === eventId && m.status === "scheduled") m.court = null; });
-    return;
-  }
+/* The pending queue across all active events, woven so events alternate.
+   This is exactly the order courts are filled in. */
+function weavePending(db){
+  const act = db.events.filter(e => e.active).sort((a, b) => a.sort_order - b.sort_order);
+  const lists = act.map(ev => db.matches
+    .filter(m => m.event_id === ev.id && m.status === "scheduled" && m.court == null && m.entrant1_id && m.entrant2_id)
+    .sort((a, b) => a.play_order - b.play_order));
+  return weaveQueues(lists);
+}
+
+/* Shared court pool: every free court takes the next match from the woven
+   cross-event queue, so no court sits idle while any active event has
+   matches waiting. Mutates db.matches. Mirrors the SQL function. */
+function assignCourtsGlobal(db){
+  const total = (db.tournament && db.tournament.settings && db.tournament.settings.courts) || 4;
   db.matches.forEach(m => {
-    if (m.event_id === eventId && m.status === "scheduled" && m.court != null && !alloc.includes(m.court)) m.court = null;
+    if (m.status !== "scheduled" || m.court == null) return;
+    const ev = db.events.find(e => e.id === m.event_id);
+    if (!ev || !ev.active) m.court = null;
   });
   const taken = new Set(db.matches.filter(m => m.status === "scheduled" && m.court != null).map(m => m.court));
-  for(const c of alloc){
+  const queue = weavePending(db);
+  let qi = 0;
+  for(let c = 1; c <= total; c++){
     if (taken.has(c)) continue;
-    const next = db.matches
-      .filter(m => m.event_id === eventId && m.status === "scheduled" && m.court == null && m.entrant1_id && m.entrant2_id)
-      .sort((a, b) => a.play_order - b.play_order)[0];
+    const next = queue[qi++];
     if (!next) break;
     next.court = c; taken.add(c);
     next.postponed = false;
@@ -642,7 +652,7 @@ const EVENT_CATEGORIES = [
 
 function defaultEventSettings(){
   return { points_to_group: 21, points_to_knockout: 21, best_of_group: 1, best_of_knockout: 1,
-    advance_per_group: 2, knockout_size: "auto", group_size: 6, courts: [], schedule_note: "" };
+    advance_per_group: 2, knockout_size: "auto", group_size: 6, schedule_note: "" };
 }
 
 function buildMockData(){
@@ -654,8 +664,8 @@ function buildMockData(){
     stage: "group", active: false, settings: defaultEventSettings()
   }));
   const evD = events[0], evS = events[1];
-  evD.active = true; evD.settings.courts = [1, 2, 3]; evD.settings.schedule_note = "Day 1";
-  evS.active = true; evS.settings.courts = [4]; evS.settings.group_size = 5;
+  evD.active = true; evD.settings.schedule_note = "Day 1";
+  evS.active = true; evS.settings.group_size = 5;
   evS.settings.schedule_note = "Day 1"; evS.settings.best_of_knockout = 3;
   events[2].settings.schedule_note = "Day 2"; events[3].settings.schedule_note = "Day 2"; events[4].settings.schedule_note = "Day 2";
   for(let i = 5; i <= 9; i++) events[i].settings.schedule_note = "Day 3";
@@ -728,8 +738,7 @@ function buildMockData(){
     target.play_order = pendingS[Math.min(8, pendingS.length - 1)].play_order + 1;
   }
 
-  assignCourtsIn(db, evD.id);
-  assignCourtsIn(db, evS.id);
+  assignCourtsGlobal(db);
   return db;
 }
 /*__LOGIC_END__*/
@@ -755,14 +764,6 @@ function demoStore(){
     return (ev && ev.settings && ev.settings[key]) || (base === "points_to" ? 21 : 1);
   };
   const checkPin = pin => pin === PIN;
-  const courtsConflict = (eventId, courts) => {
-    for(const other of db.events){
-      if (other.id === eventId || !other.active) continue;
-      const overlap = ((other.settings && other.settings.courts) || []).filter(c => courts.includes(c));
-      if (overlap.length) return "Court " + overlap.join(", ") + " is already used by " + other.name + ".";
-    }
-    return null;
-  };
 
   function advanceWinner(m){
     if (!m.next_match_id || m.status !== "played") return;
@@ -807,7 +808,7 @@ function demoStore(){
       const err = applyScore(m, s1, s2, games, false, false);
       if (err) return fail(err);
       advanceWinner(m);
-      assignCourtsIn(db, m.event_id);
+      assignCourtsGlobal(db);
       notify(); return ok();
     },
     async adminSubmitScore(pin, matchId, s1, s2, games, walkover){
@@ -842,7 +843,7 @@ function demoStore(){
           if (m.next_slot === 1) nm.entrant1_id = newW; else nm.entrant2_id = newW;
         }
       }
-      assignCourtsIn(db, m.event_id);
+      assignCourtsGlobal(db);
       notify(); return ok();
     },
     async adminClearScore(pin, matchId){
@@ -858,7 +859,7 @@ function demoStore(){
       }
       m.score1 = null; m.score2 = null; m.games = null; m.walkover = false;
       m.status = "scheduled"; m.court = null;
-      assignCourtsIn(db, m.event_id);
+      assignCourtsGlobal(db);
       notify(); return ok();
     },
     async adminPostpone(pin, matchId, toEnd){
@@ -877,7 +878,7 @@ function demoStore(){
         if (anchor) m.play_order = anchor.play_order + 1;
       }
       m.postponed = true; m.court = null;
-      assignCourtsIn(db, m.event_id);
+      assignCourtsGlobal(db);
       notify(); return ok();
     },
     async adminPlayNext(pin, matchId){
@@ -888,7 +889,21 @@ function demoStore(){
       const pending = db.matches.filter(x => x.event_id === m.event_id && x.status === "scheduled" && x.id !== m.id);
       m.play_order = (pending.length ? Math.min(...pending.map(x => x.play_order)) : m.play_order) - 1;
       m.postponed = false;
-      assignCourtsIn(db, m.event_id);
+      assignCourtsGlobal(db);
+      notify(); return ok();
+    },
+    async adminSwapOut(pin, matchId){
+      if (!checkPin(pin)) return fail("Wrong PIN.");
+      const m = findMatch(matchId);
+      if (!m) return fail("Match not found.");
+      if (m.status !== "scheduled" || m.court == null) return fail("That match is not on a court.");
+      const repl = weavePending(db)[0];
+      if (!repl) return fail("No other match is waiting, so it stays on court.");
+      repl.court = m.court; repl.postponed = false;
+      repl.called_at = new Date().toISOString(); repl.called_ack = false;
+      const pending = db.matches.filter(x => x.event_id === m.event_id && x.status === "scheduled" && x.court == null && x.id !== m.id);
+      m.court = null; m.called_at = null; m.called_ack = false; m.postponed = false;
+      m.play_order = (pending.length ? Math.min(...pending.map(x => x.play_order)) : m.play_order) - 1;
       notify(); return ok();
     },
     async adminAckCalled(pin, matchId){
@@ -902,27 +917,17 @@ function demoStore(){
       if (!checkPin(pin)) return fail("Wrong PIN.");
       const ev = db.events.find(e => e.id === eventId);
       if (!ev) return fail("Event not found.");
-      if (ev.active){
-        const conflict = courtsConflict(eventId, (settings && settings.courts) || []);
-        if (conflict) return fail(conflict);
-      }
       ev.name = name; ev.settings = settings;
-      assignCourtsIn(db, eventId);
+      assignCourtsGlobal(db);
       notify(); return ok();
     },
     async adminSetActive(pin, eventId, active){
       if (!checkPin(pin)) return fail("Wrong PIN.");
       const ev = db.events.find(e => e.id === eventId);
       if (!ev) return fail("Event not found.");
-      if (active){
-        if (!db.matches.some(m => m.event_id === eventId)) return fail("Draw groups first, then start the event.");
-        const courts = (ev.settings && ev.settings.courts) || [];
-        if (!courts.length) return fail("Pick at least one court, save, then start.");
-        const conflict = courtsConflict(eventId, courts);
-        if (conflict) return fail(conflict);
-      }
+      if (active && !db.matches.some(m => m.event_id === eventId)) return fail("Draw groups first, then start the event.");
       ev.active = active;
-      assignCourtsIn(db, eventId);
+      assignCourtsGlobal(db);
       notify(); return ok();
     },
     async adminReplaceEvent(pin, eventId, meta, entrants, matches){
@@ -939,14 +944,8 @@ function demoStore(){
       db.matches = db.matches.filter(m => m.event_id !== ev.id);
       entrants.forEach(e => db.entrants.push(Object.assign({}, e, { event_id: ev.id })));
       matches.forEach(m => db.matches.push(Object.assign({}, m, { event_id: ev.id, court: null })));
+      assignCourtsGlobal(db);
       notify(); return { ok: true, eventId: ev.id };
-    },
-    async adminDeleteEvent(pin, eventId){
-      if (!checkPin(pin)) return fail("Wrong PIN.");
-      db.events = db.events.filter(e => e.id !== eventId);
-      db.entrants = db.entrants.filter(e => e.event_id !== eventId);
-      db.matches = db.matches.filter(m => m.event_id !== eventId);
-      notify(); return ok();
     },
     async adminRenameEntrant(pin, entrantId, name){
       if (!checkPin(pin)) return fail("Wrong PIN.");
@@ -963,7 +962,7 @@ function demoStore(){
         return fail("They're in the knockout bracket. Edit the bracket or reset it first.");
       db.matches = db.matches.filter(m => !(m.entrant1_id === entrantId || m.entrant2_id === entrantId));
       db.entrants = db.entrants.filter(x => x.id !== entrantId);
-      assignCourtsIn(db, e.event_id);
+      assignCourtsGlobal(db);
       notify(); return ok();
     },
     async adminAddEntrant(pin, eventId, entrant, matches){
@@ -971,7 +970,7 @@ function demoStore(){
       if (!db.events.some(e => e.id === eventId)) return fail("Event not found.");
       db.entrants.push(Object.assign({}, entrant, { event_id: eventId }));
       matches.forEach(m => db.matches.push(Object.assign({}, m, { event_id: eventId, court: null })));
-      assignCourtsIn(db, eventId);
+      assignCourtsGlobal(db);
       notify(); return ok();
     },
     async adminMoveEntrant(pin, entrantId, newGroup, matches){
@@ -983,7 +982,7 @@ function demoStore(){
       db.matches = db.matches.filter(m => !(m.stage === "group" && (m.entrant1_id === entrantId || m.entrant2_id === entrantId)));
       e.group_name = newGroup;
       matches.forEach(m => db.matches.push(Object.assign({}, m, { event_id: e.event_id, court: null })));
-      assignCourtsIn(db, e.event_id);
+      assignCourtsGlobal(db);
       notify(); return ok();
     },
     async adminSetBracketTeams(pin, matchId, e1, e2){
@@ -993,7 +992,7 @@ function demoStore(){
       if (m.stage !== "knockout") return fail("Only knockout matches can be edited here.");
       if (m.status === "played") return fail("This match already has a score. Clear it first.");
       m.entrant1_id = e1 || null; m.entrant2_id = e2 || null;
-      assignCourtsIn(db, m.event_id);
+      assignCourtsGlobal(db);
       notify(); return ok();
     },
     async adminGenerateBracket(pin, eventId, rows){
@@ -1003,7 +1002,7 @@ function demoStore(){
       db.matches = db.matches.filter(m => !(m.event_id === eventId && m.stage === "knockout"));
       rows.forEach(m => db.matches.push(Object.assign({}, m, { event_id: eventId })));
       ev.stage = "knockout";
-      assignCourtsIn(db, eventId);
+      assignCourtsGlobal(db);
       notify(); return ok();
     },
     async adminResetBracket(pin, eventId){
@@ -1012,7 +1011,7 @@ function demoStore(){
       if (!ev) return fail("Event not found.");
       db.matches = db.matches.filter(m => !(m.event_id === eventId && m.stage === "knockout"));
       ev.stage = "group";
-      assignCourtsIn(db, eventId);
+      assignCourtsGlobal(db);
       notify(); return ok();
     }
   };
@@ -1083,6 +1082,7 @@ function liveStore(){
     adminClearScore: (pin, id) => rpc("nairobi_admin_clear_score", { p_pin: pin, p_match_id: id }),
     adminPostpone: (pin, id, toEnd) => rpc("nairobi_admin_postpone", { p_pin: pin, p_match_id: id, p_to_end: !!toEnd }),
     adminPlayNext: (pin, id) => rpc("nairobi_admin_play_next", { p_pin: pin, p_match_id: id }),
+    adminSwapOut: (pin, id) => rpc("nairobi_admin_swap_out", { p_pin: pin, p_match_id: id }),
     adminAckCalled: (pin, id) => rpc("nairobi_admin_ack_called", { p_pin: pin, p_match_id: id }),
     adminUpdateEvent: (pin, eventId, name, settings) => rpc("nairobi_admin_update_event", { p_pin: pin, p_event_id: eventId, p_name: name, p_settings: settings }),
     adminSetActive: (pin, eventId, active) => rpc("nairobi_admin_set_active", { p_pin: pin, p_event_id: eventId, p_active: !!active }),
@@ -1095,7 +1095,6 @@ function liveStore(){
       if (r.ok && typeof r.data === "string" && r.data.startsWith("OK:")) r.eventId = r.data.slice(3);
       return r;
     },
-    adminDeleteEvent: (pin, eventId) => rpc("nairobi_admin_delete_event", { p_pin: pin, p_event_id: eventId }),
     adminRenameEntrant: (pin, id, name) => rpc("nairobi_admin_rename_entrant", { p_pin: pin, p_entrant_id: id, p_name: name }),
     adminRemoveEntrant: (pin, id) => rpc("nairobi_admin_remove_entrant", { p_pin: pin, p_entrant_id: id }),
     adminAddEntrant: (pin, eventId, entrant, matches) => rpc("nairobi_admin_add_entrant", { p_pin: pin, p_event_id: eventId, p_entrant: entrant, p_matches: matches }),
@@ -1116,7 +1115,7 @@ const store = (SUPABASE_URL && SUPABASE_ANON_KEY) ? liveStore() : demoStore();
 let data = { tournament: null, events: [], entrants: [], matches: [] };
 const state = {
   view: "board", eventId: null, search: "", roundFilter: "all",
-  resultsFilter: "all", standingsFilter: "all",
+  standingsFilter: "all",
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null,
   setupPreview: null, adminEventId: null, loadError: null,
   showAllQueue: false, showRedraw: false, pendingRender: false,
@@ -1134,6 +1133,25 @@ function safeSession(key, val){
     if (val === null) window.sessionStorage.removeItem(key);
     else window.sessionStorage.setItem(key, val);
   }catch(e){ return null; }
+}
+function safeLocal(key, val){
+  try{
+    if (val === undefined) return window.localStorage.getItem(key);
+    if (val === null) window.localStorage.removeItem(key);
+    else window.localStorage.setItem(key, val);
+  }catch(e){ return null; }
+}
+/* Banner dismissals survive refresh; entries expire with the banners. */
+function loadDismissedCalled(){
+  try{
+    const o = JSON.parse(safeLocal("pb_dismissed") || "{}");
+    const now = Date.now(), keep = {};
+    Object.keys(o).forEach(k => {
+      const t = Date.parse(k.split("|")[1] || "");
+      if (t && now - t < CALLED_FRESH_MS * 3) keep[k] = true;
+    });
+    return keep;
+  }catch(e){ return {}; }
 }
 function toast(msg){
   const t = document.createElement("div");
@@ -1242,7 +1260,7 @@ function render(){
   }
 
   const tabs = [
-    ["board", "Courts"], ["schedule", "Schedule"], ["results", "Results"],
+    ["board", "Courts"], ["schedule", "Schedule"],
     ["standings", "Standings"], ["bracket", "Bracket"], ["admin", "Admin"]
   ];
   let html = '<div class="topbar">';
@@ -1256,12 +1274,11 @@ function render(){
   html += '</div>';
 
   html += '<main class="wrap">';
-  if (["schedule", "results", "standings", "bracket"].includes(state.view) && data.events.length > 1){
-    html += renderEventPicker();
+  if (["schedule", "standings", "bracket"].includes(state.view) && data.events.length > 1){
+    html += renderEventTabs();
   }
   if (state.view === "board") html += renderBoard();
   else if (state.view === "schedule") html += renderSchedule();
-  else if (state.view === "results") html += renderResults();
   else if (state.view === "standings") html += renderStandings();
   else if (state.view === "bracket") html += renderBracket();
   else if (state.view === "admin") html += renderAdmin();
@@ -1271,6 +1288,9 @@ function render(){
   html += renderTeamModal();
   html += renderSlotModal();
   if (!commitHtml(app, html)) return;
+
+  const curTab = app.querySelector('.evtabs [aria-current="true"]');
+  if (curTab && curTab.scrollIntoView) curTab.scrollIntoView({ block: "nearest", inline: "nearest" });
 
   if (restoreId){
     const el = document.getElementById(restoreId);
@@ -1309,12 +1329,13 @@ function eventLabel(ev){
   else if (evSetting(ev, "schedule_note", "")) l += " · " + evSetting(ev, "schedule_note", "");
   return l;
 }
-function renderEventPicker(){
+function renderEventTabs(){
   const cur = currentEvent();
   const evs = data.events.slice().sort((a, b) => a.sort_order - b.sort_order);
-  return '<div class="eventpick"><select onchange="setEvent(this.value)" aria-label="Event">' +
-    evs.map(ev => '<option value="' + ev.id + '"' + (cur && ev.id === cur.id ? ' selected' : '') + '>' + esc(eventLabel(ev)) + '</option>').join("") +
-    '</select></div>';
+  return '<div class="subtabs evtabs" role="tablist">' + evs.map(ev =>
+    '<button class="subtab" aria-current="' + (cur && ev.id === cur.id) + '" onclick="setEvent(\'' + ev.id + '\')">' +
+    esc(ev.name) + (ev.active ? ' <span class="livedot" aria-hidden="true">●</span>' : '') + '</button>').join("") +
+    '</div>';
 }
 
 function queueRow(m, opts){
@@ -1484,54 +1505,17 @@ function renderSchedule(){
   for(let r = 1; r <= maxRound; r++){
     const list = shown.filter(m => m.round === r).sort((a, b) => a.play_order - b.play_order);
     if (!list.length) continue;
-    h += '<div class="roundblock"><h3>Round ' + r + '</h3>' + list.map(m => scheduleRow(m, false)).join("") + '</div>';
+    const allDone = list.every(m => m.status === "played");
+    if (allDone && state.roundFilter === "all"){
+      /* Finished rounds fold away; tap to peek. */
+      h += '<details class="roundblock folded"><summary><h3>Round ' + r + ' <span class="hint">complete · ' + list.length + ' matches</span></h3></summary>' +
+        list.map(m => scheduleRow(m, true)).join("") + '</details>';
+    } else {
+      h += '<div class="roundblock"><h3>Round ' + r + '</h3>' + list.map(m => scheduleRow(m, true)).join("") + '</div>';
+    }
   }
-  h += '<p class="note">Matches run in this order, group A first, so everyone plays round 1 before round 2 starts. Tap a match for details; a score can be entered while the match is on a court, and corrections go through the desk. Results and Standings update live.</p>';
+  h += '<p class="note">Matches run in this order, group A first, so everyone plays round 1 before round 2 starts. Played matches show their scores; tap a match for details. A score can be entered while the match is on a court, and corrections go through the desk.</p>';
   return h;
-}
-
-function renderResults(){
-  const ev = currentEvent();
-  if (!ev) return '<div class="empty">No events yet.</div>';
-  const evMatches = data.matches.filter(m => m.event_id === ev.id);
-  const matchesTerm = termFilterFor();
-  const played = evMatches.filter(m => m.status === "played" && m.score1 != null && matchesTerm(m));
-  const koMs = evMatches.filter(m => m.stage === "knockout");
-  const groups = groupsOfEvent(ev);
-  if (state.resultsFilter === "ko" ? !koMs.length : state.resultsFilter !== "all" && !groups.includes(state.resultsFilter)) state.resultsFilter = "all";
-  const f = state.resultsFilter;
-
-  let h = '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + ' · Results</span>';
-  h += '<div class="controls">' +
-    '<input class="search" id="search-input" type="text" placeholder="Find a name" value="' + esc(state.search) + '" oninput="setSearch(this.value)">' +
-    '<button class="btn small secondary" onclick="window.print()">Print</button></div>';
-  if (groups.length > 1 || koMs.length){
-    h += '<div class="subtabs" role="tablist">' +
-      '<button class="subtab" aria-current="' + (f === "all") + '" onclick="setResultsFilter(\'all\')">All</button>' +
-      groups.map(g => '<button class="subtab" aria-current="' + (f === g) + '" onclick="setResultsFilter(\'' + esc(g) + '\')">Group ' + esc(g) + '</button>').join("") +
-      (koMs.length ? '<button class="subtab" aria-current="' + (f === "ko") + '" onclick="setResultsFilter(\'ko\')">Knockout</button>' : '') +
-      '</div>';
-  }
-  if (!played.length) return h + '<div class="empty">No results yet for ' + esc(ev.name) + '.</div>';
-
-  let body = '';
-  if ((f === "all" || f === "ko") && koMs.some(m => m.status === "played" && m.score1 != null)){
-    const total = Math.max(...koMs.map(x => x.bracket_round));
-    for(let r = total; r >= 1; r--){
-      const list = played.filter(m => m.stage === "knockout" && m.bracket_round === r);
-      if (!list.length) continue;
-      body += '<div class="roundblock"><h3>' + roundLabelFor(r, total) + '</h3>' + list.map(m => scheduleRow(m, true)).join("") + '</div>';
-    }
-  }
-  if (f !== "ko"){
-    for(const g of groups){
-      if (f !== "all" && f !== g) continue;
-      const list = played.filter(m => m.stage === "group" && m.group_name === g).sort((a, b) => a.round - b.round || a.play_order - b.play_order);
-      if (!list.length) continue;
-      body += '<div class="roundblock"><h3>Group ' + g + '</h3>' + list.map(m => scheduleRow(m, true)).join("") + '</div>';
-    }
-  }
-  return h + (body || '<div class="empty">No results here yet.</div>');
 }
 
 function renderStandings(){
@@ -1692,7 +1676,6 @@ function renderAdmin(){
     const hasMatches = data.matches.some(m => m.event_id === ev.id);
     const groupLeft = data.matches.filter(m => m.event_id === ev.id && m.stage === "group" && m.status === "scheduled").length;
     const koCount = data.matches.filter(m => m.event_id === ev.id && m.stage === "knockout").length;
-    const alloc = evSetting(ev, "courts", []);
     const evEntrants = data.entrants.filter(e => e.event_id === ev.id);
     const groups = groupsOfEvent(ev);
     const bog = evSetting(ev, "best_of_group", 1), bok = evSetting(ev, "best_of_knockout", 1);
@@ -1700,7 +1683,7 @@ function renderAdmin(){
 
     h += '<div class="panel">';
     h += '<div class="statusline"><h3 style="margin:0">' + esc(ev.name) + '</h3>' +
-      (ev.active ? '<span class="tag good">Running · courts ' + alloc.join(", ") + '</span>' : '<span class="tag plain">Not started</span>') +
+      (ev.active ? '<span class="tag good">Running</span>' : '<span class="tag plain">Not started</span>') +
       (koCount ? '<span class="tag">Knockout</span>' : '') + '</div>';
 
     h += '<h4>1 · Format and rules</h4>';
@@ -1759,21 +1742,14 @@ function renderAdmin(){
       }
     }
 
-    h += '<div class="divider"></div><h4>3 · Courts and start</h4>';
-    h += '<div class="courtchecks">';
-    for(let c = 1; c <= courtsCount(); c++){
-      const holder = data.events.find(e => e.active && e.id !== ev.id && (evSetting(e, "courts", [])).includes(c));
-      h += '<label><input type="checkbox" class="adm-court" value="' + c + '"' + (alloc.includes(c) ? ' checked' : '') + '> Court ' + c +
-        (holder ? ' <span class="holder">(' + esc(holder.name) + ')</span>' : '') + '</label>';
-    }
-    h += '</div>';
+    h += '<div class="divider"></div><h4>3 · Start and pause</h4>';
     h += '<div class="field" style="margin-top:6px"><label for="adm-note">Schedule note (shown to players, e.g. "Sat 9am")</label>' +
       '<input id="adm-note" type="text" value="' + esc(evSetting(ev, "schedule_note", "")) + '"></div>';
-    h += '<button class="btn small secondary" onclick="saveCourts()">Save courts and note</button> ';
+    h += '<button class="btn small secondary" onclick="saveNote()">Save note</button> ';
     h += ev.active
       ? '<button class="btn small secondary" onclick="setActive(false)">Pause event</button>'
       : '<button class="btn small" onclick="setActive(true)">Start event</button>';
-    h += '<p class="note" style="margin-top:8px">Ticking a court another running event holds will ask to take it over, no pausing needed. Court changes apply immediately.</p>';
+    h += '<p class="note" style="margin-top:8px">Courts are shared automatically: every free court takes the next match in line across all running events, alternating between them. Start a second event and they mix in; pause an event and its matches leave the courts and queue.</p>';
 
     h += '<div class="divider"></div><h4>4 · Finish group stage</h4>';
     if (koCount){
@@ -1786,13 +1762,17 @@ function renderAdmin(){
         '<button class="btn small' + (groupLeft ? ' secondary' : '') + '" ' + (hasMatches ? '' : 'disabled') + ' onclick="confirmGroupStage()">Confirm group stage finished</button>';
     }
 
-    h += '<div class="divider"></div><button class="btn small danger" onclick="deleteEvent()">Delete this event</button>';
+    h += '<div class="divider"></div><h4>5 · Export results</h4>';
+    h += '<p class="note">One row per played match, players split out of team names, one column pair per game. Made to copy into DUPR\'s club "Import Matches via CSV" template (download that template from the DUPR club dashboard; it wants each player\'s DUPR ID, so collect those with the roster).</p>';
+    h += '<button class="btn small secondary" onclick="downloadResults(false)">Download this event (CSV)</button> ' +
+      '<button class="btn small secondary" onclick="downloadResults(true)">Download all events (CSV)</button>';
     h += '</div>';
   }
 
   h += '<div class="panel"><h3>Admin powers on the other tabs</h3><p class="note">' +
-    'While unlocked: tap any match anywhere (Courts, Schedule, Results, a team in Standings, or the Bracket) to fix or clear its score, enter a walkover, or postpone. ' +
+    'While unlocked: tap any match anywhere (Courts, Schedule, a team in Standings, or the Bracket) to fix or clear its score, enter a walkover, or postpone. ' +
     'Players can only enter a score while a match is on a court; admins can score anything from anywhere. ' +
+    'An on-court match can be sent back with "Off court, up next": the next match in line takes its court and it plays next. ' +
     'The Courts tab has Postpone on the queue and Play next on postponed matches. On a "go to court" banner, ✓ On court dismisses it for everyone; a plain tap hides it only on that phone. ' +
     'On the Bracket tab, unplayed matches have an Edit teams link for manual fixes. ' +
     'Everything updates live on everyone\'s phone.</p></div>';
@@ -1831,8 +1811,8 @@ function renderScoreModal(){
   const adminExtras = () => {
     let x = '';
     if (isAdmin && m.status === "scheduled"){
-      x += '<button class="btn small secondary" onclick="postpone(\'' + m.id + '\', false, true)">Postpone</button>' +
-        '<button class="btn small secondary" onclick="postpone(\'' + m.id + '\', true, true)">To end</button>';
+      if (m.court != null) x += '<button class="btn small secondary" onclick="swapOut(\'' + m.id + '\')">Off court, up next</button>';
+      x += '<button class="btn small secondary" onclick="postpone(\'' + m.id + '\', false, true)">Postpone</button>';
     }
     if (isAdmin && played) x += '<button class="btn small danger" onclick="clearScore(\'' + m.id + '\')">Clear score</button>';
     return x;
@@ -1963,14 +1943,14 @@ function renderSlotModal(){
 
 /* ---------- actions ---------- */
 function setView(v){ state.view = v; state.setupPreview = null; render(); }
-function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.resultsFilter = "all"; state.standingsFilter = "all"; render(); }
+function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.standingsFilter = "all"; render(); }
 function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; render(); }
 function setRoundFilter(r){ state.roundFilter = String(r); render(); }
-function setResultsFilter(v){ state.resultsFilter = v; render(); }
 function setStandingsFilter(v){ state.standingsFilter = v; render(); }
 function dismissCallout(id){
   const m = data.matches.find(x => x.id === id);
   if (m) state.dismissedCalled[m.id + "|" + m.called_at] = true;
+  safeLocal("pb_dismissed", JSON.stringify(state.dismissedCalled));
   render();
 }
 function toggleAllQueue(){ state.showAllQueue = !state.showAllQueue; render(); }
@@ -2032,16 +2012,29 @@ function collectGames(bo){
 async function saveScore(matchId){
   const m = data.matches.find(x => x.id === matchId);
   const bo = m ? matchBestOf(m) : 1;
+  const pts = m ? matchPts(m) : 21;
   const errEl = document.getElementById("score-err");
   let r;
   if (bo > 1){
     const games = collectGames(bo);
+    /* Admin scores are free-form, but an off-format score must be
+       acknowledged so typos don't slip through as overrides. */
+    if (state.adminPin){
+      const strict = validateGames(games, pts, false, bo);
+      const lenient = validateGames(games, pts, true, bo);
+      if (!lenient.error && strict.error && !confirm(strict.error + " Save anyway (admin override)?")) return;
+    }
     r = state.adminPin
       ? await store.adminSubmitScore(state.adminPin, matchId, null, null, games, false)
       : await store.submitScore(matchId, null, null, games);
   } else {
     const s1 = parseInt(document.getElementById("score1").value, 10);
     const s2 = parseInt(document.getElementById("score2").value, 10);
+    if (state.adminPin){
+      const strict = validateScore(s1, s2, pts, false);
+      const lenient = validateScore(s1, s2, pts, true);
+      if (!lenient && strict && !confirm(strict + " Save anyway (admin override)?")) return;
+    }
     r = state.adminPin
       ? await store.adminSubmitScore(state.adminPin, matchId, s1, s2, null, false)
       : await store.submitScore(matchId, s1, s2);
@@ -2087,6 +2080,17 @@ async function playNext(matchId){
   const r = await store.adminPlayNext(state.adminPin, matchId);
   if (!r.ok){ toast(r.error || "Could not move it."); return; }
   toast("Moved to the front of the queue");
+  await reload();
+}
+async function swapOut(matchId){
+  const m = data.matches.find(x => x.id === matchId);
+  if (!m) return;
+  if (!confirm("Take " + (entrantName(m.entrant1_id) || "this match") + " vs " + (entrantName(m.entrant2_id) || "") +
+      " off Court " + m.court + "? The next match in line takes the court, and this one plays next.")) return;
+  const r = await store.adminSwapOut(state.adminPin, matchId);
+  if (!r.ok){ toast(r.error || "Could not move it."); return; }
+  state.modalMatchId = null;
+  toast("Off court, back up next");
   await reload();
 }
 async function ackCalled(matchId){
@@ -2137,48 +2141,23 @@ async function saveEventSettings(){
   if (!r.ok){ toast(r.error); return; }
   toast("Settings saved"); await reload();
 }
-async function saveCourts(){
+async function saveNote(){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
-  const courts = [...document.querySelectorAll(".adm-court:checked")].map(el => parseInt(el.value, 10));
   const note = document.getElementById("adm-note").value.trim();
-
-  const others = data.events.filter(e => e.active && e.id !== ev.id);
-  const conflicts = others
-    .map(o => ({ o, overlap: (evSetting(o, "courts", [])).filter(c => courts.includes(c)) }))
-    .filter(x => x.overlap.length);
-  if (conflicts.length){
-    const desc = conflicts.map(x => "court " + x.overlap.join(", ") + " from " + x.o.name).join(" and ");
-    if (!confirm("Take " + desc + " and give it to " + ev.name + "?")) return;
-    for(const x of conflicts){
-      const ns = Object.assign({}, x.o.settings, { courts: (evSetting(x.o, "courts", [])).filter(c => !x.overlap.includes(c)) });
-      const rr = await store.adminUpdateEvent(state.adminPin, x.o.id, x.o.name, ns);
-      if (!rr.ok){ toast(rr.error); return; }
-    }
-  }
-
-  const settings = Object.assign({}, ev.settings, { courts, schedule_note: note });
+  const settings = Object.assign({}, ev.settings, { schedule_note: note });
   const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, settings);
   if (!r.ok){ toast(r.error); return; }
-  toast("Courts saved"); await reload();
+  toast("Note saved"); await reload();
 }
 async function setActive(active){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
-  if (!active && !confirm("Pause " + ev.name + "? Its courts free up for other events.")) return;
+  if (!active && !confirm("Pause " + ev.name + "? Its matches leave the courts and queue until it starts again.")) return;
   const r = await store.adminSetActive(state.adminPin, ev.id, active);
   if (!r.ok){ toast(r.error); return; }
   toast(active ? "Event started" : "Event paused");
   await reload();
-}
-async function deleteEvent(){
-  const ev = eventById(state.adminEventId);
-  if (!ev) return;
-  if (!confirm('Delete "' + ev.name + '" and all its matches and scores? This cannot be undone.')) return;
-  const r = await store.adminDeleteEvent(state.adminPin, ev.id);
-  if (!r.ok){ toast(r.error); return; }
-  state.adminEventId = null;
-  toast("Event deleted"); await reload();
 }
 async function addEvent(){
   const name = prompt("Name for the new event:");
@@ -2332,6 +2311,55 @@ async function resetBracket(){
   toast("Back to group stage");
   await reload();
 }
+function csvCell(v){
+  v = String(v == null ? "" : v);
+  return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+}
+/* Results export: one row per played match, team names split into players,
+   per-game score column pairs. Copies cleanly into DUPR's club CSV template. */
+function downloadResults(allEvents){
+  const evs = allEvents
+    ? data.events.slice().sort((a, b) => a.sort_order - b.sort_order)
+    : [eventById(state.adminEventId)].filter(Boolean);
+  const played = [];
+  evs.forEach(ev => {
+    data.matches
+      .filter(m => m.event_id === ev.id && m.status === "played" && m.score1 != null)
+      .sort((a, b) => (a.stage === b.stage ? a.play_order - b.play_order : a.stage === "group" ? -1 : 1))
+      .forEach(m => played.push([ev, m]));
+  });
+  if (!played.length){ toast("No played matches to export yet."); return; }
+  const maxGames = Math.max(1, ...played.map(([, m]) => Array.isArray(m.games) ? m.games.length : 1));
+  const head = ["Event", "Stage", "Date", "Format",
+    "Team 1 Player A", "Team 1 Player B", "Team 2 Player A", "Team 2 Player B"];
+  for(let g = 1; g <= maxGames; g++) head.push("Game " + g + " Team 1", "Game " + g + " Team 2");
+  head.push("Winner", "Notes");
+  const lines = [head.map(csvCell).join(",")];
+  played.forEach(([ev, m]) => {
+    const split = id => {
+      const parts = (entrantName(id) || "").split(" & ");
+      return [parts[0] || "", parts[1] || ""];
+    };
+    const [a1, a2] = split(m.entrant1_id), [b1, b2] = split(m.entrant2_id);
+    const d = m.updated_at ? new Date(m.updated_at) : null;
+    const date = d && !isNaN(d) ? (d.getMonth() + 1) + "/" + d.getDate() + "/" + d.getFullYear() : "";
+    const row = [ev.name, m.stage === "group" ? "Group " + (m.group_name || "") : koLabel(m), date,
+      a2 || b2 ? "Doubles" : "Singles", a1, a2, b1, b2];
+    const games = Array.isArray(m.games) && m.games.length ? m.games : [[m.score1, m.score2]];
+    for(let g = 0; g < maxGames; g++) row.push(games[g] ? games[g][0] : "", games[g] ? games[g][1] : "");
+    row.push(entrantName(m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id) || "", m.walkover ? "Walkover" : "");
+    lines.push(row.map(csvCell).join(","));
+  });
+  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = (allEvents ? "nairobi-open-results-all" : "nairobi-open-results-" +
+    (evs[0] ? evs[0].name.toLowerCase().replace(/[^a-z0-9]+/g, "-") : "event")) + ".csv";
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  toast("CSV downloaded: " + (lines.length - 1) + " matches");
+}
 async function doChangePin(){
   const oldPin = document.getElementById("adm-oldpin").value.trim();
   const newPin = document.getElementById("adm-newpin").value.trim();
@@ -2345,6 +2373,7 @@ async function doChangePin(){
 
 /* ---------- init ---------- */
 (async function init(){
+  state.dismissedCalled = loadDismissedCalled();
   const savedPin = safeSession("pb_admin_pin");
   if (savedPin){
     const r = await store.verifyPin(savedPin).catch(() => ({ ok: false }));

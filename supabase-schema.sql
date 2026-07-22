@@ -45,7 +45,7 @@ create table if not exists nairobi_events (
   sort_order int not null default 0,
   stage text not null default 'group',        -- 'group' or 'knockout'
   active boolean not null default false,      -- true while feeding the courts
-  settings jsonb not null default '{"points_to_group": 21, "points_to_knockout": 21, "best_of_group": 1, "best_of_knockout": 1, "advance_per_group": 2, "knockout_size": "auto", "group_size": 6, "courts": [], "schedule_note": ""}'::jsonb,
+  settings jsonb not null default '{"points_to_group": 21, "points_to_knockout": 21, "best_of_group": 1, "best_of_knockout": 1, "advance_per_group": 2, "knockout_size": "auto", "group_size": 6, "schedule_note": ""}'::jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -100,6 +100,13 @@ drop policy if exists "public read nairobi_entrants" on nairobi_entrants;
 create policy "public read nairobi_entrants" on nairobi_entrants for select using (true);
 drop policy if exists "public read nairobi_matches" on nairobi_matches;
 create policy "public read nairobi_matches" on nairobi_matches for select using (true);
+
+-- ---------- migrations from earlier versions of this file ----------
+-- (safe no-ops on a fresh install)
+
+drop function if exists nairobi_assign_courts(uuid);      -- replaced by the shared-pool nairobi_assign_courts()
+drop function if exists nairobi_courts_conflict(uuid, jsonb);  -- per-event court allocation removed
+drop function if exists nairobi_admin_delete_event(text, uuid); -- deleting whole events is intentionally not possible
 
 -- ---------- helpers ----------
 
@@ -157,40 +164,42 @@ begin
 end;
 $$;
 
--- Internal: give free allocated courts to the next matches in line for an event.
-create or replace function nairobi_assign_courts(p_event_id uuid)
+-- Internal: shared court pool. Every free court takes the next match from
+-- the cross-event queue, which alternates between active events in event
+-- order (the same weave the app shows as "Up next").
+create or replace function nairobi_assign_courts()
 returns void
 language plpgsql security definer set search_path = public
 as $$
 declare
-  ev nairobi_events;
+  total int;
   c int;
   next_id uuid;
 begin
-  select * into ev from nairobi_events where id = p_event_id;
-  if not found then return; end if;
-  perform pg_advisory_xact_lock(hashtext('nairobi_' || p_event_id::text));
+  select coalesce(nullif(settings ->> 'courts', '')::int, 4) into total from nairobi_tournaments limit 1;
+  if total is null then return; end if;
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
 
-  if not ev.active then
-    update nairobi_matches set court = null, updated_at = now()
-    where event_id = p_event_id and status = 'scheduled' and court is not null;
-    return;
-  end if;
+  -- matches of paused events leave their courts
+  update nairobi_matches m set court = null, updated_at = now()
+  where m.status = 'scheduled' and m.court is not null
+    and not exists (select 1 from nairobi_events e where e.id = m.event_id and e.active);
 
-  -- drop assignments to courts no longer allocated to this event
-  update nairobi_matches set court = null, updated_at = now()
-  where event_id = p_event_id and status = 'scheduled' and court is not null
-    and not (court in (select (jsonb_array_elements_text(coalesce(ev.settings -> 'courts', '[]'::jsonb)))::int));
-
-  for c in select (jsonb_array_elements_text(coalesce(ev.settings -> 'courts', '[]'::jsonb)))::int loop
-    -- a court is busy if any scheduled match (any event) holds it
+  for c in 1..total loop
     if exists (select 1 from nairobi_matches where status = 'scheduled' and court = c) then continue; end if;
-    select id into next_id from nairobi_matches
-    where event_id = p_event_id and status = 'scheduled' and court is null
-      and entrant1_id is not null and entrant2_id is not null
-    order by play_order limit 1;
+    next_id := null;
+    with pending as (
+      select mm.id, e.sort_order,
+             row_number() over (partition by mm.event_id order by mm.play_order) as rn
+      from nairobi_matches mm
+      join nairobi_events e on e.id = mm.event_id and e.active
+      where mm.status = 'scheduled' and mm.court is null
+        and mm.entrant1_id is not null and mm.entrant2_id is not null
+    )
+    select id into next_id from pending order by rn, sort_order limit 1;
     exit when next_id is null;
-    update nairobi_matches set court = c, postponed = false, called_at = now(), called_ack = false, updated_at = now()
+    update nairobi_matches
+    set court = c, postponed = false, called_at = now(), called_ack = false, updated_at = now()
     where id = next_id;
   end loop;
 end;
@@ -286,7 +295,7 @@ begin
   where id = p_match_id;
 
   perform nairobi_advance_winner(p_match_id);
-  perform nairobi_assign_courts(m.event_id);
+  perform nairobi_assign_courts();
   return 'OK';
 end;
 $$;
@@ -340,7 +349,7 @@ begin
   where id = p_match_id;
 
   perform nairobi_advance_winner(p_match_id);
-  perform nairobi_assign_courts(m.event_id);
+  perform nairobi_assign_courts();
   return 'OK';
 end;
 $$;
@@ -374,7 +383,51 @@ begin
   select coalesce(min(play_order), m.play_order) - 1 into front
   from nairobi_matches where event_id = m.event_id and status = 'scheduled' and id <> m.id;
   update nairobi_matches set play_order = front, postponed = false, updated_at = now() where id = p_match_id;
-  perform nairobi_assign_courts(m.event_id);
+  perform nairobi_assign_courts();
+  return 'OK';
+end;
+$$;
+
+-- Take an on-court match off its court: the next match in line takes the
+-- court immediately, and this one moves to the front of its event's queue.
+create or replace function nairobi_admin_swap_out(p_pin text, p_match_id uuid)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  m nairobi_matches;
+  repl uuid;
+  front numeric;
+begin
+  if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  select * into m from nairobi_matches where id = p_match_id for update;
+  if not found then return 'Match not found.'; end if;
+  if m.status <> 'scheduled' or m.court is null then return 'That match is not on a court.'; end if;
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
+
+  with pending as (
+    select mm.id, e.sort_order,
+           row_number() over (partition by mm.event_id order by mm.play_order) as rn
+    from nairobi_matches mm
+    join nairobi_events e on e.id = mm.event_id and e.active
+    where mm.status = 'scheduled' and mm.court is null
+      and mm.entrant1_id is not null and mm.entrant2_id is not null
+      and mm.id <> p_match_id
+  )
+  select id into repl from pending order by rn, sort_order limit 1;
+  if repl is null then return 'No other match is waiting, so it stays on court.'; end if;
+
+  update nairobi_matches
+  set court = m.court, postponed = false, called_at = now(), called_ack = false, updated_at = now()
+  where id = repl;
+
+  select coalesce(min(play_order), m.play_order) - 1 into front
+  from nairobi_matches
+  where event_id = m.event_id and status = 'scheduled' and court is null and id <> p_match_id;
+
+  update nairobi_matches
+  set court = null, play_order = front, postponed = false, called_at = null, called_ack = false, updated_at = now()
+  where id = p_match_id;
   return 'OK';
 end;
 $$;
@@ -409,7 +462,7 @@ begin
   set score1 = null, score2 = null, games = null, walkover = false,
       status = 'scheduled', court = null, updated_at = now()
   where id = p_match_id;
-  perform nairobi_assign_courts(m.event_id);
+  perform nairobi_assign_courts();
   return 'OK';
 end;
 $$;
@@ -443,26 +496,8 @@ begin
   end if;
 
   update nairobi_matches set play_order = anchor, postponed = true, court = null, updated_at = now() where id = p_match_id;
-  perform nairobi_assign_courts(m.event_id);
+  perform nairobi_assign_courts();
   return 'OK';
-end;
-$$;
-
--- Internal: overlap check against other ACTIVE events' court allocations.
-create or replace function nairobi_courts_conflict(p_event_id uuid, p_courts jsonb)
-returns text
-language plpgsql stable security definer set search_path = public
-as $$
-declare
-  msg text;
-begin
-  select 'Court ' || string_agg(distinct cc.c::text, ', ') || ' is already used by ' || min(e2.name) || '.'
-  into msg
-  from nairobi_events e2,
-       lateral (select (jsonb_array_elements_text(coalesce(e2.settings -> 'courts', '[]'::jsonb)))::int as c) cc
-  where e2.active and e2.id <> p_event_id
-    and cc.c in (select (jsonb_array_elements_text(coalesce(p_courts, '[]'::jsonb)))::int);
-  return msg;
 end;
 $$;
 
@@ -470,20 +505,12 @@ create or replace function nairobi_admin_update_event(p_pin text, p_event_id uui
 returns text
 language plpgsql security definer set search_path = public
 as $$
-declare
-  ev nairobi_events;
-  conflict text;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
-  select * into ev from nairobi_events where id = p_event_id;
-  if not found then return 'Event not found.'; end if;
-  if ev.active then
-    conflict := nairobi_courts_conflict(p_event_id, coalesce(p_settings -> 'courts', '[]'::jsonb));
-    if conflict is not null then return conflict; end if;
-  end if;
   update nairobi_events set name = coalesce(p_name, name), settings = coalesce(p_settings, settings)
   where id = p_event_id;
-  perform nairobi_assign_courts(p_event_id);
+  if not found then return 'Event not found.'; end if;
+  perform nairobi_assign_courts();
   return 'OK';
 end;
 $$;
@@ -492,25 +519,14 @@ create or replace function nairobi_admin_set_active(p_pin text, p_event_id uuid,
 returns text
 language plpgsql security definer set search_path = public
 as $$
-declare
-  ev nairobi_events;
-  conflict text;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
-  select * into ev from nairobi_events where id = p_event_id;
-  if not found then return 'Event not found.'; end if;
-  if p_active then
-    if not exists (select 1 from nairobi_matches where event_id = p_event_id) then
-      return 'Draw groups first, then start the event.';
-    end if;
-    if jsonb_array_length(coalesce(ev.settings -> 'courts', '[]'::jsonb)) = 0 then
-      return 'Pick at least one court, save, then start.';
-    end if;
-    conflict := nairobi_courts_conflict(p_event_id, ev.settings -> 'courts');
-    if conflict is not null then return conflict; end if;
+  if not exists (select 1 from nairobi_events where id = p_event_id) then return 'Event not found.'; end if;
+  if p_active and not exists (select 1 from nairobi_matches where event_id = p_event_id) then
+    return 'Draw groups first, then start the event.';
   end if;
   update nairobi_events set active = p_active where id = p_event_id;
-  perform nairobi_assign_courts(p_event_id);
+  perform nairobi_assign_courts();
   return 'OK';
 end;
 $$;
@@ -566,19 +582,8 @@ begin
          null, (x ->> 'next_match_id')::uuid, (x ->> 'next_slot')::int
   from jsonb_array_elements(coalesce(p_matches, '[]'::jsonb)) x;
 
+  perform nairobi_assign_courts();
   return 'OK:' || v_eid;
-end;
-$$;
-
-create or replace function nairobi_admin_delete_event(p_pin text, p_event_id uuid)
-returns text
-language plpgsql security definer set search_path = public
-as $$
-begin
-  if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
-  delete from nairobi_events where id = p_event_id;
-  if not found then return 'Event not found.'; end if;
-  return 'OK';
 end;
 $$;
 
@@ -610,7 +615,7 @@ begin
   end if;
   delete from nairobi_matches where entrant1_id = p_entrant_id or entrant2_id = p_entrant_id;
   delete from nairobi_entrants where id = p_entrant_id;
-  perform nairobi_assign_courts(e.event_id);
+  perform nairobi_assign_courts();
   return 'OK';
 end;
 $$;
@@ -637,7 +642,7 @@ begin
          null, null, null
   from jsonb_array_elements(coalesce(p_matches, '[]'::jsonb)) x;
 
-  perform nairobi_assign_courts(p_event_id);
+  perform nairobi_assign_courts();
   return 'OK';
 end;
 $$;
@@ -671,7 +676,7 @@ begin
          null, null, null
   from jsonb_array_elements(coalesce(p_matches, '[]'::jsonb)) x;
 
-  perform nairobi_assign_courts(e.event_id);
+  perform nairobi_assign_courts();
   return 'OK';
 end;
 $$;
@@ -691,7 +696,7 @@ begin
   if m.status = 'played' then return 'This match already has a score. Clear it first.'; end if;
   update nairobi_matches set entrant1_id = p_entrant1_id, entrant2_id = p_entrant2_id, updated_at = now()
   where id = p_match_id;
-  perform nairobi_assign_courts(m.event_id);
+  perform nairobi_assign_courts();
   return 'OK';
 end;
 $$;
@@ -720,7 +725,7 @@ begin
   from jsonb_array_elements(coalesce(p_matches, '[]'::jsonb)) x;
 
   update nairobi_events set stage = 'knockout' where id = p_event_id;
-  perform nairobi_assign_courts(p_event_id);
+  perform nairobi_assign_courts();
   return 'OK';
 end;
 $$;
@@ -734,7 +739,7 @@ begin
   if not exists (select 1 from nairobi_events where id = p_event_id) then return 'Event not found.'; end if;
   delete from nairobi_matches where event_id = p_event_id and stage = 'knockout';
   update nairobi_events set stage = 'group' where id = p_event_id;
-  perform nairobi_assign_courts(p_event_id);
+  perform nairobi_assign_courts();
   return 'OK';
 end;
 $$;
@@ -742,10 +747,9 @@ $$;
 -- ---------- permissions ----------
 
 revoke execute on function nairobi_advance_winner(uuid) from public, anon, authenticated;
-revoke execute on function nairobi_assign_courts(uuid) from public, anon, authenticated;
+revoke execute on function nairobi_assign_courts() from public, anon, authenticated;
 revoke execute on function nairobi_check_score(uuid, text, int, int, jsonb, boolean) from public, anon, authenticated;
 revoke execute on function nairobi_ev_int_setting(uuid, text, int) from public, anon, authenticated;
-revoke execute on function nairobi_courts_conflict(uuid, jsonb) from public, anon, authenticated;
 
 grant execute on function nairobi_verify_pin(text) to anon, authenticated;
 grant execute on function nairobi_change_admin_pin(text, text) to anon, authenticated;
@@ -754,12 +758,12 @@ grant execute on function nairobi_admin_submit_score(text, uuid, int, int, jsonb
 grant execute on function nairobi_admin_clear_score(text, uuid) to anon, authenticated;
 grant execute on function nairobi_admin_postpone(text, uuid, boolean) to anon, authenticated;
 grant execute on function nairobi_admin_play_next(text, uuid) to anon, authenticated;
+grant execute on function nairobi_admin_swap_out(text, uuid) to anon, authenticated;
 grant execute on function nairobi_admin_ack_called(text, uuid) to anon, authenticated;
 grant execute on function nairobi_admin_move_entrant(text, uuid, text, jsonb) to anon, authenticated;
 grant execute on function nairobi_admin_update_event(text, uuid, text, jsonb) to anon, authenticated;
 grant execute on function nairobi_admin_set_active(text, uuid, boolean) to anon, authenticated;
 grant execute on function nairobi_admin_replace_event(text, uuid, text, int, jsonb, jsonb, jsonb) to anon, authenticated;
-grant execute on function nairobi_admin_delete_event(text, uuid) to anon, authenticated;
 grant execute on function nairobi_admin_rename_entrant(text, uuid, text) to anon, authenticated;
 grant execute on function nairobi_admin_remove_entrant(text, uuid) to anon, authenticated;
 grant execute on function nairobi_admin_add_entrant(text, uuid, jsonb, jsonb) to anon, authenticated;
@@ -822,19 +826,18 @@ select
 -- drop function if exists nairobi_admin_add_entrant(text, uuid, jsonb, jsonb);
 -- drop function if exists nairobi_admin_remove_entrant(text, uuid);
 -- drop function if exists nairobi_admin_rename_entrant(text, uuid, text);
--- drop function if exists nairobi_admin_delete_event(text, uuid);
 -- drop function if exists nairobi_admin_replace_event(text, uuid, text, int, jsonb, jsonb, jsonb);
 -- drop function if exists nairobi_admin_set_active(text, uuid, boolean);
 -- drop function if exists nairobi_admin_update_event(text, uuid, text, jsonb);
--- drop function if exists nairobi_courts_conflict(uuid, jsonb);
 -- drop function if exists nairobi_admin_postpone(text, uuid, boolean);
 -- drop function if exists nairobi_admin_clear_score(text, uuid);
 -- drop function if exists nairobi_admin_play_next(text, uuid);
+-- drop function if exists nairobi_admin_swap_out(text, uuid);
 -- drop function if exists nairobi_admin_ack_called(text, uuid);
 -- drop function if exists nairobi_admin_submit_score(text, uuid, int, int, jsonb, boolean);
 -- drop function if exists nairobi_submit_score(uuid, int, int, jsonb);
 -- drop function if exists nairobi_check_score(uuid, text, int, int, jsonb, boolean);
--- drop function if exists nairobi_assign_courts(uuid);
+-- drop function if exists nairobi_assign_courts();
 -- drop function if exists nairobi_advance_winner(uuid);
 -- drop function if exists nairobi_ev_int_setting(uuid, text, int);
 -- drop function if exists nairobi_change_admin_pin(text, text);
