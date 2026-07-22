@@ -164,17 +164,22 @@ begin
 end;
 $$;
 
--- Internal: shared court pool. Every free court takes the next match from
--- the cross-event queue, which alternates between active events in event
--- order (the same weave the app shows as "Up next").
+-- Internal: shared court pool, weighted by how many matches each active event
+-- still has waiting. An event with more waiting matches appears proportionally
+-- earlier in the cross-event queue, so it claims proportionally more courts.
+-- A match only lands on a court its event may use: settings.courts (a JSON
+-- array of court numbers) restricts an event; absent or empty means every
+-- court. This is the same weave the app shows as "Up next".
 create or replace function nairobi_assign_courts()
 returns void
 language plpgsql security definer set search_path = public
 as $$
 declare
   total int;
-  c int;
-  next_id uuid;
+  free_courts int[];
+  rec record;
+  allowed int[];
+  chosen int;
 begin
   select coalesce(nullif(settings ->> 'courts', '')::int, 4) into total from nairobi_tournaments limit 1;
   if total is null then return; end if;
@@ -185,25 +190,80 @@ begin
   where m.status = 'scheduled' and m.court is not null
     and not exists (select 1 from nairobi_events e where e.id = m.event_id and e.active);
 
-  for c in 1..total loop
-    if exists (select 1 from nairobi_matches where status = 'scheduled' and court = c) then continue; end if;
-    next_id := null;
-    with pending as (
-      select mm.id, e.sort_order,
-             row_number() over (partition by mm.event_id order by mm.play_order) as rn
-      from nairobi_matches mm
-      join nairobi_events e on e.id = mm.event_id and e.active
-      where mm.status = 'scheduled' and mm.court is null
-        and mm.entrant1_id is not null and mm.entrant2_id is not null
-    )
-    select id into next_id from pending order by rn, sort_order limit 1;
-    exit when next_id is null;
-    update nairobi_matches
-    set court = c, postponed = false, called_at = now(), called_ack = false, updated_at = now()
-    where id = next_id;
+  -- courts with no scheduled match on them right now
+  select coalesce(array_agg(c order by c), '{}') into free_courts
+  from generate_series(1, total) c
+  where not exists (select 1 from nairobi_matches where status = 'scheduled' and court = c);
+
+  -- walk the weighted cross-event queue, dropping each match on the lowest free
+  -- court its event is allowed to use, until the courts (or the queue) run out
+  for rec in
+    select q.id, ev.settings as evsettings
+    from (
+      select m2.id, m2.event_id, m2.play_order,
+             ((row_number() over (partition by m2.event_id order by m2.play_order) - 1) + 0.5)
+               / count(*) over (partition by m2.event_id) as frac
+      from nairobi_matches m2
+      join nairobi_events e on e.id = m2.event_id and e.active
+      where m2.status = 'scheduled' and m2.court is null
+        and m2.entrant1_id is not null and m2.entrant2_id is not null
+    ) q
+    join nairobi_events ev on ev.id = q.event_id
+    order by q.frac, ev.sort_order, q.play_order
+  loop
+    exit when array_length(free_courts, 1) is null;
+    if rec.evsettings ? 'courts'
+       and jsonb_typeof(rec.evsettings -> 'courts') = 'array'
+       and jsonb_array_length(rec.evsettings -> 'courts') > 0 then
+      select array_agg((value)::int) into allowed
+      from jsonb_array_elements_text(rec.evsettings -> 'courts');
+    else
+      allowed := null;
+    end if;
+
+    select c into chosen from unnest(free_courts) c
+    where allowed is null or c = any(allowed)
+    order by c limit 1;
+
+    if chosen is not null then
+      update nairobi_matches
+      set court = chosen, postponed = false, called_at = now(), called_ack = false, updated_at = now()
+      where id = rec.id;
+      free_courts := array_remove(free_courts, chosen);
+    end if;
   end loop;
 end;
 $$;
+
+-- Admin: place a specific waiting match onto a specific free court by hand,
+-- overriding the automatic pool. Other free courts still fill automatically.
+create or replace function nairobi_admin_assign_court(p_pin text, p_match_id uuid, p_court int)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  m nairobi_matches;
+  total int;
+begin
+  if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  select coalesce(nullif(settings ->> 'courts', '')::int, 4) into total from nairobi_tournaments limit 1;
+  select * into m from nairobi_matches where id = p_match_id for update;
+  if not found then return 'Match not found.'; end if;
+  if m.status <> 'scheduled' or m.court is not null then return 'That match is not waiting for a court.'; end if;
+  if m.entrant1_id is null or m.entrant2_id is null then return 'This match''s teams are not set yet.'; end if;
+  if p_court < 1 or p_court > total then return 'No such court.'; end if;
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
+  if exists (select 1 from nairobi_matches where status = 'scheduled' and court = p_court) then
+    return 'Court ' || p_court || ' was just filled. Pick another.';
+  end if;
+  update nairobi_matches
+  set court = p_court, postponed = false, called_at = now(), called_ack = false, updated_at = now()
+  where id = p_match_id;
+  perform nairobi_assign_courts();
+  return 'OK';
+end;
+$$;
+grant execute on function nairobi_admin_assign_court(text, uuid, int) to anon, authenticated;
 
 -- Internal: validate and normalize a score. Returns error text, or null and
 -- sets out params. Games format: [[a,b],[a,b],...].

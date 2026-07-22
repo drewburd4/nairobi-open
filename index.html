@@ -397,21 +397,19 @@ function buildCatchupMatches(eventId, groupName, newId, memberIds, startRound, s
   }));
 }
 
-/* Merge per-event pending lists by alternating between events. */
+/* Merge per-event pending lists into one queue, weighted by list length: an
+   event with more waiting matches appears proportionally more often, so it
+   claims proportionally more courts. Each match gets a fractional key
+   (position + 0.5) / count, and the queue is those keys ascending (ties broken
+   by event order). An equal split falls back to plain alternation. */
 function weaveQueues(lists){
-  const out = [];
-  const idx = lists.map(() => 0);
-  let remaining = lists.reduce((s, l) => s + l.length, 0);
-  while(remaining > 0){
-    for(let e = 0; e < lists.length; e++){
-      if (idx[e] < lists[e].length){
-        out.push(lists[e][idx[e]]);
-        idx[e]++;
-        remaining--;
-      }
-    }
-  }
-  return out;
+  const items = [];
+  lists.forEach((list, e) => {
+    const n = list.length;
+    for(let i = 0; i < n; i++) items.push({ m: list[i], e: e, key: (i + 0.5) / n });
+  });
+  items.sort((a, b) => a.key - b.key || a.e - b.e);
+  return items.map(x => x.m);
 }
 
 /* Points for/against of one side of a match, summing games when present. */
@@ -651,13 +649,17 @@ function assignCourtsGlobal(db){
     if (!ev || !ev.active) m.court = null;
   });
   const taken = new Set(db.matches.filter(m => m.status === "scheduled" && m.court != null).map(m => m.court));
+  const free = [];
+  for(let c = 1; c <= total; c++) if (!taken.has(c)) free.push(c);
   const queue = weavePending(db);
-  let qi = 0;
-  for(let c = 1; c <= total; c++){
-    if (taken.has(c)) continue;
-    const next = queue[qi++];
-    if (!next) break;
-    next.court = c; taken.add(c);
+  for(const next of queue){
+    if (!free.length) break;
+    const ev = db.events.find(e => e.id === next.event_id);
+    const allowed = ev && ev.settings && Array.isArray(ev.settings.courts) && ev.settings.courts.length ? ev.settings.courts : null;
+    let idx = -1;
+    for(let k = 0; k < free.length; k++){ if (!allowed || allowed.includes(free[k])){ idx = k; break; } }
+    if (idx === -1) continue;
+    next.court = free[idx]; free.splice(idx, 1);
     next.postponed = false;
     next.called_at = new Date().toISOString();
     next.called_ack = false;
@@ -948,6 +950,20 @@ function demoStore(){
       m.called_ack = true;
       notify(); return ok();
     },
+    async adminAssignCourt(pin, matchId, court){
+      if (!checkPin(pin)) return fail("Wrong PIN.");
+      const m = findMatch(matchId);
+      if (!m) return fail("Match not found.");
+      if (m.status !== "scheduled" || m.court != null) return fail("That match is not waiting for a court.");
+      if (!m.entrant1_id || !m.entrant2_id) return fail("This match's teams aren't set yet.");
+      const total = (db.tournament && db.tournament.settings && db.tournament.settings.courts) || 4;
+      if (!(court >= 1 && court <= total)) return fail("No such court.");
+      if (db.matches.some(x => x.status === "scheduled" && x.court === court)) return fail("Court " + court + " was just filled. Pick another.");
+      m.court = court; m.postponed = false;
+      m.called_at = new Date().toISOString(); m.called_ack = false;
+      assignCourtsGlobal(db);
+      notify(); return ok();
+    },
     async adminUpdateEvent(pin, eventId, name, settings){
       if (!checkPin(pin)) return fail("Wrong PIN.");
       const ev = db.events.find(e => e.id === eventId);
@@ -1121,6 +1137,7 @@ function liveStore(){
     adminPlayNext: (pin, id) => rpc("nairobi_admin_play_next", { p_pin: pin, p_match_id: id }),
     adminSwapOut: (pin, id) => rpc("nairobi_admin_swap_out", { p_pin: pin, p_match_id: id }),
     adminAckCalled: (pin, id) => rpc("nairobi_admin_ack_called", { p_pin: pin, p_match_id: id }),
+    adminAssignCourt: (pin, id, court) => rpc("nairobi_admin_assign_court", { p_pin: pin, p_match_id: id, p_court: court }),
     adminUpdateEvent: (pin, eventId, name, settings) => rpc("nairobi_admin_update_event", { p_pin: pin, p_event_id: eventId, p_name: name, p_settings: settings }),
     adminSetActive: (pin, eventId, active) => rpc("nairobi_admin_set_active", { p_pin: pin, p_event_id: eventId, p_active: !!active }),
     adminReplaceEvent: async (pin, eventId, meta, entrants, matches) => {
@@ -1155,7 +1172,7 @@ let data = { tournament: null, events: [], entrants: [], matches: [] };
 const state = {
   view: "board", eventId: null, search: "", roundFilter: "all",
   standingsFilter: "all",
-  adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null,
+  adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null, assignCourt: null,
   setupPreview: null, adminEventId: null, loadError: null,
   showAllQueue: false, showRedraw: false, pendingRender: false,
   dismissedCalled: {}, contacts: {}, bkCentered: false
@@ -1326,6 +1343,7 @@ function render(){
   html += renderScoreModal();
   html += renderTeamModal();
   html += renderSlotModal();
+  html += renderCourtAssignModal();
   if (!commitHtml(app, html)) return;
 
   if (restoreId){
@@ -1406,6 +1424,7 @@ function renderBoard(){
   }
 
   const on = onCourtMatches();
+  const q = pendingQueue();
   h += '<div class="section-h"><h2>On court</h2></div>';
   h += '<div class="courtgrid">';
   for(let c = 1; c <= courtsCount(); c++){
@@ -1420,13 +1439,22 @@ function renderBoard(){
         '<div class="team">' + esc(entrantName(m.entrant2_id)) + '</div>' +
         '<div class="cta">Tap to enter the score</div></button>';
     } else {
-      h += '<div class="courtcard idle"><div class="chead"><span class="cnum">Court ' + c + '</span></div>' +
-        '<div class="team">Free</div></div>';
+      const canPlace = state.adminPin && q.length > 0;
+      const reason = q.length > 0
+        ? (state.adminPin ? 'Tap to place a match' : 'Waiting for a free court')
+        : 'No match ready yet';
+      if (canPlace){
+        h += '<button class="courtcard idle" onclick="openCourtAssign(' + c + ')">' +
+          '<div class="chead"><span class="cnum">Court ' + c + '</span></div>' +
+          '<div class="team">Free</div><div class="cta">' + reason + '</div></button>';
+      } else {
+        h += '<div class="courtcard idle"><div class="chead"><span class="cnum">Court ' + c + '</span></div>' +
+          '<div class="team">Free</div><div class="note" style="margin-top:4px">' + reason + '</div></div>';
+      }
     }
   }
   h += '</div>';
 
-  const q = pendingQueue();
   const upNext = q.slice(0, 8);
   if (upNext.length){
     h += '<div class="section-h"><h2>Up next</h2></div><div class="roundblock" style="padding-top:2px">';
@@ -2014,6 +2042,34 @@ function renderSlotModal(){
   return h;
 }
 
+/* Admin: pick a waiting match to drop onto a specific free court. Lists the
+   whole cross-event queue so any waiting match can override the auto pool. */
+function renderCourtAssignModal(){
+  if (state.assignCourt == null) return "";
+  const c = state.assignCourt;
+  const q = pendingQueue();
+  const multi = activeEvents().length > 1;
+  let h = '<div class="overlay" onclick="if(event.target===this)closeCourtAssign()"><div class="modal" role="dialog" aria-modal="true">';
+  h += '<h3>Put a match on Court ' + c + '</h3>';
+  h += '<div class="sub">Pick a waiting match to send to Court ' + c + ' now.</div>';
+  if (!q.length){
+    h += '<p class="note">No match is waiting right now.</p>';
+  } else {
+    h += '<div class="roundblock" style="padding-top:2px">';
+    h += q.slice(0, 40).map((m, i) => {
+      const ev = eventById(m.event_id);
+      return '<button class="queue-row click" onclick="assignToCourt(\'' + m.id + '\', ' + c + ')">' +
+        '<span class="qpos">' + (i + 1) + '</span>' +
+        '<span class="qnames">' + esc(entrantName(m.entrant1_id)) + ' <span class="qv">vs</span> ' + esc(entrantName(m.entrant2_id)) + '</span>' +
+        (multi && ev ? '<span class="qtag">' + esc(ev.name) + '</span>' : '') + '</button>';
+    }).join("");
+    h += '</div>';
+  }
+  h += '<div class="actions"><span class="spacer"></span><button class="btn secondary" onclick="closeCourtAssign()">Cancel</button></div>';
+  h += '</div></div>';
+  return h;
+}
+
 /* ---------- actions ---------- */
 function setView(v){ state.view = v; state.setupPreview = null; state.bkCentered = false; render(); }
 function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.standingsFilter = "all"; state.bkCentered = false; render(); }
@@ -2036,9 +2092,12 @@ function openTeam(id){ state.teamModalId = id; render(); }
 function closeTeam(){ state.teamModalId = null; render(); }
 function openSlotEditor(id){ state.slotEditId = id; render(); }
 function closeSlotEditor(){ state.slotEditId = null; render(); }
+function openCourtAssign(c){ state.assignCourt = c; render(); }
+function closeCourtAssign(){ state.assignCourt = null; render(); }
 document.addEventListener("keydown", e => {
   if (e.key === "Escape"){
     if (state.modalMatchId) closeModal();
+    else if (state.assignCourt != null) closeCourtAssign();
     else if (state.slotEditId) closeSlotEditor();
     else if (state.teamModalId) closeTeam();
   }
@@ -2176,6 +2235,13 @@ async function swapOut(matchId){
 async function ackCalled(matchId){
   const r = await store.adminAckCalled(state.adminPin, matchId);
   if (!r.ok){ toast(r.error); return; }
+  await reload();
+}
+async function assignToCourt(matchId, court){
+  const r = await store.adminAssignCourt(state.adminPin, matchId, court);
+  if (!r.ok){ toast(r.error || "Could not place it."); return; }
+  state.assignCourt = null;
+  toast("On Court " + court);
   await reload();
 }
 async function saveSlots(matchId){
