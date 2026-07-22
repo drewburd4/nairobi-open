@@ -5,6 +5,7 @@ A one-file tournament app: group stages, court assignments, public score entry, 
 - `index.html`: the whole app.
 - `supabase-schema.sql`: database schema plus all server-side rules. Run once in the Supabase SQL editor.
 - `supabase-testdata.sql`: the sample tournament data (generated). Run after the schema; re-run any time to reset the samples.
+- `supabase-sms.sql` + `sms-function.ts`: the optional SMS add-on (see the SMS section).
 - Live site: https://drewburd4.github.io/nairobi-open/ (GitHub repo: drewburd4/nairobi-open, deploys from `main`).
 
 ## Current status
@@ -42,14 +43,20 @@ The key in `index.html` is Supabase's publishable key, designed to be public; ev
 - End of day or event: Admin → Export results (CSV) for DUPR or records.
 - Useful trick: keep one phone or laptop at the desk open to the Courts tab; it updates live and works as the announcement board.
 
-## Possible add-on: notify players when they're on court
+## SMS: "you're on court" texts (built in, off until set up)
 
-Not built yet; feasibility notes so the thinking is saved:
+When a match is assigned a court, every phone number saved for its two teams gets a text via Africa's Talking (~1KSh each; account app name "Pickleball Tournament", username `pickleball`). Numbers live in a private table the public API cannot read; admins manage them per team with the ☎ button in the Admin team list (07... numbers are normalized to +254). The trigger fires only on the moment a court is assigned, so re-calls after a swap text again but nothing double-sends, and there is a 20-per-minute flood guard.
 
-- **SMS (recommended if wanted).** Kenya-appropriate via Africa's Talking (or Twilio). Roughly 1KSh per message, so a few hundred shillings for the whole tournament. Needs: an Africa's Talking account, phone numbers collected with the roster, and a small Supabase Edge Function that fires when a match gets assigned a court. Real setup work (account approval, secrets), so allow a few days of lead time. Requires the Supabase setup above first.
-- **Email.** Cheap and easy to send, but nobody checks email courtside. Not worth it.
-- **Web push.** Free, works well on Android; on iPhones it only works if the person adds the site to their home screen first. Unreliable for a mixed crowd.
-- **Zero-setup fallback.** The Courts tab already updates live on everyone's phone, and the desk announces. This is what most local tournaments do.
+One-time setup, in this order:
+
+1. Run `supabase-sms.sql` in the dispatch project's SQL editor (after the main schema). Copy the `sms_shared_secret` it prints.
+2. Supabase dashboard → Edge Functions → deploy a new function named exactly `nairobi-sms`, paste in `sms-function.ts`, and turn OFF "Verify JWT" for it (the shared secret replaces it).
+3. Set the function's secrets: `AT_USERNAME` = `pickleball`, `AT_API_KEY` = the API key from the Africa's Talking dashboard (it lives only there, never in this repo), `NAIROBI_SMS_SECRET` = the secret from step 1.
+4. Top up Africa's Talking airtime (M-Pesa works).
+5. Switch it on in the SQL editor: `update nairobi_private set value = 'on' where key = 'sms_enabled';` (set `'off'` to pause any time).
+6. Save a number for a test team (Admin → team list → ☎), then put its match on a court.
+
+Texts come from Africa's Talking's default shared sender; a branded sender name needs slow carrier registration and isn't worth it for one event. Sandbox testing: add secret `AT_API_HOST` = `https://api.sandbox.africastalking.com` with `AT_USERNAME` = `sandbox`. Fallback if SMS is off: the Courts tab updates live on every phone and the desk announces, which is what most local tournaments do anyway.
 
 ## Development
 

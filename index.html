@@ -985,6 +985,8 @@ function demoStore(){
       assignCourtsGlobal(db);
       notify(); return ok();
     },
+    async adminSetContacts(){ return fail("Phone numbers only work on the live site."); },
+    async adminListContacts(){ return { ok: true, data: [] }; },
     async adminSetBracketTeams(pin, matchId, e1, e2){
       if (!checkPin(pin)) return fail("Wrong PIN.");
       const m = findMatch(matchId);
@@ -1099,6 +1101,8 @@ function liveStore(){
     adminRemoveEntrant: (pin, id) => rpc("nairobi_admin_remove_entrant", { p_pin: pin, p_entrant_id: id }),
     adminAddEntrant: (pin, eventId, entrant, matches) => rpc("nairobi_admin_add_entrant", { p_pin: pin, p_event_id: eventId, p_entrant: entrant, p_matches: matches }),
     adminMoveEntrant: (pin, id, group, matches) => rpc("nairobi_admin_move_entrant", { p_pin: pin, p_entrant_id: id, p_group: group, p_matches: matches }),
+    adminSetContacts: (pin, entrantId, phones) => rpc("nairobi_admin_set_contacts", { p_pin: pin, p_entrant_id: entrantId, p_phones: phones }),
+    adminListContacts: pin => rpc("nairobi_admin_list_contacts", { p_pin: pin }),
     adminSetBracketTeams: (pin, matchId, e1, e2) => rpc("nairobi_admin_set_bracket_teams", { p_pin: pin, p_match_id: matchId, p_entrant1_id: e1 || null, p_entrant2_id: e2 || null }),
     adminGenerateBracket: (pin, eventId, rows) => rpc("nairobi_admin_generate_bracket", { p_pin: pin, p_event_id: eventId, p_matches: rows }),
     adminResetBracket: (pin, eventId) => rpc("nairobi_admin_reset_bracket", { p_pin: pin, p_event_id: eventId })
@@ -1119,7 +1123,7 @@ const state = {
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null,
   setupPreview: null, adminEventId: null, loadError: null,
   showAllQueue: false, showRedraw: false, pendingRender: false,
-  dismissedCalled: {}
+  dismissedCalled: {}, contacts: {}
 };
 
 function esc(s){
@@ -1725,6 +1729,8 @@ function renderAdmin(){
         byGroup[g].forEach(e => {
           h += '<div class="queue-row"><span class="qnames">' + esc(e.name) + '</span><span class="qtag">Group ' + esc(g) + '</span>' +
             '<span class="queue-actions">' +
+            '<button class="btn small secondary" title="SMS numbers" onclick="editContacts(\'' + e.id + '\')">☎' +
+            ((state.contacts[e.id] || []).length ? ' ' + state.contacts[e.id].length : '') + '</button>' +
             '<select class="mv" onchange="moveEntrant(\'' + e.id + '\', this.value); this.value=\'\'">' +
             '<option value="">Move…</option>' +
             groups.filter(x => x !== g).map(x => '<option value="' + x + '">To ' + x + '</option>').join("") +
@@ -1736,7 +1742,8 @@ function renderAdmin(){
       h += '<div class="addteam"><input id="add-team-name" type="text" placeholder="New team or player">' +
         '<select id="add-team-group">' + groups.map(g => '<option value="' + g + '">Group ' + g + '</option>').join("") + '</select>' +
         '<button class="btn small secondary" onclick="addTeamToGroup()">Add</button></div>' +
-        '<p class="note" style="margin-top:6px">Moving or removing a team also removes its matches (and results). New or moved teams get catch-up matches at the end of the queue.</p></details>';
+        '<p class="note" style="margin-top:6px">Moving or removing a team also removes its matches (and results). New or moved teams get catch-up matches at the end of the queue. ' +
+        '☎ saves phone numbers for "you\'re on court" texts (live site with the SMS add-on set up; numbers stay private).</p></details>';
       if (hasMatches && !state.showRedraw){
         h += '<p class="note"><button class="btn small secondary" onclick="toggleRedraw()">Start over with a new list</button></p>';
       }
@@ -1989,6 +1996,13 @@ async function reload(){
     if (state.modalMatchId && !data.matches.some(m => m.id === state.modalMatchId)) state.modalMatchId = null;
     if (state.slotEditId && !data.matches.some(m => m.id === state.slotEditId)) state.slotEditId = null;
     if (state.teamModalId && !data.entrants.some(e => e.id === state.teamModalId)) state.teamModalId = null;
+    if (state.adminPin){
+      try{
+        const rc = await store.adminListContacts(state.adminPin);
+        state.contacts = {};
+        if (rc.ok && Array.isArray(rc.data)) rc.data.forEach(x => { state.contacts[x.entrant_id] = x.phones || []; });
+      }catch(e){}
+    }
   }catch(e){
     let msg = e.message || String(e);
     if (/does not exist|schema cache/i.test(msg)){
@@ -2201,6 +2215,31 @@ async function moveEntrant(id, target){
   const r = await store.adminMoveEntrant(state.adminPin, id, group, matches);
   if (!r.ok){ toast(r.error); return; }
   toast(e.name + " moved to group " + group);
+  await reload();
+}
+function normalizePhone(s){
+  s = s.trim().replace(/[\s()-]/g, "");
+  if (/^0[17]\d{8}$/.test(s)) return "+254" + s.slice(1);
+  if (/^254\d{9}$/.test(s)) return "+" + s;
+  if (/^\+\d{10,14}$/.test(s)) return s;
+  return null;
+}
+async function editContacts(id){
+  const e = entrantById(id);
+  if (!e) return;
+  const cur = (state.contacts[id] || []).join(", ");
+  const raw = prompt('Phone number(s) for "' + e.name + '", comma separated (07... or +254...). Leave empty to remove.', cur);
+  if (raw == null) return;
+  const parts = raw.split(",").map(s => s.trim()).filter(Boolean);
+  const phones = [];
+  for(const p of parts){
+    const n = normalizePhone(p);
+    if (!n){ toast('"' + p + '" does not look like a phone number.'); return; }
+    phones.push(n);
+  }
+  const r = await store.adminSetContacts(state.adminPin, id, phones);
+  if (!r.ok){ toast(r.error); return; }
+  toast(phones.length ? "Numbers saved" : "Numbers removed");
   await reload();
 }
 async function addTeamToGroup(){
