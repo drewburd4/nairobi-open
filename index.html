@@ -14,6 +14,8 @@
   --warn:#a8730a; --warn-soft:#f6ecd9;
   --danger:#a33d2a; --danger-soft:#f6e4de;
   --bkline:#cfc8b8;
+  --court:#2f6f6e; --court-soft:#e7f0ef; --ball:#c99a1f;
+  --court-ink:#ffffff; --callout-chip:rgba(255,255,255,.18); --callout-chip-line:rgba(255,255,255,.4);
   --shadow:0 1px 2px rgba(38,37,31,.05);
 }
 @media (prefers-color-scheme: dark){
@@ -24,6 +26,8 @@
     --warn:#d9a24a; --warn-soft:#33270f;
     --danger:#df8268; --danger-soft:#381d15;
     --bkline:#575040;
+    --court:#6cb8b2; --court-soft:#1b2b29; --ball:#e0b84a;
+    --court-ink:#10201e; --callout-chip:rgba(0,0,0,.14); --callout-chip-line:rgba(0,0,0,.3);
     --shadow:none;
   }
 }
@@ -34,6 +38,8 @@
   --warn:#a8730a; --warn-soft:#f6ecd9;
   --danger:#a33d2a; --danger-soft:#f6e4de;
   --bkline:#cfc8b8;
+  --court:#2f6f6e; --court-soft:#e7f0ef; --ball:#c99a1f;
+  --court-ink:#ffffff; --callout-chip:rgba(255,255,255,.18); --callout-chip-line:rgba(255,255,255,.4);
   --shadow:0 1px 2px rgba(38,37,31,.05);
 }
 :root[data-theme="dark"]{
@@ -43,6 +49,8 @@
   --warn:#d9a24a; --warn-soft:#33270f;
   --danger:#df8268; --danger-soft:#381d15;
   --bkline:#575040;
+  --court:#6cb8b2; --court-soft:#1b2b29; --ball:#e0b84a;
+  --court-ink:#10201e; --callout-chip:rgba(0,0,0,.14); --callout-chip-line:rgba(0,0,0,.3);
   --shadow:none;
 }
 
@@ -65,13 +73,13 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .stagechip{font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); white-space:nowrap}
 .tabs{max-width:820px; margin:0 auto; padding:8px 14px 0; display:flex; gap:2px; overflow-x:auto}
 .tab{padding:8px 12px 10px; font-weight:700; font-size:14px; color:var(--muted); border-bottom:3px solid transparent; white-space:nowrap; border-radius:6px 6px 0 0}
-.tab[aria-current="true"]{color:var(--ink); border-bottom-color:var(--accent)}
+.tab[aria-current="true"]{color:var(--ink); border-bottom-color:var(--accent); background:var(--accent-soft)}
 .demo-banner{background:var(--warn-soft); color:var(--warn); font-size:12.5px; font-weight:600; text-align:center; padding:6px 12px}
-.callout{display:flex; align-items:center; gap:10px; width:100%; background:var(--good); color:#fff; padding:9px 14px; font-weight:700; font-size:14px; border-top:1px solid rgba(255,255,255,.25)}
+.callout{display:flex; align-items:center; gap:10px; width:100%; background:var(--court); color:var(--court-ink); padding:9px 14px; font-weight:700; font-size:14px; border-top:1px solid var(--callout-chip-line)}
 .callout .cinner{max-width:820px; margin:0 auto; width:100%; display:flex; align-items:center; gap:10px}
 .callout .ctext{flex:1; min-width:0; overflow-wrap:anywhere}
 .callout .cdim{opacity:.85; font-weight:600}
-.callout .ack{background:rgba(255,255,255,.18); border:1px solid rgba(255,255,255,.4); color:#fff; border-radius:6px; padding:4px 9px; font-size:12.5px; font-weight:700; white-space:nowrap}
+.callout .ack{background:var(--callout-chip); border:1px solid var(--callout-chip-line); color:inherit; border-radius:6px; padding:4px 9px; font-size:12.5px; font-weight:700; white-space:nowrap}
 
 /* ---------- shared ---------- */
 .evtabs{margin-top:14px}
@@ -98,7 +106,7 @@ input,textarea,select{font:inherit; color:var(--ink)}
 @media (min-width:640px){ .courtgrid{grid-template-columns:1fr 1fr} }
 .courtcard{background:var(--card); border:1px solid var(--line); border-radius:12px; box-shadow:var(--shadow); padding:12px 14px; width:100%}
 .courtcard .chead{display:flex; justify-content:space-between; align-items:baseline; margin-bottom:8px}
-.courtcard .cnum{font-size:12px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; color:var(--accent)}
+.courtcard .cnum{font-size:12px; font-weight:900; letter-spacing:.1em; text-transform:uppercase; color:var(--court); background:var(--court-soft); padding:3px 9px; border-radius:20px}
 .courtcard .team{font-weight:700; font-size:16px; overflow-wrap:anywhere}
 .courtcard .vs{color:var(--muted); font-weight:400; font-size:13px; padding:1px 0}
 .courtcard .cta{margin-top:8px; font-size:12.5px; font-weight:700; color:var(--accent)}
@@ -141,38 +149,76 @@ details.roundblock .hint{font-weight:600; letter-spacing:0; text-transform:none}
 .group-card{background:var(--card); border:1px solid var(--line); border-radius:10px; box-shadow:var(--shadow); padding:12px 14px; margin-bottom:14px}
 .group-card h3{margin:0 0 8px; font-size:15px; font-weight:800; display:flex; justify-content:space-between; align-items:baseline; gap:8px}
 .standings{width:100%; border-collapse:collapse; font-variant-numeric:tabular-nums}
-.standings th{font-size:10.5px; font-weight:800; letter-spacing:.07em; text-transform:uppercase; color:var(--muted); text-align:right; padding:4px 5px; border-bottom:1px solid var(--line)}
+.standings th{font-size:10.5px; font-weight:800; letter-spacing:.07em; text-transform:uppercase; color:var(--muted); text-align:right; padding:4px 5px; border-bottom:1px solid var(--line); background:var(--court-soft)}
 .standings th.tname{text-align:left}
 .standings td{padding:7px 5px; text-align:right; font-size:13.5px; border-bottom:1px solid var(--line); cursor:pointer}
 .standings tr:last-child td{border-bottom:none}
 .standings td.tname{text-align:left; font-weight:600; overflow-wrap:anywhere}
 .standings .pos{color:var(--muted); font-weight:700}
 
-/* ---------- bracket (paper style: names on lines, elbow connectors) ---------- */
-.bkwrap{overflow-x:auto; padding:4px 0 12px}
-.bk{display:flex; min-width:min-content}
-.bkcol{display:flex; flex-direction:column; min-width:170px; flex:1}
-.bkcol+.bkcol{padding-left:18px}
-.bkcol:last-child .bkpair{padding-right:0}
+/* ---------- bracket (split: rounds flow in from both edges, final in the center) ----------
+   Geometry rules that keep the elbows attached, do not break casually:
+   every column stretches to the same height; connectors hang off the
+   fixed-share slots (never off cell content); the champion block has a
+   fixed height that is mirrored as bottom padding on every other column. */
+.bkwrap{overflow-x:auto; padding:4px 0 12px; position:relative}
+.bk{display:flex; align-items:stretch; min-width:min-content;
+  --bk-gutter:18px; --bk-w-compact:150px; --bk-w-mid:160px; --bk-w-inner:172px; --bk-w-center:212px; --bk-champ-h:104px}
+@media (max-width:480px){
+  .bk{--bk-gutter:14px; --bk-w-compact:118px; --bk-w-mid:128px; --bk-w-inner:140px; --bk-w-center:168px}
+}
+.bkcol{display:flex; flex-direction:column; flex:1; position:relative}
+.bkcol[data-tier="compact"]{min-width:var(--bk-w-compact)}
+.bkcol[data-tier="mid"]{min-width:var(--bk-w-mid)}
+.bkcol[data-tier="inner"]{min-width:var(--bk-w-inner)}
+.bkcol[data-tier="center"]{min-width:var(--bk-w-center); z-index:0; padding:0 var(--bk-gutter)}
+.bkcenter-bg{position:absolute; inset:4px 2px 0; background:var(--court-soft); border-radius:16px; z-index:-1}
 .bkhead{text-align:center; margin:10px 0 8px; white-space:nowrap}
+.bkcol[data-tier="center"] .bkhead .microlabel{color:var(--court); font-size:12px}
 .bkbody{flex:1; display:flex; flex-direction:column}
-.bkpair{flex:1; display:flex; flex-direction:column; position:relative; padding-right:18px}
-.bkpair.link::after{content:""; position:absolute; right:0; top:25%; height:50%; border-right:2px solid var(--bkline)}
-.bkpair.solo::after{content:none}
-/* Connectors hang off the fixed-share slots, not the match content, so the
-   elbows stay attached even if a cell renders a little taller than its twin. */
+.bkcol:not([data-tier="center"]) .bkbody{padding-bottom:var(--bk-champ-h)}
+.bkpair{flex:1; display:flex; flex-direction:column; position:relative; min-width:0}
 .bkslot{flex:1; display:flex; flex-direction:column; justify-content:center; position:relative; min-width:0}
-.bkpair.link .bkslot::after{content:""; position:absolute; right:-18px; top:50%; width:18px; border-top:2px solid var(--bkline)}
-.bkcol+.bkcol .bkslot::before{content:""; position:absolute; left:-18px; top:50%; width:18px; border-top:2px solid var(--bkline)}
-.bko{display:block; position:relative; width:100%; padding:0; text-align:left}
-.bkrow{display:flex; align-items:baseline; justify-content:space-between; gap:8px; min-height:27px; border-bottom:2px solid var(--bkline); padding:3px 2px}
+.bkcol.out-right .bkpair{padding-right:var(--bk-gutter)}
+.bkcol.out-left .bkpair{padding-left:var(--bk-gutter)}
+.bkcol.out-right .bkpair.link::after{content:""; position:absolute; right:0; top:25%; height:50%; border-right:2px solid var(--bkline)}
+.bkcol.out-left .bkpair.link::after{content:""; position:absolute; left:0; top:25%; height:50%; border-left:2px solid var(--bkline)}
+.bkpair.solo::after{content:none}
+.bkcol.out-right .bkpair.link .bkslot::after{content:""; position:absolute; right:calc(-1*var(--bk-gutter)); top:50%; width:var(--bk-gutter); border-top:2px solid var(--bkline)}
+.bkcol.out-left .bkpair.link .bkslot::after{content:""; position:absolute; left:calc(-1*var(--bk-gutter)); top:50%; width:var(--bk-gutter); border-top:2px solid var(--bkline)}
+.bkcol.in-left{padding-left:var(--bk-gutter)}
+.bkcol.in-right{padding-right:var(--bk-gutter)}
+.bkcol.in-left .bkslot::before{content:""; position:absolute; left:calc(-1*var(--bk-gutter)); top:50%; width:var(--bk-gutter); border-top:2px solid var(--bkline)}
+.bkcol.in-right .bkslot::before{content:""; position:absolute; right:calc(-1*var(--bk-gutter)); top:50%; width:var(--bk-gutter); border-top:2px solid var(--bkline)}
+.bko{display:block; position:relative; width:100%; padding:0; text-align:left; border-radius:6px}
+/* Fixed row height (not a floor): no tag, score, or link can make one
+   sibling cell taller than the other, so pair splits stay exactly 50/50. */
+.bkrow{display:flex; align-items:flex-end; justify-content:space-between; gap:8px; height:27px; border-bottom:2px solid var(--bkline); padding:0 2px 3px; overflow:hidden}
+.bkcol[data-tier="center"] .bkrow{height:32px}
 .bkteam{min-width:0; flex:1; font-weight:600; font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
 .bkteam.tbd{color:var(--muted); font-weight:400}
 .bkteam.win{color:var(--good); font-weight:800}
+.bkteam.seed{text-align:center}
 .bkscore{font-weight:800; font-variant-numeric:tabular-nums; font-size:13.5px}
-.bedit{font-size:11px; font-weight:700; color:var(--accent); white-space:nowrap; padding-left:6px}
-.champ{background:var(--good); color:#fff; border-radius:10px; padding:14px 16px; text-align:center; font-weight:800; font-size:16px}
-.champ .microlabel{color:#fff; opacity:.8}
+.bko.editable{padding-right:64px}
+.bkmain{display:block; width:100%; padding:0; text-align:left}
+.bedit{position:absolute; inset:0 0 0 auto; width:64px; display:flex; align-items:center; justify-content:center; text-align:center; font-size:11px; font-weight:700; color:var(--accent); line-height:1.2; padding:2px; border-radius:0 6px 6px 0}
+.bedit:hover,.bedit:focus-visible{background:var(--accent-soft)}
+.bkcol[data-tier="mid"] .bkteam{font-size:14px}
+.bkcol[data-tier="inner"] .bko{background:var(--card); border:1px solid var(--line); box-shadow:var(--shadow); padding:5px 6px}
+.bkcol[data-tier="inner"] .bkteam{font-size:14.5px}
+.bkcol[data-tier="inner"] .bko.editable{padding-right:66px}
+.bkcol[data-tier="center"] .bko{background:var(--card); border:1px solid var(--line); box-shadow:var(--shadow); padding:8px 10px; border-radius:10px}
+.bkcol[data-tier="center"] .bkteam{font-size:16px; font-weight:800}
+.bkcol[data-tier="center"] .bkscore{font-size:16px}
+.bkcol[data-tier="center"] .bko.editable{padding-right:70px}
+.bkchamp-wrap{height:var(--bk-champ-h); padding-top:2px}
+.bkchamp-tick{width:2px; height:14px; background:var(--bkline); margin:0 auto}
+.champ{background:var(--good); color:#fff; border-radius:10px; padding:12px 14px; text-align:center; font-weight:800; font-size:15px; border-top:3px solid var(--ball); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; animation:bkchamp .5s ease-out}
+@keyframes bkchamp{from{opacity:0; transform:scale(.92)} to{opacity:1; transform:scale(1)}}
+.champ .microlabel{color:#fff; opacity:.85}
+.champ.tbd{background:var(--card); color:var(--muted); border:1px dashed var(--bkline); font-weight:600; font-size:13px; border-top:1px dashed var(--bkline)}
+.champ.tbd .microlabel{color:var(--muted); opacity:1}
 
 /* ---------- modal ---------- */
 .overlay{position:fixed; inset:0; background:rgba(20,17,12,.55); z-index:50; display:flex; align-items:center; justify-content:center; padding:16px}
@@ -228,8 +274,11 @@ select.mv{padding:4px 6px; border-radius:6px; border:1px solid var(--line); back
   .roundblock,.group-card{box-shadow:none; border-color:#bbb; break-inside:avoid}
   .bko{break-inside:avoid}
   .bkrow{border-bottom-color:#999}
-  .bkpair.link::after{border-right-color:#999}
-  .bkpair.link .bkslot::after,.bkcol+.bkcol .bkslot::before{border-top-color:#999}
+  .bkcol.out-right .bkpair.link::after,.bkcol.out-left .bkpair.link::after{border-color:#999}
+  .bkcol.out-right .bkpair.link .bkslot::after,.bkcol.out-left .bkpair.link .bkslot::after,
+  .bkcol.in-left .bkslot::before,.bkcol.in-right .bkslot::before{border-top-color:#999}
+  .bkchamp-tick{background:#999}
+  .bkcenter-bg{display:none}
   .print-title{display:block !important; font-size:18px; font-weight:900; margin:0 0 12px}
 }
 .print-title{display:none}
@@ -1123,7 +1172,7 @@ const state = {
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null,
   setupPreview: null, adminEventId: null, loadError: null,
   showAllQueue: false, showRedraw: false, pendingRender: false,
-  dismissedCalled: {}, contacts: {}
+  dismissedCalled: {}, contacts: {}, bkCentered: false
 };
 
 function esc(s){
@@ -1295,6 +1344,17 @@ function render(){
 
   const curTab = app.querySelector('.evtabs [aria-current="true"]');
   if (curTab && curTab.scrollIntoView) curTab.scrollIntoView({ block: "nearest", inline: "nearest" });
+
+  /* On first look at a live bracket, start the scroll at the Final in the
+     center; the projected view starts at round 1 on the left instead. */
+  if (state.view === "bracket" && !state.bkCentered){
+    state.bkCentered = true;
+    const wrap = app.querySelector(".bkwrap");
+    const cc = app.querySelector('.bk.real .bkcol[data-tier="center"]');
+    if (wrap && cc && wrap.scrollWidth > wrap.clientWidth){
+      wrap.scrollLeft = cc.offsetLeft - (wrap.clientWidth - cc.offsetWidth) / 2;
+    }
+  }
 
   if (restoreId){
     const el = document.getElementById(restoreId);
@@ -1559,28 +1619,46 @@ function renderStandings(){
   return h;
 }
 
-/* One column of the bracket tree. Sibling matches are wrapped in a .bkpair,
-   whose CSS draws the elbow connectors into the next round. */
-function bkColumn(label, cells, feeds){
-  let h = '<div class="bkcol"><div class="bkhead"><span class="microlabel">' + label + '</span></div><div class="bkbody">';
-  if (feeds && cells.length === 1){
-    h += '<div class="bkpair link solo"><div class="bkslot">' + cells[0] + '</div></div>';
-  } else if (feeds){
-    for(let i = 0; i < cells.length; i += 2){
-      h += '<div class="bkpair link"><div class="bkslot">' + cells[i] + '</div><div class="bkslot">' + cells[i + 1] + '</div></div>';
-    }
-  } else {
-    for(const c of cells) h += '<div class="bkpair"><div class="bkslot">' + c + '</div></div>';
-  }
-  return h + '</div></div>';
-}
 /* One underlined line of a bracket cell. Every cell is exactly two of these,
    so sibling cells stay the same height and the connector elbows line up.
-   `right` is optional markup for the line's right end (score or edit link). */
+   `right` is optional markup for the line's right end (the score). */
 function bkRow(inner, cls, right){
   return '<div class="bkrow"><span class="bkteam' + (cls || '') + '">' + inner + '</span>' + (right || '') + '</div>';
 }
 function bkScore(n){ return '<span class="bkscore">' + n + '</span>'; }
+/* Rounds nearer the final get wider, weightier columns so sparse rounds
+   read as the main event rather than as lost boxes in empty space. */
+function bkTier(bracketRound, totalRounds){
+  const rf = totalRounds - bracketRound;
+  if (rf >= 3) return "compact";
+  if (rf === 2) return "mid";
+  return "inner";
+}
+/* One side column of the split bracket. Sibling matches share a .bkpair,
+   whose CSS draws the elbow connectors toward the center. */
+function bkSideColumn(label, cells, tier, side, hasIncoming){
+  const cls = (side === "left" ? "out-right" : "out-left") +
+    (hasIncoming ? (side === "left" ? " in-left" : " in-right") : "");
+  let h = '<div class="bkcol ' + cls + '" data-tier="' + tier + '">' +
+    '<div class="bkhead"><span class="microlabel">' + esc(label) + '</span></div><div class="bkbody">';
+  if (cells.length === 1){
+    h += '<div class="bkpair link solo"><div class="bkslot">' + cells[0] + '</div></div>';
+  } else {
+    for(let i = 0; i < cells.length; i += 2){
+      h += '<div class="bkpair link"><div class="bkslot">' + cells[i] + '</div><div class="bkslot">' + cells[i + 1] + '</div></div>';
+    }
+  }
+  return h + '</div></div>';
+}
+/* The centerpiece: the Final with the Champion beneath it. */
+function bkCenterColumn(finalCell, champCell, hasSides){
+  return '<div class="bkcol' + (hasSides ? ' in-left in-right' : '') + '" data-tier="center"><div class="bkcenter-bg"></div>' +
+    '<div class="bkhead"><span class="microlabel">Final</span></div><div class="bkbody">' +
+    '<div class="bkpair solo"><div class="bkslot">' + finalCell + '</div></div></div>' +
+    '<div class="bkchamp-wrap"><div class="bkchamp-tick"></div>' + champCell + '</div>' +
+    '</div>';
+}
+function bkSplitHalf(list){ const half = list.length / 2; return [list.slice(0, half), list.slice(half)]; }
 
 function renderBracket(){
   const ev = currentEvent();
@@ -1596,63 +1674,92 @@ function renderBracket(){
     const pairs = bracketPairs(field.seeds);
     const size = nextPow2(Math.max(2, field.seeds.length));
     const totalRounds = Math.log2(size);
-    const slotRow = s => {
-      if (!s) return bkRow('BYE', ' tbd');
-      return bkRow(esc(s.group + s.place) + (s.wildcard ? ' <span class="tag warn">Best ' + ordinal(s.place) + '</span>' : ''));
-    };
+    const slotRow = s => !s ? bkRow('BYE', ' tbd')
+      : bkRow(esc(s.group + s.place) + (s.wildcard ? ' <span class="tag warn">Best ' + ordinal(s.place) + '</span>' : ''), ' seed');
+    const champTbd = '<div class="champ tbd"><span class="microlabel">' + esc(ev.name) + '</span><br>Champion TBD</div>';
+
     let h = '<div class="section-h"><h2>Projected bracket</h2><span class="hint">' +
       (left ? 'Live, ' + left + ' group matches to go' : 'Group play complete') + '</span></div>';
     h += '<div class="bkwrap"><div class="bk">';
-    for(let r = 1; r <= totalRounds; r++){
-      const count = size / Math.pow(2, r);
-      const cells = r === 1
-        ? pairs.map(p => '<div class="bko">' + slotRow(p[0]) + slotRow(p[1]) + '</div>')
-        : Array.from({ length: count }, () => '<div class="bko">' + bkRow('', ' tbd') + bkRow('', ' tbd') + '</div>');
-      h += bkColumn(roundLabelFor(r, totalRounds), cells, true);
+    if (totalRounds === 1){
+      h += bkCenterColumn('<div class="bko">' + slotRow(pairs[0][0]) + slotRow(pairs[0][1]) + '</div>', champTbd, false);
+    } else {
+      const r1cells = pairs.map(p => '<div class="bko">' + slotRow(p[0]) + slotRow(p[1]) + '</div>');
+      const [l1, r1] = bkSplitHalf(r1cells);
+      const leftCols = [bkSideColumn(roundLabelFor(1, totalRounds), l1, bkTier(1, totalRounds), "left", false)];
+      const rightCols = [bkSideColumn(roundLabelFor(1, totalRounds), r1, bkTier(1, totalRounds), "right", false)];
+      for(let r = 2; r < totalRounds; r++){
+        const count = size / Math.pow(2, r);
+        const cells = Array.from({ length: count }, () => '<div class="bko">' + bkRow('TBD', ' tbd') + bkRow('TBD', ' tbd') + '</div>');
+        const [l, rr] = bkSplitHalf(cells);
+        leftCols.push(bkSideColumn(roundLabelFor(r, totalRounds), l, bkTier(r, totalRounds), "left", true));
+        rightCols.push(bkSideColumn(roundLabelFor(r, totalRounds), rr, bkTier(r, totalRounds), "right", true));
+      }
+      const finalCell = '<div class="bko">' + bkRow('TBD', ' tbd') + bkRow('TBD', ' tbd') + '</div>';
+      h += leftCols.join('') + bkCenterColumn(finalCell, champTbd, true) + rightCols.slice().reverse().join('');
     }
-    h += bkColumn('Champion', ['<div class="bko">' + bkRow('', ' tbd') + '</div>'], false);
     h += '</div></div>';
     h += '<p class="note">A1 means the group A winner, C2 the group C runner-up, from standings right now, so matchups can shift until group play ends. ' +
+      'Round 1 sits at the outer edges and winners move toward the middle, where the final and champion live. ' +
       field.seeds.length + ' qualify for a ' + size + '-slot bracket' +
       (field.wildcards ? ', including ' + field.wildcards + ' wildcard' + (field.wildcards > 1 ? 's' : '') + ' from the next places' : '') +
-      '. Winners advance along the lines. The real bracket is created when the desk confirms the group stage is finished.</p>';
+      '. The real bracket is created when the desk confirms the group stage is finished.</p>';
     return h;
   }
 
   const total = Math.max(...ko.map(m => m.bracket_round));
-  let h = '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + ' · Bracket</span>';
-  h += '<div class="bkwrap"><div class="bk">';
-  for(let r = 1; r <= total; r++){
-    const list = ko.filter(m => m.bracket_round === r).sort((a, b) => a.bracket_pos - b.bracket_pos);
-    const cells = list.map(m => {
-      const n1 = entrantName(m.entrant1_id), n2 = entrantName(m.entrant2_id);
-      const played = m.status === "played" && m.score1 != null;
-      const bye = m.status === "played" && m.score1 == null;
-      const w1 = played && m.score1 > m.score2, w2 = played && m.score2 > m.score1;
-      const clickable = !bye && m.entrant1_id && m.entrant2_id;
-      const wo = ' <span class="tag warn">W/O</span>';
-      const edit = state.adminPin && m.status === "scheduled" && !bye
-        ? '<span class="bedit" role="button" tabindex="0" onclick="event.stopPropagation();openSlotEditor(\'' + m.id + '\')">Edit teams</span>'
-        : '';
-      const inner = bkRow((n1 ? esc(n1) : '') + (m.walkover && w1 ? wo : ''), n1 ? (w1 ? ' win' : '') : ' tbd', played ? bkScore(m.score1) : '') +
-        bkRow((n2 ? esc(n2) : (bye ? 'BYE' : '')) + (m.walkover && w2 ? wo : ''), n2 ? (w2 ? ' win' : '') : ' tbd', played ? bkScore(m.score2) : edit);
-      return clickable
-        ? '<button class="bko" onclick="openMatch(\'' + m.id + '\')">' + inner + '</button>'
-        : '<div class="bko">' + inner + '</div>';
-    });
-    h += bkColumn(roundLabelFor(r, total), cells, true);
-  }
+  const cellFor = m => {
+    const n1 = entrantName(m.entrant1_id), n2 = entrantName(m.entrant2_id);
+    const played = m.status === "played" && m.score1 != null;
+    const bye = m.status === "played" && m.score1 == null;
+    const w1 = played && m.score1 > m.score2, w2 = played && m.score2 > m.score1;
+    const clickable = !bye && m.entrant1_id && m.entrant2_id;
+    const wo = ' <span class="tag warn">W/O</span>';
+    const editable = !!(state.adminPin && m.status === "scheduled" && !bye);
+    const rows =
+      bkRow((n1 ? esc(n1) : 'TBD') + (m.walkover && w1 ? wo : ''), n1 ? (w1 ? ' win' : '') : ' tbd', played ? bkScore(m.score1) : '') +
+      bkRow((n2 ? esc(n2) : (bye ? 'BYE' : 'TBD')) + (m.walkover && w2 ? wo : ''), n2 ? (w2 ? ' win' : '') : ' tbd', played ? bkScore(m.score2) : '');
+    /* Editable cells are a plain container with two sibling buttons, so no
+       interactive element ever nests inside another (screen readers choke
+       on a button-in-button). */
+    if (editable){
+      const main = clickable
+        ? '<button class="bkmain" onclick="openMatch(\'' + m.id + '\')">' + rows + '</button>'
+        : rows;
+      return '<div class="bko editable">' + main +
+        '<button class="bedit" onclick="openSlotEditor(\'' + m.id + '\')">Edit teams</button></div>';
+    }
+    return clickable
+      ? '<button class="bko" onclick="openMatch(\'' + m.id + '\')">' + rows + '</button>'
+      : '<div class="bko">' + rows + '</div>';
+  };
+
   const final = ko.find(m => m.bracket_round === total);
   let champCell;
   if (final && final.status === "played" && final.score1 != null){
     const champ = final.score1 > final.score2 ? final.entrant1_id : final.entrant2_id;
-    champCell = '<div class="bko"><div class="champ"><span class="microlabel">' + esc(ev.name) + '</span><br>🏆 ' + esc(entrantName(champ)) + '</div></div>';
+    champCell = '<div class="champ"><span class="microlabel">' + esc(ev.name) + '</span><br>🏆 ' + esc(entrantName(champ)) + '</div>';
   } else {
-    champCell = '<div class="bko">' + bkRow('', ' tbd') + '</div>';
+    champCell = '<div class="champ tbd"><span class="microlabel">' + esc(ev.name) + '</span><br>Champion TBD</div>';
   }
-  h += bkColumn('Champion', [champCell], false);
+
+  let h = '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + ' · Bracket</span>';
+  h += '<div class="bkwrap"><div class="bk real">';
+  if (total === 1){
+    h += bkCenterColumn(cellFor(final), champCell, false);
+  } else {
+    const leftCols = [], rightColsAsc = [];
+    for(let r = 1; r < total; r++){
+      const list = ko.filter(m => m.bracket_round === r).sort((a, b) => a.bracket_pos - b.bracket_pos);
+      const [leftList, rightList] = bkSplitHalf(list);
+      const tier = bkTier(r, total);
+      leftCols.push(bkSideColumn(roundLabelFor(r, total), leftList.map(cellFor), tier, "left", r > 1));
+      rightColsAsc.push(bkSideColumn(roundLabelFor(r, total), rightList.map(cellFor), tier, "right", r > 1));
+    }
+    h += leftCols.join('') + bkCenterColumn(cellFor(final), champCell, true) + rightColsAsc.slice().reverse().join('');
+  }
   h += '</div></div>';
-  h += '<p class="note">Tap a match to see or enter its result. Winners advance along the lines.</p>';
+  h += '<p class="note">Tap a match to see or enter its result. Winners advance toward the middle from both sides.</p>';
   return h;
 }
 
@@ -1949,8 +2056,8 @@ function renderSlotModal(){
 }
 
 /* ---------- actions ---------- */
-function setView(v){ state.view = v; state.setupPreview = null; render(); }
-function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.standingsFilter = "all"; render(); }
+function setView(v){ state.view = v; state.setupPreview = null; state.bkCentered = false; render(); }
+function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.standingsFilter = "all"; state.bkCentered = false; render(); }
 function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; render(); }
 function setRoundFilter(r){ state.roundFilter = String(r); render(); }
 function setStandingsFilter(v){ state.standingsFilter = v; render(); }
@@ -2338,7 +2445,7 @@ async function confirmGroupStage(){
   const r = await store.adminGenerateBracket(state.adminPin, ev.id, rows);
   if (!r.ok){ toast(r.error); return; }
   toast("Bracket created");
-  state.view = "bracket"; state.eventId = ev.id;
+  state.view = "bracket"; state.eventId = ev.id; state.bkCentered = false;
   await reload();
 }
 async function resetBracket(){
