@@ -833,7 +833,14 @@ function demoStore(){
   return {
     mode: "demo",
     subscribe(f){ subs.push(f); },
-    async loadAll(){ return JSON.parse(JSON.stringify(db)); },
+    async loadAll(activeOnly){
+      const snap = JSON.parse(JSON.stringify(db));
+      if (activeOnly){
+        const ids = new Set(snap.events.filter(e => e.active).map(e => e.id));
+        snap.matches = snap.matches.filter(m => ids.has(m.event_id));
+      }
+      return snap;
+    },
     async verifyPin(pin){ return checkPin(pin) ? ok() : fail("Wrong PIN."); },
     async changePin(){ return fail("PIN changes only work on the live site."); },
     async submitScore(matchId, s1, s2, games){
@@ -962,6 +969,36 @@ function demoStore(){
       m.court = court; m.postponed = false;
       m.called_at = new Date().toISOString(); m.called_ack = false;
       assignCourtsGlobal(db);
+      notify(); return ok();
+    },
+    async adminReorderMatch(pin, matchId, dir){
+      if (!checkPin(pin)) return fail("Wrong PIN.");
+      const m = findMatch(matchId);
+      if (!m) return fail("Match not found.");
+      if (m.status !== "scheduled" || m.court != null) return fail("That match is not waiting in the queue.");
+      const sibs = db.matches.filter(x => x.event_id === m.event_id && x.status === "scheduled" && x.court == null && !x.postponed && x.entrant1_id && x.entrant2_id);
+      const other = dir === "up"
+        ? sibs.filter(x => x.play_order < m.play_order).sort((a, b) => b.play_order - a.play_order)[0]
+        : sibs.filter(x => x.play_order > m.play_order).sort((a, b) => a.play_order - b.play_order)[0];
+      if (!other) return ok();
+      const tmp = m.play_order; m.play_order = other.play_order; other.play_order = tmp;
+      assignCourtsGlobal(db);
+      notify(); return ok();
+    },
+    async adminSwapTo(pin, offId, onId){
+      if (!checkPin(pin)) return fail("Wrong PIN.");
+      if (offId === onId) return fail("Pick a different match.");
+      const offm = findMatch(offId), onm = findMatch(onId);
+      if (!offm) return fail("Match not found.");
+      if (offm.status !== "scheduled" || offm.court == null) return fail("That match is not on a court.");
+      if (!onm) return fail("The match to bring on was not found.");
+      if (onm.status !== "scheduled" || onm.court != null) return fail("That match is not waiting for a court.");
+      if (!onm.entrant1_id || !onm.entrant2_id) return fail("That match's teams aren't set yet.");
+      const c = offm.court;
+      onm.court = c; onm.postponed = false; onm.called_at = new Date().toISOString(); onm.called_ack = false;
+      const pending = db.matches.filter(x => x.event_id === offm.event_id && x.status === "scheduled" && x.court == null && x.id !== offm.id);
+      offm.court = null; offm.called_at = null; offm.called_ack = false; offm.postponed = false;
+      offm.play_order = (pending.length ? Math.min(...pending.map(x => x.play_order)) : offm.play_order) - 1;
       notify(); return ok();
     },
     async adminUpdateEvent(pin, eventId, name, settings){
@@ -1122,14 +1159,25 @@ function liveStore(){
   return {
     mode: "live",
     subscribe(f){ subs.push(f); },
-    async loadAll(){
+    async loadAll(activeOnly){
       const c = await ensureClient();
-      const [t, ev, en, ma] = await Promise.all([
+      const [t, ev, en] = await Promise.all([
         c.from("nairobi_tournaments").select("*").limit(1),
         c.from("nairobi_events").select("*").order("sort_order"),
-        c.from("nairobi_entrants").select("*").order("group_name").order("seed"),
-        c.from("nairobi_matches").select("*").order("play_order")
+        c.from("nairobi_entrants").select("*").order("group_name").order("seed")
       ]);
+      /* Background refreshes pull matches only for the running events (the bulk
+         of the payload); the rest are merged back in from the last full load in
+         reload(). Tables other than matches stay small, so fetch them in full. */
+      let ma;
+      if (activeOnly){
+        const ids = (ev.data || []).filter(e => e.active).map(e => e.id);
+        ma = ids.length
+          ? await c.from("nairobi_matches").select("*").in("event_id", ids).order("play_order")
+          : { data: [], error: null };
+      } else {
+        ma = await c.from("nairobi_matches").select("*").order("play_order");
+      }
       const err = t.error || ev.error || en.error || ma.error;
       if (err) throw new Error(err.message);
       return { tournament: (t.data && t.data[0]) || null, events: ev.data || [], entrants: en.data || [], matches: ma.data || [] };
@@ -1145,6 +1193,8 @@ function liveStore(){
     adminSwapOut: (pin, id) => rpc("nairobi_admin_swap_out", { p_pin: pin, p_match_id: id }),
     adminAckCalled: (pin, id) => rpc("nairobi_admin_ack_called", { p_pin: pin, p_match_id: id }),
     adminAssignCourt: (pin, id, court) => rpc("nairobi_admin_assign_court", { p_pin: pin, p_match_id: id, p_court: court }),
+    adminReorderMatch: (pin, id, dir) => rpc("nairobi_admin_reorder_match", { p_pin: pin, p_match_id: id, p_dir: dir }),
+    adminSwapTo: (pin, offId, onId) => rpc("nairobi_admin_swap_to", { p_pin: pin, p_off_match: offId, p_on_match: onId }),
     adminUpdateEvent: (pin, eventId, name, settings) => rpc("nairobi_admin_update_event", { p_pin: pin, p_event_id: eventId, p_name: name, p_settings: settings }),
     adminSetActive: (pin, eventId, active) => rpc("nairobi_admin_set_active", { p_pin: pin, p_event_id: eventId, p_active: !!active }),
     adminReplaceEvent: async (pin, eventId, meta, entrants, matches) => {
@@ -1179,7 +1229,7 @@ let data = { tournament: null, events: [], entrants: [], matches: [] };
 const state = {
   view: "board", eventId: null, search: "", roundFilter: "all",
   standingsFilter: "all",
-  adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null, assignCourt: null,
+  adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null, assignCourt: null, offCourtId: null,
   setupPreview: null, adminEventId: null, loadError: null,
   showAllQueue: false, showRedraw: false, pendingRender: false,
   dismissedCalled: {}, contacts: {}, bkCentered: false
@@ -1350,6 +1400,7 @@ function render(){
   html += renderTeamModal();
   html += renderSlotModal();
   html += renderCourtAssignModal();
+  html += renderOffCourtModal();
   if (!commitHtml(app, html)) return;
 
   if (restoreId){
@@ -1407,7 +1458,10 @@ function queueRow(m, opts){
   if (m.postponed && !opts.inPostponed) row += '<span class="qtag">Postponed</span>';
   if (opts.showEvent && ev) row += '<span class="qtag">' + esc(ev.name) + '</span>';
   if (state.adminPin && opts.action === "postpone")
-    row += '<span class="queue-actions"><button class="btn small secondary" onclick="event.stopPropagation();postpone(\'' + m.id + '\', false)">Postpone</button></span>';
+    row += '<span class="queue-actions">' +
+      '<button class="btn small secondary" title="Move up" onclick="event.stopPropagation();reorderMatch(\'' + m.id + '\',\'up\')">▲</button>' +
+      '<button class="btn small secondary" title="Move down" onclick="event.stopPropagation();reorderMatch(\'' + m.id + '\',\'down\')">▼</button>' +
+      '<button class="btn small secondary" onclick="event.stopPropagation();postpone(\'' + m.id + '\', false)">Postpone</button></span>';
   if (state.adminPin && opts.action === "playnext")
     row += '<span class="queue-actions"><button class="btn small secondary" onclick="event.stopPropagation();playNext(\'' + m.id + '\')">Play next</button></span>';
   row += '</div>';
@@ -1938,7 +1992,7 @@ function renderScoreModal(){
   const adminExtras = () => {
     let x = '';
     if (isAdmin && m.status === "scheduled"){
-      if (m.court != null) x += '<button class="btn small secondary" onclick="swapOut(\'' + m.id + '\')">Off court, up next</button>';
+      if (m.court != null) x += '<button class="btn small secondary" onclick="openOffCourt(\'' + m.id + '\')">Take off court</button>';
       x += '<button class="btn small secondary" onclick="postpone(\'' + m.id + '\', false, true)">Postpone</button>';
     }
     if (isAdmin && played) x += '<button class="btn small danger" onclick="clearScore(\'' + m.id + '\')">Clear score</button>';
@@ -2096,6 +2150,38 @@ function renderCourtAssignModal(){
   return h;
 }
 
+/* Admin: pull an on-court match off and choose who comes on, either the next in
+   line or a specific waiting match. The pulled match goes to the front of its
+   queue either way. */
+function renderOffCourtModal(){
+  if (!state.offCourtId) return "";
+  const m = data.matches.find(x => x.id === state.offCourtId);
+  if (!m) return "";
+  const q = pendingQueue();
+  const multi = activeEvents().length > 1;
+  let h = '<div class="overlay" onclick="if(event.target===this)closeOffCourt()"><div class="modal" role="dialog" aria-modal="true">';
+  h += '<h3>Take this match off Court ' + m.court + '</h3>';
+  h += '<div class="sub">' + esc(entrantName(m.entrant1_id)) + ' vs ' + esc(entrantName(m.entrant2_id)) + '</div>';
+  if (q.length){
+    h += '<p class="note" style="margin:0 0 10px">It goes to the front of its queue. Who comes on Court ' + m.court + '?</p>';
+    h += '<button class="btn" style="width:100%" onclick="swapOut(\'' + m.id + '\')">Bring on the next in line</button>';
+    h += '<div class="microlabel" style="margin:14px 0 4px">Or bring on someone specific</div>';
+    h += '<div class="roundblock" style="padding-top:2px">';
+    h += q.slice(0, 40).map(x => {
+      const ev = eventById(x.event_id);
+      return '<button class="queue-row click" onclick="swapTo(\'' + m.id + '\', \'' + x.id + '\')">' +
+        '<span class="qnames">' + esc(entrantName(x.entrant1_id)) + ' <span class="qv">vs</span> ' + esc(entrantName(x.entrant2_id)) + '</span>' +
+        (multi && ev ? '<span class="qtag">' + esc(ev.name) + '</span>' : '') + '</button>';
+    }).join("");
+    h += '</div>';
+  } else {
+    h += '<p class="note">No other match is waiting, so this one would stay on court.</p>';
+  }
+  h += '<div class="actions"><span class="spacer"></span><button class="btn secondary" onclick="closeOffCourt()">Cancel</button></div>';
+  h += '</div></div>';
+  return h;
+}
+
 /* ---------- actions ---------- */
 function setView(v){ state.view = v; state.setupPreview = null; state.bkCentered = false; render(); }
 function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.standingsFilter = "all"; state.bkCentered = false; render(); }
@@ -2123,6 +2209,7 @@ function closeCourtAssign(){ state.assignCourt = null; render(); }
 document.addEventListener("keydown", e => {
   if (e.key === "Escape"){
     if (state.modalMatchId) closeModal();
+    else if (state.offCourtId) closeOffCourt();
     else if (state.assignCourt != null) closeCourtAssign();
     else if (state.slotEditId) closeSlotEditor();
     else if (state.teamModalId) closeTeam();
@@ -2136,9 +2223,18 @@ document.addEventListener("focusout", () => {
   }, 60);
 });
 
-async function reload(){
+async function reload(background){
   try{
-    data = await store.loadAll();
+    /* A background refresh (realtime/interval) pulls only the running events'
+       matches to save egress, then keeps the other events' matches from the
+       last full load. Admin actions and the initial load run full. */
+    const activeOnly = !!(background && data.tournament);
+    const fresh = await store.loadAll(activeOnly);
+    if (activeOnly && Array.isArray(data.matches)){
+      const ids = new Set((fresh.events || []).filter(e => e.active).map(e => e.id));
+      fresh.matches = data.matches.filter(m => !ids.has(m.event_id)).concat(fresh.matches || []);
+    }
+    data = fresh;
     state.loadError = null;
     if (state.eventId && !eventById(state.eventId)) state.eventId = null;
     if (state.adminEventId && !eventById(state.adminEventId)) state.adminEventId = null;
@@ -2146,6 +2242,7 @@ async function reload(){
        otherwise a dead modalMatchId silently blocks the team modal forever. */
     if (state.modalMatchId && !data.matches.some(m => m.id === state.modalMatchId)) state.modalMatchId = null;
     if (state.slotEditId && !data.matches.some(m => m.id === state.slotEditId)) state.slotEditId = null;
+    if (state.offCourtId && !data.matches.some(m => m.id === state.offCourtId)) state.offCourtId = null;
     if (state.teamModalId && !data.entrants.some(e => e.id === state.teamModalId)) state.teamModalId = null;
     if (state.adminPin){
       try{
@@ -2247,15 +2344,27 @@ async function playNext(matchId){
   toast("Moved to the front of the queue");
   await reload();
 }
+function openOffCourt(id){ state.offCourtId = id; state.modalMatchId = null; render(); }
+function closeOffCourt(){ state.offCourtId = null; render(); }
+/* "Bring on the next in line": the pool's next match takes the court. */
 async function swapOut(matchId){
-  const m = data.matches.find(x => x.id === matchId);
-  if (!m) return;
-  if (!confirm("Take " + (entrantName(m.entrant1_id) || "this match") + " vs " + (entrantName(m.entrant2_id) || "") +
-      " off Court " + m.court + "? The next match in line takes the court, and this one plays next.")) return;
   const r = await store.adminSwapOut(state.adminPin, matchId);
   if (!r.ok){ toast(r.error || "Could not move it."); return; }
-  state.modalMatchId = null;
-  toast("Off court, back up next");
+  state.offCourtId = null; state.modalMatchId = null;
+  toast("Off court, next one on");
+  await reload();
+}
+/* "Bring someone else on": a specific chosen match takes the court. */
+async function swapTo(offId, onId){
+  const r = await store.adminSwapTo(state.adminPin, offId, onId);
+  if (!r.ok){ toast(r.error || "Could not swap them."); return; }
+  state.offCourtId = null; state.modalMatchId = null;
+  toast("Court updated");
+  await reload();
+}
+async function reorderMatch(matchId, dir){
+  const r = await store.adminReorderMatch(state.adminPin, matchId, dir);
+  if (!r.ok){ toast(r.error || "Could not move it."); return; }
   await reload();
 }
 async function ackCalled(matchId){
@@ -2588,7 +2697,7 @@ async function doChangePin(){
     const r = await store.verifyPin(savedPin).catch(() => ({ ok: false }));
     if (r.ok) state.adminPin = savedPin; else safeSession("pb_admin_pin", null);
   }
-  store.subscribe(reload);
+  store.subscribe(() => reload(true));
   await reload();
   /* Refresh so "go to court" banners expire on time, without stomping on forms. */
   setInterval(() => {
