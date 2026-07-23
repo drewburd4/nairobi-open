@@ -1800,6 +1800,17 @@ function renderAdmin(){
         ['auto',4,8,16,32].map(v => '<option value="' + v + '"' + (ksize == String(v) ? ' selected' : '') + '>' + (v === 'auto' ? 'Auto' : v + ' teams') + '</option>').join("") + '</select></div>' +
       '<div class="field"><label for="adm-adv">Advance per group (auto)</label><input id="adm-adv" type="number" min="1" max="4" value="' + evSetting(ev, "advance_per_group", 2) + '"></div>' +
       '</div>' +
+      '<div class="field"><label>Courts this event may use</label><div style="padding:2px 0 0">' +
+      (function(){
+        const allowed = Array.isArray(ev.settings && ev.settings.courts) ? ev.settings.courts : [];
+        let s = '';
+        for(let cn = 1; cn <= courtsCount(); cn++){
+          const on = allowed.length === 0 || allowed.indexOf(cn) !== -1;
+          s += '<label style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 6px 0;font-weight:600"><input type="checkbox" class="adm-court" value="' + cn + '"' + (on ? ' checked' : '') + '> Court ' + cn + '</label>';
+        }
+        return s;
+      })() +
+      '</div><p class="note" style="margin:2px 0 0">Leave all ticked to share every court (weighted by how many matches each event still has). Tick only some to keep this event on just those courts.</p></div>' +
       '<button class="btn small secondary" onclick="saveEventSettings()">Save settings</button>' +
       '<p class="note" style="margin-top:8px">Changes apply right away. "Auto" knockout size takes the top ' + evSetting(ev, "advance_per_group", 2) + ' per group and fills to a full bracket with best next-placed teams; a fixed size does the same math for that exact number.</p>';
 
@@ -2270,6 +2281,17 @@ function readEventSettings(ev){
   const num = (id, dflt) => { const el = document.getElementById(id); return el ? (parseInt(el.value, 10) || dflt) : dflt; };
   const ksEl = document.getElementById("adm-ksize");
   const ks = ksEl ? ksEl.value : String(evSetting(ev, "knockout_size", "auto"));
+  /* Court override: all (or none) ticked means no restriction (share every
+     court); a subset limits the event to those courts. Preserve the saved
+     value when the checkboxes aren't on screen. */
+  const courtBoxes = Array.from(document.querySelectorAll(".adm-court"));
+  let courts;
+  if (!courtBoxes.length){
+    courts = Array.isArray(ev.settings && ev.settings.courts) ? ev.settings.courts : [];
+  } else {
+    const picked = courtBoxes.filter(b => b.checked).map(b => parseInt(b.value, 10));
+    courts = (picked.length === 0 || picked.length >= courtsCount()) ? [] : picked.sort((a, b) => a - b);
+  }
   return Object.assign({}, ev.settings, {
     points_to_group: Math.max(1, num("adm-ptg", evSetting(ev, "points_to_group", 21))),
     points_to_knockout: Math.max(1, num("adm-ptk", evSetting(ev, "points_to_knockout", 21))),
@@ -2277,7 +2299,8 @@ function readEventSettings(ev){
     best_of_knockout: num("adm-bok", evSetting(ev, "best_of_knockout", 1)),
     knockout_size: ks === "auto" ? "auto" : parseInt(ks, 10),
     advance_per_group: Math.max(1, num("adm-adv", evSetting(ev, "advance_per_group", 2))),
-    group_size: Math.max(3, num("adm-gsize", evSetting(ev, "group_size", 6)))
+    group_size: Math.max(3, num("adm-gsize", evSetting(ev, "group_size", 6))),
+    courts: courts
   });
 }
 async function saveEventSettings(){
