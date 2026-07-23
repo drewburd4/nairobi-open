@@ -1075,7 +1075,14 @@ function liveStore(){
   const subs = [];
   const notify = () => subs.forEach(f => { try{ f(); }catch(e){} });
   let debounceT = null;
-  const debouncedNotify = () => { clearTimeout(debounceT); debounceT = setTimeout(notify, 400); };
+  /* Reload live data only when the tab is actually being looked at, and let a
+     burst of changes coalesce into one reload, to keep egress down. A
+     backgrounded tab catches up the instant it returns to the foreground (see
+     the visibilitychange handler below), so "you're up" still lands on time. */
+  const debouncedNotify = () => {
+    clearTimeout(debounceT);
+    debounceT = setTimeout(() => { if (document.visibilityState === "visible") notify(); }, 1500);
+  };
 
   function loadScript(src){
     return new Promise((res, rej) => {
@@ -1321,8 +1328,7 @@ function render(){
   ];
   let html = '<div class="topbar">';
   if (store.mode === "demo") html += '<div class="demo-banner">Demo with sample data. Changes reset on refresh. Admin PIN: 0727</div>';
-  html += '<div class="masthead"><div class="wordmark">' + esc(data.tournament.name) + '</div>' +
-    '<div class="stagechip">' + courtsCount() + ' courts</div></div>';
+  html += '<div class="masthead"><div class="wordmark">' + esc(data.tournament.name) + '</div></div>';
   html += '<nav class="tabs">' + tabs.map(([id, label]) =>
     '<button class="tab" aria-current="' + (state.view === id) + '" onclick="setView(\'' + id + '\')">' + label + '</button>'
   ).join("") + '</nav>';
@@ -1565,7 +1571,8 @@ function renderSchedule(){
   }
 
   const shown = groupMs.filter(m => (state.roundFilter === "all" || String(m.round) === state.roundFilter) && matchesTerm(m));
-  if (!shown.length) return h + '<div class="empty">No matches found.</div>';
+  const shownKo = state.roundFilter === "all" ? koMs.filter(matchesTerm) : [];
+  if (!shown.length && !shownKo.length) return h + '<div class="empty">No matches found.</div>';
   for(let r = 1; r <= maxRound; r++){
     const list = shown.filter(m => m.round === r).sort((a, b) => a.play_order - b.play_order);
     if (!list.length) continue;
@@ -1576,6 +1583,16 @@ function renderSchedule(){
         list.map(m => scheduleRow(m, true)).join("") + '</details>';
     } else {
       h += '<div class="roundblock"><h3>Round ' + r + '</h3>' + list.map(m => scheduleRow(m, true)).join("") + '</div>';
+    }
+  }
+  /* Knockout matches show on the "All" page too while they're live, not only
+     under the Knockout tab. */
+  if (shownKo.length){
+    const koTotal = Math.max(...koMs.map(x => x.bracket_round));
+    for(let r = 1; r <= koTotal; r++){
+      const list = shownKo.filter(m => m.bracket_round === r).sort((a, b) => a.bracket_pos - b.bracket_pos);
+      if (!list.length) continue;
+      h += '<div class="roundblock"><h3>' + roundLabelFor(r, koTotal) + '</h3>' + list.map(m => scheduleRow(m, true)).join("") + '</div>';
     }
   }
   h += '<p class="note">Matches run in this order, group A first, so everyone plays round 1 before round 2 starts. Played matches show their scores; tap a match for details. A score can be entered while the match is on a court, and corrections go through the desk.</p>';
@@ -1678,9 +1695,7 @@ function renderBracket(){
       : bkTeamRow(esc(s.group + s.place), 'bkm-seed', null, s.wildcard ? ' <span class="bktag">Best ' + ordinal(s.place) + '</span>' : '');
     const tbdRow = () => bkTeamRow('TBD', 'bkm-tbd');
 
-    let h = '<div class="section-h"><h2>Projected bracket</h2><span class="hint">' +
-      (left ? 'Live, ' + left + ' group matches to go' : 'Group play complete') + '</span></div>';
-    h += '<div class="bkwrap"><div class="bk">';
+    let h = '<div class="bkwrap"><div class="bk">';
     for(let r = 0; r < totalRounds; r++){
       const count = size / Math.pow(2, r + 1);
       const cells = [];
