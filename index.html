@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="theme-color" content="#f7f5f0">
+<meta name="theme-color" content="#f7f5f0" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#171511" media="(prefers-color-scheme: dark)">
 <title>Nairobi Open</title>
 <style>
 /* ---------- tokens ---------- */
@@ -12,7 +13,7 @@
   --accent:#9a4526; --accent-ink:#ffffff; --accent-soft:#f4e7e0;
   --good:#46704f; --good-soft:#e9efe7;
   --warn:#a8730a; --warn-soft:#f6ecd9;
-  --danger:#a33d2a; --danger-soft:#f6e4de;
+  --danger:#a33d2a; --danger-soft:#f6e4de; --danger-ink:#ffffff;
   --bkline:#cfc8b8;
   --court:#2f6f6e; --court-soft:#e7f0ef; --ball:#c99a1f;
   --court-ink:#ffffff; --callout-chip:rgba(255,255,255,.18); --callout-chip-line:rgba(255,255,255,.4);
@@ -24,7 +25,7 @@
     --accent:#d07a55; --accent-ink:#1c130d; --accent-soft:#3a2a20;
     --good:#8db394; --good-soft:#26302a;
     --warn:#d9a24a; --warn-soft:#33270f;
-    --danger:#df8268; --danger-soft:#381d15;
+    --danger:#df8268; --danger-soft:#381d15; --danger-ink:#2a1109;
     --bkline:#575040;
     --court:#6cb8b2; --court-soft:#1b2b29; --ball:#e0b84a;
     --court-ink:#10201e; --callout-chip:rgba(0,0,0,.14); --callout-chip-line:rgba(0,0,0,.3);
@@ -36,7 +37,7 @@
   --accent:#9a4526; --accent-ink:#ffffff; --accent-soft:#f4e7e0;
   --good:#46704f; --good-soft:#e9efe7;
   --warn:#a8730a; --warn-soft:#f6ecd9;
-  --danger:#a33d2a; --danger-soft:#f6e4de;
+  --danger:#a33d2a; --danger-soft:#f6e4de; --danger-ink:#ffffff;
   --bkline:#cfc8b8;
   --court:#2f6f6e; --court-soft:#e7f0ef; --ball:#c99a1f;
   --court-ink:#ffffff; --callout-chip:rgba(255,255,255,.18); --callout-chip-line:rgba(255,255,255,.4);
@@ -47,7 +48,7 @@
   --accent:#d07a55; --accent-ink:#1c130d; --accent-soft:#3a2a20;
   --good:#8db394; --good-soft:#26302a;
   --warn:#d9a24a; --warn-soft:#33270f;
-  --danger:#df8268; --danger-soft:#381d15;
+  --danger:#df8268; --danger-soft:#381d15; --danger-ink:#2a1109;
   --bkline:#575040;
   --court:#6cb8b2; --court-soft:#1b2b29; --ball:#e0b84a;
   --court-ink:#10201e; --callout-chip:rgba(0,0,0,.14); --callout-chip-line:rgba(0,0,0,.3);
@@ -94,12 +95,14 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .tag.plain{background:transparent; border:1px solid var(--line); color:var(--muted)}
 .btn{display:inline-block; padding:9px 14px; border-radius:8px; font-weight:700; font-size:14px; background:var(--accent); color:var(--accent-ink); border:1px solid var(--accent); text-align:center}
 .btn.secondary{background:var(--card); color:var(--ink); border:1px solid var(--line)}
-.btn.danger{background:var(--danger); border-color:var(--danger); color:#fff}
+.btn.danger{background:var(--danger); border-color:var(--danger); color:var(--danger-ink)}
 .btn.small{padding:5px 9px; font-size:12.5px; border-radius:6px}
 .btn:disabled{opacity:.45; cursor:default}
 .note{font-size:12.5px; color:var(--muted)}
 .empty{padding:36px 16px; text-align:center; color:var(--muted); font-size:14px}
 .err{color:var(--danger); font-size:13px; font-weight:600; margin-top:8px}
+.stalebar{background:var(--warn-soft); color:var(--warn); font-size:12.5px; font-weight:700;
+  padding:5px 14px; text-align:center; border-top:1px solid var(--line)}
 
 /* ---------- courts board ---------- */
 .courtgrid{display:grid; grid-template-columns:1fr; gap:10px}
@@ -118,7 +121,17 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .queue-row .qnames{flex:1; min-width:0; font-weight:600; overflow-wrap:anywhere}
 .queue-row .qv{color:var(--muted); font-weight:400}
 .queue-row .qtag{font-size:11.5px; color:var(--muted); white-space:nowrap}
-.queue-actions{display:flex; gap:6px}
+.queue-actions{display:flex; gap:8px; align-items:center}
+/* touch-action:none keeps a finger drag from scrolling the page instead */
+.qgrip{display:inline-flex; align-items:center; justify-content:center; flex:none;
+  width:38px; height:34px; border-radius:7px; border:1px solid var(--line);
+  background:var(--card); color:var(--muted); font-size:15px; line-height:1;
+  cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none}
+.qgrip:active{cursor:grabbing; background:var(--accent-soft); color:var(--accent); border-color:var(--accent)}
+.queue-row.dragging{position:relative; z-index:5; border-radius:8px;
+  background:var(--accent-soft); box-shadow:0 6px 18px rgba(0,0,0,.18)}
+.queue-row.dropbefore{box-shadow:inset 0 3px 0 -1px var(--accent)}
+.queue-row.dropafter{box-shadow:inset 0 -3px 0 -1px var(--accent)}
 .boardnotes{margin-top:16px}
 .boardnotes .note{display:block; padding:2px 0}
 
@@ -412,8 +425,13 @@ function weaveQueues(lists){
   return items.map(x => x.m);
 }
 
-/* Points for/against of one side of a match, summing games when present. */
+/* Points for/against of one side of a match, summing games when present.
+   A walkover stores a placeholder score so the winner is recorded, but nobody
+   actually scored those points, so it contributes nothing either way. Counting
+   it would hand the winner a full-target differential for a match never played,
+   and differential decides tiebreaks and knockout seeding. */
 function matchPoints(m){
+  if (m.walkover) return [0, 0];
   if (Array.isArray(m.games) && m.games.length){
     let a = 0, b = 0;
     m.games.forEach(g => { a += g[0]; b += g[1]; });
@@ -422,7 +440,13 @@ function matchPoints(m){
   return [m.score1 || 0, m.score2 || 0];
 }
 
-/* Standings: wins, head to head (two-way ties), point diff, points for. */
+/* Standings follow the USA Pickleball round robin order (rule 12.C): matches
+   won, then head to head among the tied teams, then point differential over all
+   games, then head to head point differential. Whichever step separates the tie
+   ranks everyone in it, and teams still level afterwards restart the chain among
+   just themselves. Head to head applies to a tie of any size, not only a pair.
+   Points scored and then name settle anything the official chain leaves level,
+   so the order is always deterministic. */
 function computeStandings(entrants, matches){
   const rows = entrants.map(e => ({ id: e.id, name: e.name, p: 0, w: 0, l: 0, pf: 0, pa: 0, diff: 0 }));
   const byId = {};
@@ -438,23 +462,63 @@ function computeStandings(entrants, matches){
     if (m.score1 > m.score2){ a.w++; b.l++; } else { b.w++; a.l++; }
   }
   rows.forEach(r => r.diff = r.pf - r.pa);
-  rows.sort((x, y) => y.w - x.w || y.diff - x.diff || y.pf - x.pf || x.name.localeCompare(y.name));
-  for(let i = 0; i < rows.length - 1; i++){
-    const a = rows[i], b = rows[i + 1];
-    const twoWay = a.w === b.w &&
-      (i + 2 >= rows.length || rows[i + 2].w !== a.w) &&
-      (i === 0 || rows[i - 1].w !== a.w);
-    if (twoWay){
-      const m = played.find(m =>
-        (m.entrant1_id === a.id && m.entrant2_id === b.id) ||
-        (m.entrant1_id === b.id && m.entrant2_id === a.id));
-      if (m){
-        const winner = m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id;
-        if (winner === b.id){ rows[i] = b; rows[i + 1] = a; }
-      }
+
+  /* Only the matches played between the teams in one tied block. */
+  const between = tied => {
+    const ids = new Set(tied.map(r => r.id));
+    return played.filter(m => ids.has(m.entrant1_id) && ids.has(m.entrant2_id));
+  };
+  const h2hWins = tied => {
+    const t = {};
+    tied.forEach(r => t[r.id] = 0);
+    between(tied).forEach(m => { t[m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id]++; });
+    return r => t[r.id];
+  };
+  const h2hDiff = tied => {
+    const t = {};
+    tied.forEach(r => t[r.id] = 0);
+    between(tied).forEach(m => {
+      const [p1, p2] = matchPoints(m);
+      t[m.entrant1_id] += p1 - p2;
+      t[m.entrant2_id] += p2 - p1;
+    });
+    return r => t[r.id];
+  };
+  const steps = [h2hWins, () => r => r.diff, h2hDiff, () => r => r.pf];
+
+  /* Rank one block of teams level on wins. The first step that tells anyone
+     apart orders the whole block; each group still level after it recurses and
+     starts the chain again, so head to head is recomputed among the smaller set.
+     Every bucket is strictly smaller than its block, so this always terminates. */
+  function rank(tied){
+    if (tied.length < 2) return tied.slice();
+    for(const step of steps){
+      const value = step(tied);
+      const buckets = new Map();
+      tied.forEach(r => {
+        const v = value(r);
+        if (!buckets.has(v)) buckets.set(v, []);
+        buckets.get(v).push(r);
+      });
+      if (buckets.size < 2) continue;
+      const out = [];
+      Array.from(buckets.keys()).sort((a, b) => b - a)
+        .forEach(k => { const g = buckets.get(k); out.push(...(g.length > 1 ? rank(g) : g)); });
+      return out;
     }
+    return tied.slice().sort((a, b) => a.name.localeCompare(b.name));
   }
-  return rows;
+
+  rows.sort((x, y) => y.w - x.w || x.name.localeCompare(y.name));
+  const out = [];
+  for(let i = 0; i < rows.length; ){
+    let j = i;
+    while(j < rows.length && rows[j].w === rows[i].w) j++;
+    const block = rows.slice(i, j);
+    out.push(...(block.length > 1 ? rank(block) : block));
+    i = j;
+  }
+  return out;
 }
 
 /* Seed the knockout field.
@@ -601,26 +665,36 @@ function buildBracket(eventId, seeds, startOrder){
   return rows;
 }
 
-/* Single-game score check. Returns an error message, or null if valid. */
-function validateScore(s1, s2, pts, isAdmin){
+/* Single-game score check. Returns an error message, or null if valid.
+   winBy2 off (the default) means games stop dead on the target, which keeps
+   match lengths predictable when courts are shared. On, it follows the usual
+   pickleball rule: reach the target, and keep playing until someone leads by 2. */
+function validateScore(s1, s2, pts, isAdmin, winBy2){
   if (!Number.isInteger(s1) || !Number.isInteger(s2) || s1 < 0 || s2 < 0) return "Enter both scores as whole numbers.";
   if (s1 === s2) return "Scores can't be tied.";
   if (!isAdmin){
-    if (Math.max(s1, s2) !== pts) return "The winner needs exactly " + pts + " points.";
-    if (Math.min(s1, s2) >= pts) return "The losing score must be under " + pts + ".";
+    const hi = Math.max(s1, s2), lo = Math.min(s1, s2);
+    if (winBy2){
+      if (hi < pts) return "The winner needs at least " + pts + " points.";
+      if (hi - lo < 2) return "The winner has to lead by 2.";
+      if (hi > pts && hi - lo > 2) return "Past " + pts + ", the game ends as soon as someone leads by 2.";
+    } else {
+      if (hi !== pts) return "The winner needs exactly " + pts + " points.";
+      if (lo >= pts) return "The losing score must be under " + pts + ".";
+    }
   }
   return null;
 }
 
 /* Best-of-N check. games: [[a,b],...]. Returns {error} or {w1, w2}. */
-function validateGames(games, pts, isAdmin, bestOf){
+function validateGames(games, pts, isAdmin, bestOf, winBy2){
   const need = Math.floor(bestOf / 2) + 1;
   if (!Array.isArray(games) || !games.length) return { error: "Enter the game scores in order." };
   if (games.length > bestOf) return { error: "Best of " + bestOf + ": that's too many games." };
   let w1 = 0, w2 = 0;
   for(const g of games){
     if (w1 === need || w2 === need) return { error: "The match was already decided; remove the extra games." };
-    const err = validateScore(g[0], g[1], pts, isAdmin);
+    const err = validateScore(g[0], g[1], pts, isAdmin, winBy2);
     if (err) return { error: err };
     if (g[0] > g[1]) w1++; else w2++;
   }
@@ -814,14 +888,16 @@ function demoStore(){
   function applyScore(m, s1, s2, games, isAdmin, walkover){
     const pts = settingFor(m, "points_to");
     const bo = settingFor(m, "best_of");
+    const ev = eventOf(m);
+    const wb2 = !!(ev && ev.settings && ev.settings.win_by_two);
     if (walkover){
       m.score1 = s1; m.score2 = s2; m.games = null;
     } else if (bo > 1){
-      const v = validateGames(games || [], pts, isAdmin, bo);
+      const v = validateGames(games || [], pts, isAdmin, bo, wb2);
       if (v.error) return v.error;
       m.score1 = v.w1; m.score2 = v.w2; m.games = games;
     } else {
-      const err = validateScore(s1, s2, pts, isAdmin);
+      const err = validateScore(s1, s2, pts, isAdmin, wb2);
       if (err) return err;
       m.score1 = s1; m.score2 = s2; m.games = null;
     }
@@ -971,17 +1047,27 @@ function demoStore(){
       assignCourtsGlobal(db);
       notify(); return ok();
     },
-    async adminReorderMatch(pin, matchId, dir){
+    /* Move a waiting match so it sits directly before beforeId in its own
+       event's queue, or last if beforeId is null. Mirrors the SQL function:
+       play_order is numeric, so slotting between two neighbours is just their
+       midpoint and no other row has to be renumbered. */
+    async adminMoveMatch(pin, matchId, beforeId){
       if (!checkPin(pin)) return fail("Wrong PIN.");
       const m = findMatch(matchId);
       if (!m) return fail("Match not found.");
       if (m.status !== "scheduled" || m.court != null) return fail("That match is not waiting in the queue.");
-      const sibs = db.matches.filter(x => x.event_id === m.event_id && x.status === "scheduled" && x.court == null && !x.postponed && x.entrant1_id && x.entrant2_id);
-      const other = dir === "up"
-        ? sibs.filter(x => x.play_order < m.play_order).sort((a, b) => b.play_order - a.play_order)[0]
-        : sibs.filter(x => x.play_order > m.play_order).sort((a, b) => a.play_order - b.play_order)[0];
-      if (!other) return ok();
-      const tmp = m.play_order; m.play_order = other.play_order; other.play_order = tmp;
+      const sibs = db.matches
+        .filter(x => x.event_id === m.event_id && x.status === "scheduled" && x.court == null && x.id !== m.id)
+        .sort((a, b) => a.play_order - b.play_order);
+      if (!sibs.length) return ok();
+      if (beforeId == null){
+        m.play_order = sibs[sibs.length - 1].play_order + 10;
+      } else {
+        const t = findMatch(beforeId);
+        if (!t || t.event_id !== m.event_id) return fail("Move it within its own event.");
+        const prev = sibs.filter(x => x.play_order < t.play_order).pop();
+        m.play_order = prev ? (prev.play_order + t.play_order) / 2 : t.play_order - 10;
+      }
       assignCourtsGlobal(db);
       notify(); return ok();
     },
@@ -1005,7 +1091,8 @@ function demoStore(){
       if (!checkPin(pin)) return fail("Wrong PIN.");
       const ev = db.events.find(e => e.id === eventId);
       if (!ev) return fail("Event not found.");
-      ev.name = name; ev.settings = settings;
+      /* Merge, matching the SQL: callers send only the keys they changed. */
+      ev.name = name; ev.settings = Object.assign({}, ev.settings, settings || {});
       assignCourtsGlobal(db);
       notify(); return ok();
     },
@@ -1162,7 +1249,10 @@ function liveStore(){
     async loadAll(activeOnly){
       const c = await ensureClient();
       const [t, ev, en] = await Promise.all([
-        c.from("nairobi_tournaments").select("*").limit(1),
+        /* Never select "*" here: row level security is per row, not per column,
+           so the public read policy would hand admin_pin_hash to every visitor,
+           and a 4 digit PIN behind a readable hash cracks offline in no time. */
+        c.from("nairobi_tournaments").select("id,name,settings,created_at").limit(1),
         c.from("nairobi_events").select("*").order("sort_order"),
         c.from("nairobi_entrants").select("*").order("group_name").order("seed")
       ]);
@@ -1193,7 +1283,7 @@ function liveStore(){
     adminSwapOut: (pin, id) => rpc("nairobi_admin_swap_out", { p_pin: pin, p_match_id: id }),
     adminAckCalled: (pin, id) => rpc("nairobi_admin_ack_called", { p_pin: pin, p_match_id: id }),
     adminAssignCourt: (pin, id, court) => rpc("nairobi_admin_assign_court", { p_pin: pin, p_match_id: id, p_court: court }),
-    adminReorderMatch: (pin, id, dir) => rpc("nairobi_admin_reorder_match", { p_pin: pin, p_match_id: id, p_dir: dir }),
+    adminMoveMatch: (pin, id, beforeId) => rpc("nairobi_admin_move_match", { p_pin: pin, p_match_id: id, p_before_id: beforeId }),
     adminSwapTo: (pin, offId, onId) => rpc("nairobi_admin_swap_to", { p_pin: pin, p_off_match: offId, p_on_match: onId }),
     adminUpdateEvent: (pin, eventId, name, settings) => rpc("nairobi_admin_update_event", { p_pin: pin, p_event_id: eventId, p_name: name, p_settings: settings }),
     adminSetActive: (pin, eventId, active) => rpc("nairobi_admin_set_active", { p_pin: pin, p_event_id: eventId, p_active: !!active }),
@@ -1231,14 +1321,22 @@ const state = {
   standingsFilter: "all",
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null, assignCourt: null, offCourtId: null,
   setupPreview: null, adminEventId: null, loadError: null,
-  showAllQueue: false, showRedraw: false, pendingRender: false,
-  dismissedCalled: {}, contacts: {}, bkCentered: false
+  showAllQueue: false, showRedraw: false, pendingRender: false, dragging: false,
+  dismissedCalled: {}, contacts: {}
 };
 
 function esc(s){
   return String(s == null ? "" : s)
     .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+/* For a value passed to an inline onclick as a single-quoted JS string.
+   esc() alone is not enough there: the browser decodes the attribute before
+   compiling the JS, so an escaped quote turns back into a real one and closes
+   the string. Escape it for JS first, then for the attribute. */
+function jsAttr(s){
+  return esc(String(s == null ? "" : s)
+    .replace(/\\/g, "\\\\").replace(/'/g, "\\'").replace(/\r?\n/g, "\\n"));
 }
 function safeSession(key, val){
   try{
@@ -1289,6 +1387,7 @@ const matchBestOf = m => {
   const ev = eventById(m.event_id);
   return parseInt(evSetting(ev, m.stage === "knockout" ? "best_of_knockout" : "best_of_group", 1), 10) || 1;
 };
+const matchWinBy2 = m => !!evSetting(eventById(m.event_id), "win_by_two", false);
 function currentEvent(){
   if (state.eventId && eventById(state.eventId)) return eventById(state.eventId);
   const act = activeEvents();
@@ -1354,6 +1453,8 @@ function commitHtml(app, html){
 }
 function render(){
   const app = document.getElementById("app");
+  /* Replacing the DOM mid-drag would drop the row being held. */
+  if (state.dragging){ state.pendingRender = true; return; }
   const ae = document.activeElement;
   const typingInForm = ae && app.contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && ae.id !== "pin-input" && ae.id !== "search-input";
   if (typingInForm && (state.view === "admin" || state.modalMatchId || state.slotEditId)){
@@ -1363,7 +1464,10 @@ function render(){
   const restoreId = ae && ae.id;
   const restoreVal = restoreId && ae.value;
 
-  if (state.loadError){
+  /* Only take over the screen when there is nothing to show. A refresh that
+     fails on patchy venue wifi must not throw away a board that is already on
+     screen and still broadly right; it says so quietly and keeps retrying. */
+  if (state.loadError && !data.tournament){
     commitHtml(app, '<div class="wrap"><div class="empty">Could not load tournament data.<br>' + esc(state.loadError) + '<br><br><button class="btn secondary" onclick="location.reload()">Retry</button></div></div>');
     return;
   }
@@ -1383,6 +1487,7 @@ function render(){
     '<button class="tab" aria-current="' + (state.view === id) + '" onclick="setView(\'' + id + '\')">' + label + '</button>'
   ).join("") + '</nav>';
   html += renderCallouts();
+  if (state.loadError) html += '<div class="stalebar">Showing the last update. Trying to reconnect…</div>';
   html += '</div>';
 
   html += '<main class="wrap">';
@@ -1452,15 +1557,15 @@ function renderEventTabs(){
 function queueRow(m, opts){
   opts = opts || {};
   const ev = eventById(m.event_id);
-  let row = '<div class="queue-row click" onclick="openMatch(\'' + m.id + '\')">';
+  let row = '<div class="queue-row click" data-mid="' + m.id + '" data-eid="' + m.event_id + '" onclick="openMatch(\'' + m.id + '\')">';
   if (opts.pos != null) row += '<span class="qpos">' + opts.pos + '</span>';
   row += '<span class="qnames">' + esc(entrantName(m.entrant1_id)) + ' <span class="qv">vs</span> ' + esc(entrantName(m.entrant2_id)) + '</span>';
   if (m.postponed && !opts.inPostponed) row += '<span class="qtag">Postponed</span>';
   if (opts.showEvent && ev) row += '<span class="qtag">' + esc(ev.name) + '</span>';
   if (state.adminPin && opts.action === "postpone")
     row += '<span class="queue-actions">' +
-      '<button class="btn small secondary" title="Move up" onclick="event.stopPropagation();reorderMatch(\'' + m.id + '\',\'up\')">▲</button>' +
-      '<button class="btn small secondary" title="Move down" onclick="event.stopPropagation();reorderMatch(\'' + m.id + '\',\'down\')">▼</button>' +
+      '<span class="qgrip" role="button" tabindex="0" aria-label="Drag to reorder" title="Drag to reorder within this event"' +
+      ' onpointerdown="startQueueDrag(event, \'' + m.id + '\')">⠿</span>' +
       '<button class="btn small secondary" onclick="event.stopPropagation();postpone(\'' + m.id + '\', false)">Postpone</button></span>';
   if (state.adminPin && opts.action === "playnext")
     row += '<span class="queue-actions"><button class="btn small secondary" onclick="event.stopPropagation();playNext(\'' + m.id + '\')">Play next</button></span>';
@@ -1671,14 +1776,14 @@ function renderStandings(){
   if (groups.length > 1){
     h += '<div class="subtabs" role="tablist">' +
       '<button class="subtab" aria-current="' + (f === "all") + '" onclick="setStandingsFilter(\'all\')">All</button>' +
-      groups.map(g => '<button class="subtab" aria-current="' + (f === g) + '" onclick="setStandingsFilter(\'' + esc(g) + '\')">Group ' + esc(g) + '</button>').join("") +
+      groups.map(g => '<button class="subtab" aria-current="' + (f === g) + '" onclick="setStandingsFilter(\'' + jsAttr(g) + '\')">Group ' + esc(g) + '</button>').join("") +
       '</div>';
   }
   for(const g of groups){
     if (f !== "all" && f !== g) continue;
     const rows = standingsFor(ev, g);
     const left = data.matches.filter(m => m.event_id === ev.id && m.stage === "group" && m.group_name === g && m.status === "scheduled").length;
-    h += '<div class="group-card"><h3><span>Group ' + g + '</span>' + (left ? '<span class="tag plain">' + left + ' left</span>' : '<span class="tag plain">Complete</span>') + '</h3>';
+    h += '<div class="group-card"><h3><span>Group ' + esc(g) + '</span>' + (left ? '<span class="tag plain">' + left + ' left</span>' : '<span class="tag plain">Complete</span>') + '</h3>';
     h += '<table class="standings"><thead><tr><th></th><th class="tname">Team</th><th>P</th><th>W</th><th>L</th><th>+/-</th></tr></thead><tbody>';
     rows.forEach((r, i) => {
       h += '<tr onclick="openTeam(\'' + r.id + '\')"><td class="pos">' + (i + 1) + '</td><td class="tname">' + esc(r.name) + '</td>' +
@@ -1686,7 +1791,9 @@ function renderStandings(){
     });
     h += '</tbody></table></div>';
   }
-  h += '<p class="note">Tiebreakers: wins, then head to head, then point difference, then points scored.</p>';
+  h += '<p class="note">Tiebreakers follow the USA Pickleball order: wins, then head to head between the tied teams, ' +
+    'then point difference, then head to head point difference. Teams still level after that are split on points scored. ' +
+    'A walkover counts as a win but adds no points either way.</p>';
   return h;
 }
 
@@ -1869,6 +1976,12 @@ function renderAdmin(){
         ['auto',4,8,16,32].map(v => '<option value="' + v + '"' + (ksize == String(v) ? ' selected' : '') + '>' + (v === 'auto' ? 'Auto' : v + ' teams') + '</option>').join("") + '</select></div>' +
       '<div class="field"><label for="adm-adv">Advance per group (auto)</label><input id="adm-adv" type="number" min="1" max="4" value="' + evSetting(ev, "advance_per_group", 2) + '"></div>' +
       '</div>' +
+      '<div class="field"><label>Ending a game</label><div style="padding:2px 0 0">' +
+      '<label style="display:inline-flex;align-items:center;gap:6px;font-weight:600">' +
+      '<input type="checkbox" id="adm-wb2"' + (evSetting(ev, "win_by_two", false) ? ' checked' : '') + '> Win by 2</label>' +
+      '</div><p class="note" style="margin:2px 0 0">Off: the first team to the target wins, even at ' +
+      (evSetting(ev, "points_to_group", 21) - 1) + '-' + evSetting(ev, "points_to_group", 21) +
+      ', which keeps matches to a predictable length on shared courts. On: play carries past the target until someone leads by 2.</p></div>' +
       '<div class="field"><label>Courts this event may use</label><div style="padding:2px 0 0">' +
       (function(){
         const allowed = Array.isArray(ev.settings && ev.settings.courts) ? ev.settings.courts : [];
@@ -1908,14 +2021,14 @@ function renderAdmin(){
             '<span class="queue-actions">' +
             '<select class="mv" onchange="moveEntrant(\'' + e.id + '\', this.value); this.value=\'\'">' +
             '<option value="">Move…</option>' +
-            groups.filter(x => x !== g).map(x => '<option value="' + x + '">To ' + x + '</option>').join("") +
+            groups.filter(x => x !== g).map(x => '<option value="' + esc(x) + '">To ' + esc(x) + '</option>').join("") +
             '<option value="__new">New group ' + nextLetter + '</option></select>' +
             '<button class="btn small secondary" onclick="renameEntrant(\'' + e.id + '\')">Rename</button>' +
             '<button class="btn small danger" onclick="removeEntrant(\'' + e.id + '\')">Remove</button></span></div>';
         });
       });
       h += '<div class="addteam"><input id="add-team-name" type="text" placeholder="New team or player">' +
-        '<select id="add-team-group">' + groups.map(g => '<option value="' + g + '">Group ' + g + '</option>').join("") + '</select>' +
+        '<select id="add-team-group">' + groups.map(g => '<option value="' + esc(g) + '">Group ' + esc(g) + '</option>').join("") + '</select>' +
         '<button class="btn small secondary" onclick="addTeamToGroup()">Add</button></div>' +
         '<p class="note" style="margin-top:6px">Moving or removing a team also removes its matches (and results). New or moved teams get catch-up matches at the end of the queue.</p></details>';
       if (hasMatches && !state.showRedraw){
@@ -1953,8 +2066,9 @@ function renderAdmin(){
   h += '<div class="panel"><h3>Admin powers on the other tabs</h3><p class="note">' +
     'While unlocked: tap any match anywhere (Courts, Schedule, a team in Standings, or the Bracket) to fix or clear its score, enter a walkover, or postpone. ' +
     'Players can only enter a score while a match is on a court; admins can score anything from anywhere. ' +
-    'An on-court match can be sent back with "Off court, up next": the next match in line takes its court and it plays next. ' +
-    'The Courts tab has Postpone on the queue and Play next on postponed matches. On a "go to court" banner, ✓ On court dismisses it for everyone; a plain tap hides it only on that phone. ' +
+    'An on-court match can be sent back with "Take off court": either the next match in line takes its court, or you pick the one to bring on. ' +
+    'The Courts tab has Postpone on the queue and Play next on postponed matches, and the ⠿ handle drags a match up or down its own event\'s queue. ' +
+    'On a "go to court" banner, ✓ On court dismisses it for everyone; a plain tap hides it only on that phone. ' +
     'On the Bracket tab, unplayed matches have an Edit teams link for manual fixes. ' +
     'Everything updates live on everyone\'s phone.</p></div>';
 
@@ -1987,7 +2101,8 @@ function renderScoreModal(){
   let h = '<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" role="dialog" aria-modal="true">';
   h += '<h3>' + (played ? 'Match result' : infoOnly ? 'Upcoming match' : 'Enter score') + '</h3>';
   h += '<div class="sub">' + esc(ev ? ev.name : '') + ' · ' + esc(roundName(m)) + (m.court != null && !played ? ' · Court ' + m.court : '') +
-    ' · ' + (bo > 1 ? 'best of ' + bo + ', games' : 'first') + ' to ' + pts + '</div>';
+    ' · ' + (bo > 1 ? 'best of ' + bo + ', games' : 'first') + ' to ' + pts +
+    (matchWinBy2(m) ? ', win by 2' : '') + '</div>';
 
   const adminExtras = () => {
     let x = '';
@@ -2032,7 +2147,7 @@ function renderScoreModal(){
     h += '<p class="note">Fill games in order and leave unplayed games blank. First to ' + (Math.floor(bo / 2) + 1) + ' game wins takes the match.</p>';
     if (!isAdmin) h += '<p class="note">One entry per match: after that, corrections go through the desk.</p>';
     h += '<div class="actions">' + adminExtras() +
-      '<span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Cancel</button>' +
+      '<span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Close</button>' +
       '<button class="btn" onclick="saveScore(\'' + m.id + '\')">' + (isAdmin ? 'Save (admin)' : 'Save score') + '</button></div>';
     h += walkoverRow();
   } else {
@@ -2041,7 +2156,7 @@ function renderScoreModal(){
     h += '<div class="err" id="score-err"></div>';
     if (!isAdmin) h += '<p class="note">Winners report the score. One entry per match: after that, corrections go through the desk.</p>';
     h += '<div class="actions">' + adminExtras() +
-      '<span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Cancel</button>' +
+      '<span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Close</button>' +
       '<button class="btn" onclick="saveScore(\'' + m.id + '\')">' + (isAdmin ? 'Save (admin)' : 'Save score') + '</button></div>';
     h += walkoverRow();
   }
@@ -2183,8 +2298,8 @@ function renderOffCourtModal(){
 }
 
 /* ---------- actions ---------- */
-function setView(v){ state.view = v; state.setupPreview = null; state.bkCentered = false; render(); }
-function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.standingsFilter = "all"; state.bkCentered = false; render(); }
+function setView(v){ state.view = v; state.setupPreview = null; render(); }
+function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.standingsFilter = "all"; render(); }
 function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; render(); }
 function setRoundFilter(r){ state.roundFilter = String(r); render(); }
 function setStandingsFilter(v){ state.standingsFilter = v; render(); }
@@ -2198,7 +2313,10 @@ function toggleAllQueue(){ state.showAllQueue = !state.showAllQueue; render(); }
 function toggleRedraw(){ state.showRedraw = !state.showRedraw; state.setupPreview = null; render(); }
 let searchT = null;
 function setSearch(v){ state.search = v; clearTimeout(searchT); searchT = setTimeout(render, 150); }
-function openMatch(id){ state.modalMatchId = id; render(); }
+function openMatch(id){
+  if (performance.now() < qdragUntil) return;
+  state.modalMatchId = id; render();
+}
 function closeModal(){ state.modalMatchId = null; render(); }
 function openTeam(id){ state.teamModalId = id; render(); }
 function closeTeam(){ state.teamModalId = null; render(); }
@@ -2229,10 +2347,15 @@ async function reload(background){
        matches to save egress, then keeps the other events' matches from the
        last full load. Admin actions and the initial load run full. */
     const activeOnly = !!(background && data.tournament);
-    const fresh = await store.loadAll(activeOnly);
+    let fresh = await store.loadAll(activeOnly);
     if (activeOnly && Array.isArray(data.matches)){
-      const ids = new Set((fresh.events || []).filter(e => e.active).map(e => e.id));
-      fresh.matches = data.matches.filter(m => !ids.has(m.event_id)).concat(fresh.matches || []);
+      const was = (data.events || []).filter(e => e.active).map(e => e.id);
+      const now = new Set((fresh.events || []).filter(e => e.active).map(e => e.id));
+      /* An event that has just been paused drops out of the background fetch,
+         so merging would freeze its matches at whatever we last saw and leave
+         phones showing courts it no longer holds. Pull everything once instead. */
+      if (was.some(id => !now.has(id))) fresh = await store.loadAll(false);
+      else fresh.matches = data.matches.filter(m => !now.has(m.event_id)).concat(fresh.matches || []);
     }
     data = fresh;
     state.loadError = null;
@@ -2275,6 +2398,7 @@ async function saveScore(matchId){
   const m = data.matches.find(x => x.id === matchId);
   const bo = m ? matchBestOf(m) : 1;
   const pts = m ? matchPts(m) : 21;
+  const wb2 = m ? matchWinBy2(m) : false;
   const errEl = document.getElementById("score-err");
   let r;
   if (bo > 1){
@@ -2282,8 +2406,8 @@ async function saveScore(matchId){
     /* Admin scores are free-form, but an off-format score must be
        acknowledged so typos don't slip through as overrides. */
     if (state.adminPin){
-      const strict = validateGames(games, pts, false, bo);
-      const lenient = validateGames(games, pts, true, bo);
+      const strict = validateGames(games, pts, false, bo, wb2);
+      const lenient = validateGames(games, pts, true, bo, wb2);
       if (!lenient.error && strict.error && !confirm(strict.error + " Save anyway (admin override)?")) return;
     }
     r = state.adminPin
@@ -2293,8 +2417,8 @@ async function saveScore(matchId){
     const s1 = parseInt(document.getElementById("score1").value, 10);
     const s2 = parseInt(document.getElementById("score2").value, 10);
     if (state.adminPin){
-      const strict = validateScore(s1, s2, pts, false);
-      const lenient = validateScore(s1, s2, pts, true);
+      const strict = validateScore(s1, s2, pts, false, wb2);
+      const lenient = validateScore(s1, s2, pts, true, wb2);
       if (!lenient && strict && !confirm(strict + " Save anyway (admin override)?")) return;
     }
     r = state.adminPin
@@ -2362,9 +2486,74 @@ async function swapTo(offId, onId){
   toast("Court updated");
   await reload();
 }
-async function reorderMatch(matchId, dir){
-  const r = await store.adminReorderMatch(state.adminPin, matchId, dir);
-  if (!r.ok){ toast(r.error || "Could not move it."); return; }
+/* Drag to reorder the queue. Pointer events cover a finger on a phone and a
+   mouse on a laptop in one code path; HTML5 drag and drop ignores touch. A
+   match only ever moves within its own event, so the drop targets are the rows
+   sharing its event id even though the list interleaves every running event. */
+let qdrag = null;
+let qdragUntil = 0;
+const qdragPeers = () => Array.from(
+  qdrag.block.querySelectorAll('.queue-row[data-eid="' + qdrag.row.dataset.eid + '"]'))
+  .filter(r => r !== qdrag.row);
+function qdragClearMarks(){
+  qdrag.block.querySelectorAll(".dropbefore,.dropafter")
+    .forEach(r => r.classList.remove("dropbefore", "dropafter"));
+}
+function startQueueDrag(e, matchId){
+  if (!state.adminPin || qdrag) return;
+  e.stopPropagation();
+  e.preventDefault();
+  const grip = e.currentTarget, row = grip.closest(".queue-row");
+  if (!row || !row.parentElement) return;
+  qdrag = { id: matchId, grip, row, block: row.parentElement, startY: e.clientY, moved: false, before: null };
+  if (qdragPeers().length < 1){ qdrag = null; return; }
+  state.dragging = true;
+  row.classList.add("dragging");
+  try{ grip.setPointerCapture(e.pointerId); }catch(_){}
+  grip.addEventListener("pointermove", onQueueDragMove);
+  grip.addEventListener("pointerup", endQueueDrag);
+  grip.addEventListener("pointercancel", cancelQueueDrag);
+}
+function onQueueDragMove(e){
+  if (!qdrag) return;
+  const dy = e.clientY - qdrag.startY;
+  if (Math.abs(dy) > 4) qdrag.moved = true;
+  qdrag.row.style.transform = "translateY(" + dy + "px)";
+  qdragClearMarks();
+  const peers = qdragPeers();
+  let before = null;
+  for(const r of peers){
+    const b = r.getBoundingClientRect();
+    if (e.clientY < b.top + b.height / 2){ before = r; break; }
+  }
+  qdrag.before = before;
+  if (before) before.classList.add("dropbefore");
+  else if (peers.length) peers[peers.length - 1].classList.add("dropafter");
+}
+function finishQueueDrag(e){
+  const d = qdrag;
+  if (!d) return null;
+  d.row.style.transform = "";
+  d.row.classList.remove("dragging");
+  qdragClearMarks();
+  d.grip.removeEventListener("pointermove", onQueueDragMove);
+  d.grip.removeEventListener("pointerup", endQueueDrag);
+  d.grip.removeEventListener("pointercancel", cancelQueueDrag);
+  if (e) try{ d.grip.releasePointerCapture(e.pointerId); }catch(_){}
+  qdrag = null;
+  state.dragging = false;
+  state.pendingRender = false;
+  /* Swallow the click the browser fires after the drop, so letting go of a row
+     does not also open its match. */
+  if (d.moved) qdragUntil = performance.now() + 400;
+  return d;
+}
+function cancelQueueDrag(e){ finishQueueDrag(e); render(); }
+async function endQueueDrag(e){
+  const d = finishQueueDrag(e);
+  if (!d || !d.moved){ render(); return; }
+  const r = await store.adminMoveMatch(state.adminPin, d.id, d.before ? d.before.dataset.mid : null);
+  if (!r.ok) toast(r.error || "Could not move it.");
   await reload();
 }
 async function ackCalled(matchId){
@@ -2374,7 +2563,14 @@ async function ackCalled(matchId){
 }
 async function assignToCourt(matchId, court){
   const r = await store.adminAssignCourt(state.adminPin, matchId, court);
-  if (!r.ok){ toast(r.error || "Could not place it."); return; }
+  if (!r.ok){
+    toast(r.error || "Could not place it.");
+    /* Someone else filled this court first. Leaving the picker open would fail
+       the same way on every pick, so close it and show the board as it now is. */
+    if (/just filled|not free|taken/i.test(r.error || "")) state.assignCourt = null;
+    await reload();
+    return;
+  }
   state.assignCourt = null;
   toast("On Court " + court);
   await reload();
@@ -2401,36 +2597,64 @@ async function tryUnlock(){
 }
 function adminSignOut(){ state.adminPin = null; safeSession("pb_admin_pin", null); render(); }
 
+/* Reads the settings panel. Returns null if something is out of range, so a
+   typo in a points target can't be saved: public score entry checks against
+   that target, so a stray "210" would quietly block every score in the event. */
 function readEventSettings(ev){
-  const num = (id, dflt) => { const el = document.getElementById(id); return el ? (parseInt(el.value, 10) || dflt) : dflt; };
+  let bad = null;
+  const num = (id, dflt, lo, hi, label) => {
+    const el = document.getElementById(id);
+    if (!el) return dflt;
+    const v = parseInt(el.value, 10);
+    if (!Number.isInteger(v) || v < lo || v > hi){
+      if (!bad) bad = label + " has to be between " + lo + " and " + hi + ".";
+      return dflt;
+    }
+    return v;
+  };
   const ksEl = document.getElementById("adm-ksize");
   const ks = ksEl ? ksEl.value : String(evSetting(ev, "knockout_size", "auto"));
-  /* Court override: all (or none) ticked means no restriction (share every
-     court); a subset limits the event to those courts. Preserve the saved
-     value when the checkboxes aren't on screen. */
+  const wbEl = document.getElementById("adm-wb2");
+  /* Court override: every box ticked means no restriction (share every court);
+     a subset limits the event to those courts. Unticking them all is a mistake
+     rather than a setting, since an empty list reads as "no restriction"
+     everywhere else, the opposite of what the empty boxes suggest. Preserve the
+     saved value when the checkboxes aren't on screen. */
   const courtBoxes = Array.from(document.querySelectorAll(".adm-court"));
   let courts;
   if (!courtBoxes.length){
     courts = Array.isArray(ev.settings && ev.settings.courts) ? ev.settings.courts : [];
   } else {
     const picked = courtBoxes.filter(b => b.checked).map(b => parseInt(b.value, 10));
-    courts = (picked.length === 0 || picked.length >= courtsCount()) ? [] : picked.sort((a, b) => a - b);
+    if (!picked.length){
+      bad = bad || "Tick at least one court. To take this event off court entirely, pause it instead.";
+      courts = Array.isArray(ev.settings && ev.settings.courts) ? ev.settings.courts : [];
+    } else {
+      courts = picked.length >= courtsCount() ? [] : picked.sort((a, b) => a - b);
+    }
   }
-  return Object.assign({}, ev.settings, {
-    points_to_group: Math.max(1, num("adm-ptg", evSetting(ev, "points_to_group", 21))),
-    points_to_knockout: Math.max(1, num("adm-ptk", evSetting(ev, "points_to_knockout", 21))),
-    best_of_group: num("adm-bog", evSetting(ev, "best_of_group", 1)),
-    best_of_knockout: num("adm-bok", evSetting(ev, "best_of_knockout", 1)),
+  /* Only the keys this panel owns. nairobi_admin_update_event merges them into
+     whatever is stored, so saving here can't roll back an edit someone else
+     made to a different setting on another device. */
+  const out = ({
+    points_to_group: num("adm-ptg", evSetting(ev, "points_to_group", 21), 5, 51, "Group games to"),
+    points_to_knockout: num("adm-ptk", evSetting(ev, "points_to_knockout", 21), 5, 51, "Knockout games to"),
+    best_of_group: num("adm-bog", evSetting(ev, "best_of_group", 1), 1, 5, "Group format"),
+    best_of_knockout: num("adm-bok", evSetting(ev, "best_of_knockout", 1), 1, 5, "Knockout format"),
     knockout_size: ks === "auto" ? "auto" : parseInt(ks, 10),
-    advance_per_group: Math.max(1, num("adm-adv", evSetting(ev, "advance_per_group", 2))),
-    group_size: Math.max(3, num("adm-gsize", evSetting(ev, "group_size", 6))),
+    advance_per_group: num("adm-adv", evSetting(ev, "advance_per_group", 2), 1, 4, "Advance per group"),
+    group_size: num("adm-gsize", evSetting(ev, "group_size", 6), 3, 32, "Group size"),
+    win_by_two: wbEl ? wbEl.checked : !!evSetting(ev, "win_by_two", false),
     courts: courts
   });
+  return bad ? { error: bad } : out;
 }
 async function saveEventSettings(){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
-  const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, readEventSettings(ev));
+  const settings = readEventSettings(ev);
+  if (settings.error){ toast(settings.error); return; }
+  const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, settings);
   if (!r.ok){ toast(r.error); return; }
   toast("Settings saved"); await reload();
 }
@@ -2438,8 +2662,7 @@ async function saveNote(){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
   const note = document.getElementById("adm-note").value.trim();
-  const settings = Object.assign({}, ev.settings, { schedule_note: note });
-  const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, settings);
+  const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, { schedule_note: note });
   if (!r.ok){ toast(r.error); return; }
   toast("Note saved"); await reload();
 }
@@ -2568,7 +2791,8 @@ function previewSetup(){
   if (!ev) return;
   const names = parseTeamsInput();
   if (names.length < 4){ state.setupPreview = "Paste at least 4 entrants first."; render(); return; }
-  state.setupPreview = setupSummary(names, readEventSettings(ev));
+  const s = readEventSettings(ev);
+  state.setupPreview = s.error || setupSummary(names, s);
   render();
 }
 async function applySetup(){
@@ -2578,12 +2802,15 @@ async function applySetup(){
   if (names.length < 4){ state.setupPreview = "Paste at least 4 entrants first."; render(); return; }
   const dupes = names.filter((n, i) => names.indexOf(n) !== i);
   if (dupes.length){ state.setupPreview = "Duplicate entries: " + [...new Set(dupes)].join(", "); render(); return; }
+  const check = readEventSettings(ev);
+  if (check.error){ state.setupPreview = check.error; render(); return; }
   const hasMatches = data.matches.some(m => m.event_id === ev.id);
   const msg = hasMatches
     ? 'Draw new groups for "' + ev.name + '" with ' + names.length + ' entrants? This wipes its current groups, matches, and scores, and pauses it.'
     : 'Draw groups for "' + ev.name + '" with ' + names.length + ' entrants?';
   if (!confirm(msg)) return;
-  const settings = readEventSettings(ev);
+  /* This one replaces the whole event, so it does carry the untouched keys. */
+  const settings = Object.assign({}, ev.settings, check);
   const shuffle = document.getElementById("adm-shuffle").checked;
   const rand = shuffle ? mulberry32(Math.floor(performance.now() * 1000) % 2147483647 + 1) : null;
   const groups = makeGroups(names, settings.group_size, rand);
@@ -2617,7 +2844,7 @@ async function confirmGroupStage(){
   const r = await store.adminGenerateBracket(state.adminPin, ev.id, rows);
   if (!r.ok){ toast(r.error); return; }
   toast("Bracket created");
-  state.view = "bracket"; state.eventId = ev.id; state.bkCentered = false;
+  state.view = "bracket"; state.eventId = ev.id;
   await reload();
 }
 async function resetBracket(){
@@ -2631,6 +2858,9 @@ async function resetBracket(){
 }
 function csvCell(v){
   v = String(v == null ? "" : v);
+  /* A name starting with = + - or @ is a formula to Excel and Sheets, so
+     prefix it before quoting. */
+  if (/^[=+\-@]/.test(v)) v = "'" + v;
   return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
 }
 /* Results export: one row per played match, team names split into players,
@@ -2653,17 +2883,28 @@ function downloadResults(allEvents){
   for(let g = 1; g <= maxGames; g++) head.push("Game " + g + " Team 1", "Game " + g + " Team 2");
   head.push("Winner", "Notes");
   const lines = [head.map(csvCell).join(",")];
+  /* Doubles teams are stored as one free-text name, so the export can only
+     split them on the documented " & ". Anything else lands as a single player
+     and would import into DUPR as the wrong person, so those rows get called
+     out rather than silently mangled. */
+  const unsplit = [];
   played.forEach(([ev, m]) => {
     const split = id => {
-      const parts = (entrantName(id) || "").split(" & ");
-      return [parts[0] || "", parts[1] || ""];
+      const name = entrantName(id) || "";
+      const parts = name.split(" & ");
+      if (parts.length < 2 && name) unsplit.push(name);
+      return [parts[0] || "", parts.slice(1).join(" & ") || ""];
     };
     const [a1, a2] = split(m.entrant1_id), [b1, b2] = split(m.entrant2_id);
     const d = m.updated_at ? new Date(m.updated_at) : null;
-    const date = d && !isNaN(d) ? (d.getMonth() + 1) + "/" + d.getDate() + "/" + d.getFullYear() : "";
+    const pad = n => String(n).padStart(2, "0");
+    const date = d && !isNaN(d) ? pad(d.getMonth() + 1) + "/" + pad(d.getDate()) + "/" + d.getFullYear() : "";
     const row = [ev.name, m.stage === "group" ? "Group " + (m.group_name || "") : koLabel(m), date,
       a2 || b2 ? "Doubles" : "Singles", a1, a2, b1, b2];
-    const games = Array.isArray(m.games) && m.games.length ? m.games : [[m.score1, m.score2]];
+    /* A walkover has no real games: score1/score2 are a placeholder, and in a
+       best-of event they are games won, not points. Leave the columns empty so
+       nothing imports as a played result. */
+    const games = m.walkover ? [] : (Array.isArray(m.games) && m.games.length ? m.games : [[m.score1, m.score2]]);
     for(let g = 0; g < maxGames; g++) row.push(games[g] ? games[g][0] : "", games[g] ? games[g][1] : "");
     row.push(entrantName(m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id) || "", m.walkover ? "Walkover" : "");
     lines.push(row.map(csvCell).join(","));
@@ -2676,7 +2917,15 @@ function downloadResults(allEvents){
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
-  toast("CSV downloaded: " + (lines.length - 1) + " matches");
+  const odd = [...new Set(unsplit)];
+  if (odd.length){
+    toast("CSV downloaded: " + (lines.length - 1) + " matches. " + odd.length +
+      " name" + (odd.length > 1 ? "s" : "") + " had no \" & \" to split on (" +
+      odd.slice(0, 3).join(", ") + (odd.length > 3 ? ", …" : "") +
+      "), so they exported as singles. Fix them before importing to DUPR.");
+  } else {
+    toast("CSV downloaded: " + (lines.length - 1) + " matches");
+  }
 }
 async function doChangePin(){
   const oldPin = document.getElementById("adm-oldpin").value.trim();
@@ -2692,6 +2941,9 @@ async function doChangePin(){
 /* ---------- init ---------- */
 (async function init(){
   state.dismissedCalled = loadDismissedCalled();
+  /* Paint before the first fetch, so a slow connection shows "Loading…"
+     rather than a blank page that reads as a broken link. */
+  render();
   const savedPin = safeSession("pb_admin_pin");
   if (savedPin){
     const r = await store.verifyPin(savedPin).catch(() => ({ ok: false }));

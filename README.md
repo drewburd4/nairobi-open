@@ -3,18 +3,18 @@
 A one-file tournament app: group stages, court assignments, public score entry, live standings, and knockout brackets. Built for phones at the courts.
 
 - `index.html`: the whole app.
-- `supabase-schema.sql`: database schema plus all server-side rules. Run once in the Supabase SQL editor.
+- `supabase-schema.sql`: database schema plus all server-side rules, and the single source of truth for every `nairobi_` function. Run it in the Supabase SQL editor whenever it changes; it is idempotent and re-running it never touches your data, your PIN, or your rosters.
 - `supabase-testdata.sql`: the sample tournament data (generated). Run after the schema; re-run any time to reset the samples.
 - `supabase-sms.sql` + `sms-function.ts`: the optional SMS add-on (see the SMS section).
 - Live site: https://drewburd4.github.io/nairobi-open/ (GitHub repo: drewburd4/nairobi-open, deploys from `main`).
 
 ## Current status
 
-**Wired to the Dispatch app's Supabase project (shared for now); two SQL files to run.** The free plan's project slots are used by duara and dispatch, so the tournament runs inside the dispatch project: every table and function is prefixed `nairobi_`, so nothing touches or collides with the Dispatch tables. The app has that project's URL and publishable key baked in. There is one live site for everyone, no separate demo mode.
+**Wired to the Dispatch app's Supabase project (shared for now); two SQL files to run, and re-run `supabase-schema.sql` to pick up the latest fixes.** The free plan's project slots are used by duara and dispatch, so the tournament runs inside the dispatch project: every table and function is prefixed `nairobi_`, so nothing touches or collides with the Dispatch tables. The app has that project's URL and publishable key baked in. There is one live site for everyone, no separate demo mode.
 
 Setup, in the **dispatch** project on supabase.com → SQL Editor:
 
-1. Run all of `supabase-schema.sql` once. It creates the `nairobi_` tables, all the write rules, the 13 category events, and sets the admin PIN to 0727.
+1. Run all of `supabase-schema.sql`. It creates the `nairobi_` tables, all the write rules, the 13 category events, and sets the admin PIN to 0727. Run it again after any update to this repo: the seed inserts are guarded with `where not exists`, so a re-run only refreshes the function definitions and leaves data, rosters, scores, and a changed PIN alone. There are deliberately no separate patch files to apply, so nothing can revert a fix by being run in the wrong order.
 2. Run all of `supabase-testdata.sql`. It loads the sample tournament so there is something real to play with: Open Doubles (Men) with 50 teams and its pools fully played (ready to test "Confirm group stage finished" and the knockout), Open Singles (Women) mid-tournament holding all four courts with one postponed match, and small fields in the other 11 events. Re-run it any time to reset the samples.
 
 Then refresh the site: everyone with the link sees the same sample tournament and every change syncs live. Unlock Admin with 0727 and change the PIN to something private (0727 is public in this repo). When real rosters arrive, replace each event's sample data from the Admin tab ("Start over with a new list"); the commented block at the top of `supabase-testdata.sql` wipes all sample data at once.
@@ -25,19 +25,19 @@ The key in `index.html` is Supabase's publishable key, designed to be public; ev
 
 - **Events.** All categories (Open/Intermediate/Masters, singles/doubles/mixed) are pre-created. Each has its own groups, formats, and bracket. Events are started and paused from Admin, so a 4-day schedule is just: start today's event(s), pause or finish them, start tomorrow's. Schedule notes (e.g. "Sat 9am") show players what runs when. Events cannot be deleted (by design; replacing a roster is "Start over with a new list").
 - **Courts.** One shared pool: every free court automatically takes the next match from the cross-event queue, which alternates between running events. No per-event court booking, nothing to reallocate, and no court ever sits idle while any running event has matches waiting. When one event runs out (pools done, bracket not confirmed yet), the other event flows onto its courts by itself.
-- **Queue.** Matches run in round order, group A first, so everyone plays match 1 before match 2 starts; knockout matches run in bracket order so both feeders of the same quarterfinal play close together. No-shows get postponed down the queue by an admin and stay visible in a Postponed list. An on-court match can also be swapped out ("Off court, up next"): the next match takes its court and it plays next.
+- **Queue.** Matches run in round order, group A first, so everyone plays match 1 before match 2 starts; knockout matches run in bracket order so both feeders of the same quarterfinal play close together. No-shows get postponed down the queue by an admin and stay visible in a Postponed list. Admins can drag a waiting match by its ⠿ handle to move it up or down its own event's queue. An on-court match can also be swapped out ("Take off court"): either the next match in line takes its court, or the admin picks which one comes on.
 - **Score entry.** Anyone with the link can enter a score, but only for a match that is currently on a court and has no score yet (winners report from the Courts tab). Everything else, including corrections, requires the admin PIN. Point targets, best-of formats, and the on-court rule are enforced server-side.
-- **Formats.** Per event and per stage: games to N points, best of 1, 3, or 5. Best-of matches record each game's score.
-- **Standings.** Wins, then head to head (two-way ties), then point difference, then points scored. Tap a team for its full schedule and results.
+- **Formats.** Per event and per stage: games to N points, best of 1, 3, or 5. Best-of matches record each game's score. "Win by 2" is off by default, so the first team to the target wins even at 20-21, which keeps matches to a predictable length on shared courts; tick it per event to play on past the target until someone leads by 2.
+- **Standings.** The USA Pickleball round robin order (rule 12.C): wins, then head to head among the tied teams, then point difference over all games, then head to head point difference. Head to head applies to a tie of any size, not just a pair, and whichever step separates the tie ranks everyone in it; teams still level restart the chain among themselves. Points scored then name settle anything left, so the order never depends on row order. A walkover counts as a win and a loss but contributes no points, so a no-show cannot move anyone's point difference. Tap a team for its full schedule and results.
 - **Knockout.** Set a bracket size (or Auto). Before the bracket exists, the Bracket tab shows a projected paper-style bracket by group position (A1 vs C2 and so on, no names), including "Best 3rd" wildcards used to fill the bracket so there are no byes; the connector lines show who the winner plays next. When pools wrap, Admin → "Confirm group stage finished". Unplayed bracket matches have an admin "Edit teams" link for manual fixes.
-- **Score sanity.** Public entries must match the format exactly (winner exactly at the points target). Admin entries are free-form, but an off-format score asks for an explicit "save anyway" acknowledgement so typos don't slip through.
+- **Score sanity.** Public entries must match the format exactly: the winner lands exactly on the points target, or with "Win by 2" on, reaches it and leads by 2. Admin entries are free-form, but an off-format score asks for an explicit "save anyway" acknowledgement so typos don't slip through.
 - **Export / DUPR.** Admin → "Export results" downloads a CSV per event (or all events): one row per played match, players split out of team names, one column pair per game, walkovers flagged. It is shaped to copy into DUPR's club "Import Matches via CSV" template; DUPR identifies people by DUPR ID, so collect each player's DUPR ID (or the email on their DUPR account) with the roster.
 
 ## Day-of cheat sheet (desk)
 
 - Unlock Admin with the PIN once per device; it sticks for the session.
 - Start the day's event(s) in Admin (just Start event; courts share automatically).
-- No-show: Courts tab, Postpone. Players not ready on court: open the match, "Off court, up next". Wrong score: tap the match anywhere, fix or clear it.
+- No-show: Courts tab, Postpone. Reorder the queue: drag a row by its ⠿ handle. Players not ready on court: open the match, "Take off court". Wrong score: tap the match anywhere, fix or clear it.
 - Roster problems: Admin team list (rename, remove, add with catch-up matches).
 - Pools done: check the Bracket tab, then Admin → "Confirm group stage finished".
 - End of day or event: Admin → Export results (CSV) for DUPR or records.

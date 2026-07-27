@@ -133,12 +133,38 @@ begin
 end;
 $$;
 
--- Internal: event setting with default.
+-- Internal: event setting with default. Anything that is not a clean integer
+-- falls back to the default rather than raising, so one bad settings value
+-- cannot take down score entry for a whole event.
 create or replace function nairobi_ev_int_setting(p_event_id uuid, p_key text, p_default int)
 returns int
-language sql stable security definer set search_path = public
+language plpgsql stable security definer set search_path = public
 as $$
-  select coalesce(nullif(settings ->> p_key, '')::int, p_default) from nairobi_events where id = p_event_id;
+declare
+  raw text;
+begin
+  select nullif(settings ->> p_key, '') into raw from nairobi_events where id = p_event_id;
+  if raw is null then return p_default; end if;
+  return raw::int;
+exception when others then
+  return p_default;
+end;
+$$;
+
+-- Internal: boolean event setting with default.
+create or replace function nairobi_ev_bool_setting(p_event_id uuid, p_key text, p_default boolean)
+returns boolean
+language plpgsql stable security definer set search_path = public
+as $$
+declare
+  raw text;
+begin
+  select nullif(settings ->> p_key, '') into raw from nairobi_events where id = p_event_id;
+  if raw is null then return p_default; end if;
+  return raw::boolean;
+exception when others then
+  return p_default;
+end;
 $$;
 
 -- Internal: push a played match's winner into the next knockout round.
@@ -201,7 +227,7 @@ begin
     select q.id, ev.settings as evsettings
     from (
       select m2.id, m2.event_id, m2.play_order,
-             ((row_number() over (partition by m2.event_id order by m2.play_order) - 1) + 0.5)
+             ((row_number() over (partition by m2.event_id order by m2.play_order, m2.id) - 1) + 0.5)
                / count(*) over (partition by m2.event_id) as frac
       from nairobi_matches m2
       join nairobi_events e on e.id = m2.event_id and e.active
@@ -209,7 +235,9 @@ begin
         and m2.entrant1_id is not null and m2.entrant2_id is not null
     ) q
     join nairobi_events ev on ev.id = q.event_id
-    order by q.frac, ev.sort_order, q.play_order
+    -- id last so two matches sharing a play_order always resolve the same way
+    -- here and in the browser, instead of whichever row the planner returns first
+    order by q.frac, ev.sort_order, q.play_order, q.id
   loop
     exit when array_length(free_courts, 1) is null;
     if rec.evsettings ? 'courts'
@@ -301,6 +329,50 @@ end;
 $$;
 grant execute on function nairobi_admin_reorder_match(text, uuid, text) to anon, authenticated;
 
+-- Admin: drop a waiting match directly in front of another one in its own
+-- event's queue (p_before_id null sends it to the back). This is what the drag
+-- handle on the Courts tab calls. play_order is numeric, so slotting between
+-- two neighbours is just their midpoint: no other row is renumbered, and there
+-- is no fixed step size to exhaust however many times the queue is rearranged.
+create or replace function nairobi_admin_move_match(p_pin text, p_match_id uuid, p_before_id uuid)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  m nairobi_matches;
+  t nairobi_matches;
+  prev numeric;
+  target numeric;
+begin
+  if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
+  select * into m from nairobi_matches where id = p_match_id for update;
+  if not found then return 'Match not found.'; end if;
+  if m.status <> 'scheduled' or m.court is not null then return 'That match is not waiting in the queue.'; end if;
+
+  if p_before_id is null then
+    select coalesce(max(play_order), m.play_order) + 10 into target
+    from nairobi_matches
+    where event_id = m.event_id and status = 'scheduled' and court is null and id <> m.id;
+  else
+    select * into t from nairobi_matches where id = p_before_id;
+    if not found then return 'That spot is gone; try again.'; end if;
+    if t.event_id <> m.event_id then return 'A match can only move within its own event.'; end if;
+    if t.status <> 'scheduled' or t.court is not null then return 'That spot is gone; try again.'; end if;
+    select max(play_order) into prev
+    from nairobi_matches
+    where event_id = m.event_id and status = 'scheduled' and court is null
+      and id <> m.id and play_order < t.play_order;
+    target := case when prev is null then t.play_order - 10 else (prev + t.play_order) / 2 end;
+  end if;
+
+  update nairobi_matches set play_order = target, updated_at = now() where id = m.id;
+  perform nairobi_assign_courts();
+  return 'OK';
+end;
+$$;
+grant execute on function nairobi_admin_move_match(text, uuid, uuid) to anon, authenticated;
+
 -- Admin: pull an on-court match off and bring a specific chosen match on in
 -- its place (the "bring someone else on" path). The pulled match goes to the
 -- front of its event's queue.
@@ -355,9 +427,11 @@ declare
   g jsonb;
   a int;
   b int;
+  wb2 boolean;
 begin
   pts := nairobi_ev_int_setting(p_event_id, case when p_stage = 'knockout' then 'points_to_knockout' else 'points_to_group' end, 21);
   bo := nairobi_ev_int_setting(p_event_id, case when p_stage = 'knockout' then 'best_of_knockout' else 'best_of_group' end, 1);
+  wb2 := nairobi_ev_bool_setting(p_event_id, 'win_by_two', false);
 
   if bo > 1 then
     need := bo / 2 + 1;
@@ -379,8 +453,16 @@ begin
       if a is null or b is null or a < 0 or b < 0 then o_err := 'Enter both scores as whole numbers.'; return; end if;
       if a = b then o_err := 'Scores cannot be tied.'; return; end if;
       if not p_is_admin then
-        if greatest(a, b) <> pts then o_err := 'The winner needs exactly ' || pts || ' points.'; return; end if;
-        if least(a, b) >= pts then o_err := 'The losing score must be under ' || pts || '.'; return; end if;
+        if wb2 then
+          if greatest(a, b) < pts then o_err := 'The winner needs at least ' || pts || ' points.'; return; end if;
+          if greatest(a, b) - least(a, b) < 2 then o_err := 'The winner has to lead by 2.'; return; end if;
+          if greatest(a, b) > pts and greatest(a, b) - least(a, b) > 2 then
+            o_err := 'Past ' || pts || ', the game ends as soon as someone leads by 2.'; return;
+          end if;
+        else
+          if greatest(a, b) <> pts then o_err := 'The winner needs exactly ' || pts || ' points.'; return; end if;
+          if least(a, b) >= pts then o_err := 'The losing score must be under ' || pts || '.'; return; end if;
+        end if;
       end if;
       if a > b then w1 := w1 + 1; else w2 := w2 + 1; end if;
     end loop;
@@ -394,8 +476,19 @@ begin
     end if;
     if p_score1 = p_score2 then o_err := 'Scores cannot be tied.'; end if;
     if o_err is null and not p_is_admin then
-      if greatest(p_score1, p_score2) <> pts then o_err := 'The winner needs exactly ' || pts || ' points.'; end if;
-      if o_err is null and least(p_score1, p_score2) >= pts then o_err := 'The losing score must be under ' || pts || '.'; end if;
+      if wb2 then
+        if greatest(p_score1, p_score2) < pts then o_err := 'The winner needs at least ' || pts || ' points.'; end if;
+        if o_err is null and greatest(p_score1, p_score2) - least(p_score1, p_score2) < 2 then
+          o_err := 'The winner has to lead by 2.';
+        end if;
+        if o_err is null and greatest(p_score1, p_score2) > pts
+           and greatest(p_score1, p_score2) - least(p_score1, p_score2) > 2 then
+          o_err := 'Past ' || pts || ', the game ends as soon as someone leads by 2.';
+        end if;
+      else
+        if greatest(p_score1, p_score2) <> pts then o_err := 'The winner needs exactly ' || pts || ' points.'; end if;
+        if o_err is null and least(p_score1, p_score2) >= pts then o_err := 'The losing score must be under ' || pts || '.'; end if;
+      end if;
     end if;
     if o_err is null then
       o_score1 := p_score1; o_score2 := p_score2; o_games := null;
@@ -456,7 +549,8 @@ begin
   if m.entrant1_id is null or m.entrant2_id is null then return 'Teams for this match are not decided yet.'; end if;
 
   if coalesce(p_walkover, false) then
-    if p_score1 is null or p_score2 is null or p_score1 = p_score2 then return 'Bad walkover score.'; end if;
+    if p_score1 is null or p_score2 is null or p_score1 = p_score2
+       or p_score1 < 0 or p_score2 < 0 then return 'Bad walkover score.'; end if;
     v_s1 := p_score1; v_s2 := p_score2; v_games := null;
   else
     select * into chk from nairobi_check_score(m.event_id, m.stage, p_score1, p_score2, p_games, true);
@@ -511,6 +605,9 @@ declare
   front numeric;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- Same lock every other queue-mutating function takes. Without it two admins
+  -- acting at once can both read this min() and write the same play_order.
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.status <> 'scheduled' then return 'That match already has a score.'; end if;
@@ -539,16 +636,28 @@ begin
   if m.status <> 'scheduled' or m.court is null then return 'That match is not on a court.'; end if;
   perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
 
+  -- Pick the replacement with the same weighting nairobi_assign_courts uses, so
+  -- "bring on the next in line" brings on the match the Up next board is
+  -- actually showing as next. Ordering by position-within-event first would
+  -- always pick the lowest sort_order event's front match, which starves every
+  -- other running event whenever more than one is live.
   with pending as (
-    select mm.id, e.sort_order,
-           row_number() over (partition by mm.event_id order by mm.play_order) as rn
+    select mm.id, e.sort_order, mm.play_order,
+           ((row_number() over (partition by mm.event_id order by mm.play_order, mm.id) - 1) + 0.5)
+             / count(*) over (partition by mm.event_id) as frac
     from nairobi_matches mm
     join nairobi_events e on e.id = mm.event_id and e.active
     where mm.status = 'scheduled' and mm.court is null
       and mm.entrant1_id is not null and mm.entrant2_id is not null
       and mm.id <> p_match_id
+      and (
+        not (e.settings ? 'courts')
+        or jsonb_typeof(e.settings -> 'courts') <> 'array'
+        or jsonb_array_length(e.settings -> 'courts') = 0
+        or m.court in (select (value)::int from jsonb_array_elements_text(e.settings -> 'courts'))
+      )
   )
-  select id into repl from pending order by rn, sort_order limit 1;
+  select id into repl from pending order by frac, sort_order, play_order, id limit 1;
   if repl is null then return 'No other match is waiting, so it stays on court.'; end if;
 
   update nairobi_matches
@@ -610,6 +719,7 @@ declare
   anchor numeric;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.status <> 'scheduled' then return 'That match already has a score.'; end if;
@@ -618,7 +728,10 @@ begin
     select coalesce(max(play_order), m.play_order) + 10 into anchor
     from nairobi_matches where event_id = m.event_id and status = 'scheduled' and id <> m.id;
   else
-    select play_order + 1 into anchor
+    -- Land halfway between the two neighbours rather than one above the lower
+    -- one: play_order is numeric, so a midpoint never collides, while a fixed
+    -- +1 slowly eats the gaps until two matches share a position.
+    select (play_order + coalesce(lead(play_order) over (order by play_order), play_order + 20)) / 2 into anchor
     from nairobi_matches
     where event_id = m.event_id and status = 'scheduled' and id <> m.id and play_order > m.play_order
     order by play_order
@@ -641,7 +754,13 @@ language plpgsql security definer set search_path = public
 as $$
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
-  update nairobi_events set name = coalesce(p_name, name), settings = coalesce(p_settings, settings)
+  -- Merge rather than replace, and let callers send only the keys they changed.
+  -- Two admins editing one event (say a schedule note and the court list) would
+  -- otherwise each write back the other's key from their own stale snapshot,
+  -- so whoever saved second silently undid the first edit.
+  update nairobi_events
+  set name = coalesce(p_name, name),
+      settings = settings || coalesce(p_settings, '{}'::jsonb)
   where id = p_event_id;
   if not found then return 'Event not found.'; end if;
   perform nairobi_assign_courts();
@@ -828,6 +947,15 @@ begin
   if not found then return 'Match not found.'; end if;
   if m.stage <> 'knockout' then return 'Only knockout matches can be edited here.'; end if;
   if m.status = 'played' then return 'This match already has a score. Clear it first.'; end if;
+  if p_entrant1_id is not null and p_entrant1_id = p_entrant2_id then
+    return 'A team cannot play itself.';
+  end if;
+  if exists (
+    select 1 from nairobi_entrants e
+    where e.id in (p_entrant1_id, p_entrant2_id) and e.event_id <> m.event_id
+  ) then
+    return 'Pick teams from this event.';
+  end if;
   update nairobi_matches set entrant1_id = p_entrant1_id, entrant2_id = p_entrant2_id, updated_at = now()
   where id = p_match_id;
   perform nairobi_assign_courts();
@@ -884,6 +1012,7 @@ revoke execute on function nairobi_advance_winner(uuid) from public, anon, authe
 revoke execute on function nairobi_assign_courts() from public, anon, authenticated;
 revoke execute on function nairobi_check_score(uuid, text, int, int, jsonb, boolean) from public, anon, authenticated;
 revoke execute on function nairobi_ev_int_setting(uuid, text, int) from public, anon, authenticated;
+revoke execute on function nairobi_ev_bool_setting(uuid, text, boolean) from public, anon, authenticated;
 
 grant execute on function nairobi_verify_pin(text) to anon, authenticated;
 grant execute on function nairobi_change_admin_pin(text, text) to anon, authenticated;
@@ -947,6 +1076,17 @@ select
   (select count(*) from nairobi_events) as events,
   (select count(*) from nairobi_entrants) as entrants,
   (select count(*) from nairobi_matches) as matches;
+
+-- ---------- optional one-off: clear leftover per-event court locks ----------
+-- Only needed on a database that still carries 'courts' locks from the old
+-- per-event court system (symptom: a court sits idle while matches wait).
+-- Do NOT run it blind: "Courts this event may use" is a real setting now, so
+-- this also clears any restriction an admin set on purpose. Check first with
+--   select name, settings -> 'courts' from nairobi_events where settings ? 'courts';
+-- and only run the update if those restrictions are not ones you meant to set.
+--
+-- update nairobi_events set settings = settings - 'courts' where settings ? 'courts';
+-- select nairobi_assign_courts();
 
 -- ============================================================
 -- CLEANUP (after the tournament, to remove everything from the
