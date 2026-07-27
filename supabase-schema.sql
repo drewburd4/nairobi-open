@@ -350,10 +350,13 @@ begin
   if not found then return 'Match not found.'; end if;
   if m.status <> 'scheduled' or m.court is not null then return 'That match is not waiting in the queue.'; end if;
 
+  -- Span every scheduled match of the event, including ones already on a court.
+  -- Those still hold play_order values, so ignoring them lets the new position
+  -- land exactly on one and reintroduce the collision this is meant to avoid.
   if p_before_id is null then
     select coalesce(max(play_order), m.play_order) + 10 into target
     from nairobi_matches
-    where event_id = m.event_id and status = 'scheduled' and court is null and id <> m.id;
+    where event_id = m.event_id and status = 'scheduled' and id <> m.id;
   else
     select * into t from nairobi_matches where id = p_before_id;
     if not found then return 'That spot is gone; try again.'; end if;
@@ -361,7 +364,7 @@ begin
     if t.status <> 'scheduled' or t.court is not null then return 'That spot is gone; try again.'; end if;
     select max(play_order) into prev
     from nairobi_matches
-    where event_id = m.event_id and status = 'scheduled' and court is null
+    where event_id = m.event_id and status = 'scheduled'
       and id <> m.id and play_order < t.play_order;
     target := case when prev is null then t.play_order - 10 else (prev + t.play_order) / 2 end;
   end if;
