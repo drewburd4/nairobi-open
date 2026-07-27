@@ -101,6 +101,25 @@ create policy "public read nairobi_entrants" on nairobi_entrants for select usin
 drop policy if exists "public read nairobi_matches" on nairobi_matches;
 create policy "public read nairobi_matches" on nairobi_matches for select using (true);
 
+-- The admin PIN hash must never leave the database. Row level security is per
+-- row, not per column, so the public read policy above would otherwise hand the
+-- hash to anyone who asks for that column by name, and a 4 digit PIN behind a
+-- readable hash cracks offline in no time with nothing to rate limit it.
+-- A column level revoke alone would not bite while the role still holds a
+-- table wide SELECT, so drop that first and grant back only the columns the app
+-- actually reads. nairobi_verify_pin and nairobi_change_admin_pin are SECURITY
+-- DEFINER, so they still see the column.
+revoke select on nairobi_tournaments from anon, authenticated;
+grant select (id, name, settings, created_at) on nairobi_tournaments to anon, authenticated;
+
+-- Same reason: realtime replays changed rows to subscribers, so leaving this
+-- table in the publication would broadcast the new hash the moment the PIN is
+-- changed. The tournament row is basically static during play, and the periodic
+-- refresh picks up any change to it.
+do $$ begin
+  alter publication supabase_realtime drop table nairobi_tournaments;
+exception when others then null; end $$;
+
 -- ---------- migrations from earlier versions of this file ----------
 -- (safe no-ops on a fresh install)
 
@@ -1048,9 +1067,8 @@ exception when others then null; end $$;
 do $$ begin
   alter publication supabase_realtime add table nairobi_events;
 exception when others then null; end $$;
-do $$ begin
-  alter publication supabase_realtime add table nairobi_tournaments;
-exception when others then null; end $$;
+-- nairobi_tournaments is deliberately NOT published: its row carries the admin
+-- PIN hash, and realtime would replay it to subscribers. See the revoke above.
 
 -- ---------- seed data ----------
 -- Tournament row with admin PIN 0727 (change any time from the Admin tab).
