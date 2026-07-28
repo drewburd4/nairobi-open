@@ -5,8 +5,9 @@
 -- for now, since the free plan's project slots are used). Everything
 -- here is prefixed nairobi_ (tables and functions), so nothing touches
 -- or collides with the Dispatch tables. Run this once in that
--- project's SQL editor. The admin PIN is set to 0727 near the bottom;
--- change it later any time from the app's Admin tab.
+-- project's SQL editor. On a first install it invents a random admin PIN
+-- and prints it in the result of the last statement, which is the only
+-- time it is shown; change it later any time from the app's Admin tab.
 --
 -- Security model:
 --   * Anyone with the link can read everything (live standings).
@@ -1070,11 +1071,57 @@ exception when others then null; end $$;
 -- nairobi_tournaments is deliberately NOT published: its row carries the admin
 -- PIN hash, and realtime would replay it to subscribers. See the revoke above.
 
+-- Install-only helper: invents the first admin PIN and remembers it for the
+-- rest of this session, so the insert below and the printout at the end of the
+-- file agree on one value. Nothing stores the PIN in plaintext; once this
+-- session ends the only record of it is the bcrypt hash and whatever the
+-- installer wrote down.
+create or replace function nairobi_seed_pin()
+returns text
+language plpgsql
+as $$
+declare
+  p text;
+begin
+  p := nullif(current_setting('nairobi.seed_pin', true), '');
+  if p is null then
+    p := lpad((floor(random() * 1000000))::int::text, 6, '0');
+    perform set_config('nairobi.seed_pin', p, false);
+  end if;
+  return p;
+end;
+$$;
+revoke execute on function nairobi_seed_pin() from public, anon, authenticated;
+
+-- ============================================================
+-- FORGOT THE ADMIN PIN? Nobody can read it back: only a bcrypt hash is
+-- stored, and the hash is not even readable through the public key. That is
+-- the point, but it means there is no "remind me", only a reset.
+--
+-- You own this database, so you can always set a new one. Run this single
+-- line in the SQL editor, with your own PIN in place of 246813:
+--
+--   update nairobi_tournaments set admin_pin_hash = crypt('246813', gen_salt('bf'));
+--
+-- It takes effect immediately, no redeploy. Anyone already unlocked on a
+-- phone stays unlocked until that tab is closed, so if you are resetting
+-- because the PIN leaked, tell the desk to close and reopen the page.
+-- ============================================================
+
 -- ---------- seed data ----------
--- Tournament row with admin PIN 0727 (change any time from the Admin tab).
+-- The tournament row is created on the very first run with a randomly
+-- generated admin PIN, which the last statement in this file prints once. No
+-- default PIN is written down here, so nothing published in this repo can be
+-- used to unlock a live tournament. Change it any time from the Admin tab.
+-- The insert is guarded, so re-running this file never touches an existing PIN.
+
+-- Clear first, so the printout at the end can only show a PIN that this run
+-- actually created. Without this, running the file twice in one session would
+-- redisplay the first run's PIN and tell you to write down a dead value.
+select set_config('nairobi.seed_pin', '', false);
 
 insert into nairobi_tournaments (name, admin_pin_hash)
-select 'Nairobi Open', crypt('0727', gen_salt('bf'))
+select 'Nairobi Open', crypt(nairobi_seed_pin(), gen_salt('bf'))
 where not exists (select 1 from nairobi_tournaments);
 
 -- All category events, ready to fill with entrants from the Admin tab.
@@ -1091,12 +1138,20 @@ from nairobi_tournaments t,
   ) as v(name, ord)
 where not exists (select 1 from nairobi_events);
 
--- ---------- sanity check ----------
+-- ---------- sanity check, and the admin PIN if this was a first install ----------
+-- This is the last statement on purpose: its result is what the SQL editor
+-- shows. On a first install the admin_pin column is the ONLY time the new PIN
+-- is ever displayed, so write it down before closing the tab. On every later
+-- run it just says the PIN was left alone.
 select
   (select count(*) from nairobi_tournaments) as tournaments,
   (select count(*) from nairobi_events) as events,
   (select count(*) from nairobi_entrants) as entrants,
-  (select count(*) from nairobi_matches) as matches;
+  (select count(*) from nairobi_matches) as matches,
+  coalesce(
+    nullif(current_setting('nairobi.seed_pin', true), '') || '  <-- WRITE THIS DOWN, it is shown once',
+    'unchanged (a PIN was already set)'
+  ) as admin_pin;
 
 -- ---------- optional one-off: clear leftover per-event court locks ----------
 -- Only needed on a database that still carries 'courts' locks from the old

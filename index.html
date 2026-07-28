@@ -862,7 +862,10 @@ function buildMockData(){
 
 function demoStore(){
   const db = buildMockData();
-  const PIN = "0727";
+  /* Offline sample data only, never a live tournament, so this is printed on
+     the demo banner. Deliberately not a real PIN: nothing in this repo should
+     be usable against a real database. */
+  const PIN = "1234";
   const subs = [];
   const notify = () => subs.forEach(f => { try{ f(); }catch(e){} });
   const ok = () => ({ ok: true });
@@ -908,6 +911,7 @@ function demoStore(){
 
   return {
     mode: "demo",
+    demoPin: PIN,
     subscribe(f){ subs.push(f); },
     async loadAll(activeOnly){
       const snap = JSON.parse(JSON.stringify(db));
@@ -1485,7 +1489,7 @@ function render(){
     ["standings", "Standings"], ["bracket", "Bracket"], ["admin", "Admin"]
   ];
   let html = '<div class="topbar">';
-  if (store.mode === "demo") html += '<div class="demo-banner">Demo with sample data. Changes reset on refresh. Admin PIN: 0727</div>';
+  if (store.mode === "demo") html += '<div class="demo-banner">Demo with sample data. Changes reset on refresh. Admin PIN: ' + esc(store.demoPin) + '</div>';
   html += '<div class="masthead"><div class="wordmark">' + esc(data.tournament.name) + '</div></div>';
   html += '<nav class="tabs">' + tabs.map(([id, label]) =>
     '<button class="tab" aria-current="' + (state.view === id) + '" onclick="setView(\'' + id + '\')">' + label + '</button>'

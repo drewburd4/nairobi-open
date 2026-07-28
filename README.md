@@ -14,10 +14,18 @@ A one-file tournament app: group stages, court assignments, public score entry, 
 
 Setup, in the **dispatch** project on supabase.com → SQL Editor:
 
-1. Run all of `supabase-schema.sql`. It creates the `nairobi_` tables, all the write rules, the 13 category events, and sets the admin PIN to 0727. Run it again after any update to this repo: the seed inserts are guarded with `where not exists`, so a re-run only refreshes the function definitions and leaves data, rosters, scores, and a changed PIN alone. There are deliberately no separate patch files to apply, so nothing can revert a fix by being run in the wrong order.
+1. Run all of `supabase-schema.sql`. It creates the `nairobi_` tables, all the write rules, and the 13 category events. On a first install it also generates a random admin PIN and prints it in the result of the last statement, which is the only time it is ever shown, so write it down before closing the tab. Run the file again after any update to this repo: the seed inserts are guarded with `where not exists`, so a re-run only refreshes the function definitions and leaves data, rosters, scores, and a changed PIN alone. There are deliberately no separate patch files to apply, so nothing can revert a fix by being run in the wrong order.
 2. Run all of `supabase-testdata.sql`. It loads the sample tournament so there is something real to play with: Open Doubles (Men) with 50 teams and its pools fully played (ready to test "Confirm group stage finished" and the knockout), Open Singles (Women) mid-tournament holding all four courts with one postponed match, and small fields in the other 11 events. Re-run it any time to reset the samples.
 
-Then refresh the site: everyone with the link sees the same sample tournament and every change syncs live. Unlock Admin with 0727 and change the PIN to something private (0727 is public in this repo). When real rosters arrive, replace each event's sample data from the Admin tab ("Start over with a new list"); the commented block at the top of `supabase-testdata.sql` wipes all sample data at once.
+Then refresh the site: everyone with the link sees the same sample tournament and every change syncs live. Unlock Admin with the PIN the first run printed, and change it to something memorable from the Admin tab. When real rosters arrive, replace each event's sample data from the Admin tab ("Start over with a new list"); the commented block at the top of `supabase-testdata.sql` wipes all sample data at once.
+
+**Forgot the PIN?** Nobody can read it back. Only a bcrypt hash is stored, and the hash is not readable through the public key, so there is no "remind me", only a reset. You own the database, so run this one line in the SQL editor with your own PIN in place of 246813:
+
+```sql
+update nairobi_tournaments set admin_pin_hash = crypt('246813', gen_salt('bf'));
+```
+
+It applies immediately with no redeploy. Anyone already unlocked on a phone stays unlocked until that tab is closed, so if you are resetting because the PIN leaked, have the desk close and reopen the page.
 
 The key in `index.html` is Supabase's publishable key, designed to be public; every write rule is enforced in the database. After the tournament, the whole thing can be removed from the shared project with the cleanup block commented out at the bottom of `supabase-schema.sql` (it only drops `nairobi_` objects). Moving to a dedicated project later is the same schema file, minus the prefix expectations in `index.html` (ask Claude).
 
