@@ -1630,7 +1630,9 @@ function renderBoard(){
 
   const upNext = q.slice(0, 8);
   if (upNext.length){
-    h += '<div class="section-h"><h2>Up next</h2></div><div class="roundblock" style="padding-top:2px">';
+    /* Both halves of the queue carry .queue-block so a drag can move a match
+       between the visible top of the list and everything behind "Show all". */
+    h += '<div class="section-h"><h2>Up next</h2></div><div class="roundblock queue-block" style="padding-top:2px">';
     h += upNext.map((m, i) => queueRow(m, { pos: i + 1, showEvent: multi, action: "postpone" })).join("");
     h += '</div>';
     if (q.length > upNext.length || state.showAllQueue){
@@ -1638,7 +1640,7 @@ function renderBoard(){
         (state.showAllQueue ? 'Show fewer' : 'Show all matches (' + q.length + ' waiting)') + '</button></p>';
     }
     if (state.showAllQueue && q.length > upNext.length){
-      h += '<div class="roundblock" style="padding-top:2px">';
+      h += '<div class="roundblock queue-block" style="padding-top:2px">';
       h += q.slice(8).map((m, i) => queueRow(m, { pos: i + 9, showEvent: multi, action: "postpone" })).join("");
       h += '</div>';
     }
@@ -2500,47 +2502,83 @@ async function swapTo(offId, onId){
    sharing its event id even though the list interleaves every running event. */
 let qdrag = null;
 let qdragUntil = 0;
+const QDRAG_EDGE = 96;   /* start scrolling within this far of a screen edge */
+const QDRAG_SPEED = 18;  /* px per frame at the very edge */
+
+/* Every candidate row on the page, in document order. The queue is rendered as
+   two blocks, the visible top of the list and the rest behind "Show all", so
+   this deliberately searches the whole page rather than the block the drag
+   started in: otherwise a match can never cross between the two. */
 const qdragPeers = () => Array.from(
-  qdrag.block.querySelectorAll('.queue-row[data-eid="' + qdrag.row.dataset.eid + '"]'))
+  document.querySelectorAll('.queue-block .queue-row[data-eid="' + qdrag.row.dataset.eid + '"]'))
   .filter(r => r !== qdrag.row);
 function qdragClearMarks(){
-  qdrag.block.querySelectorAll(".dropbefore,.dropafter")
+  document.querySelectorAll(".dropbefore,.dropafter")
     .forEach(r => r.classList.remove("dropbefore", "dropafter"));
+}
+/* Redraw the dragged row and the insertion marker from the last known pointer
+   position. Split out from the move handler because the auto-scroll needs to
+   re-run it while the finger is held still at the edge of the screen. */
+function qdragUpdate(){
+  if (!qdrag) return;
+  qdrag.row.style.transform =
+    "translateY(" + ((qdrag.y + window.scrollY) - qdrag.startY) + "px)";
+  qdragClearMarks();
+  const peers = qdragPeers();
+  let before = null;
+  for(const r of peers){
+    const b = r.getBoundingClientRect();
+    if (qdrag.y < b.top + b.height / 2){ before = r; break; }
+  }
+  qdrag.before = before;
+  if (before) before.classList.add("dropbefore");
+  else if (peers.length) peers[peers.length - 1].classList.add("dropafter");
+}
+/* Hold the row near the top or bottom of the screen and the page scrolls, so a
+   match can be dragged somewhere off-screen. The grip sets touch-action:none to
+   stop a finger drag scrolling the page, which is what makes this necessary. */
+function qdragAutoScroll(){
+  if (!qdrag) return;
+  const h = window.innerHeight;
+  let d = 0;
+  if (qdrag.y < QDRAG_EDGE) d = -Math.ceil((QDRAG_EDGE - qdrag.y) / QDRAG_EDGE * QDRAG_SPEED);
+  else if (qdrag.y > h - QDRAG_EDGE) d = Math.ceil((qdrag.y - (h - QDRAG_EDGE)) / QDRAG_EDGE * QDRAG_SPEED);
+  if (d){
+    const was = window.scrollY;
+    window.scrollBy(0, d);
+    if (window.scrollY !== was) qdragUpdate();
+  }
+  qdrag.raf = requestAnimationFrame(qdragAutoScroll);
 }
 function startQueueDrag(e, matchId){
   if (!state.adminPin || qdrag) return;
   e.stopPropagation();
   e.preventDefault();
   const grip = e.currentTarget, row = grip.closest(".queue-row");
-  if (!row || !row.parentElement) return;
-  qdrag = { id: matchId, grip, row, block: row.parentElement, startY: e.clientY, moved: false, before: null };
-  if (qdragPeers().length < 1){ qdrag = null; return; }
+  if (!row) return;
+  /* Measured against the document, not the window, so the row keeps tracking
+     the finger while auto-scroll moves the page underneath it. */
+  qdrag = { id: matchId, grip, row, y: e.clientY, startY: e.clientY + window.scrollY,
+            moved: false, before: null, raf: 0 };
+  if (!qdragPeers().length){ qdrag = null; return; }
   state.dragging = true;
   row.classList.add("dragging");
   try{ grip.setPointerCapture(e.pointerId); }catch(_){}
   grip.addEventListener("pointermove", onQueueDragMove);
   grip.addEventListener("pointerup", endQueueDrag);
   grip.addEventListener("pointercancel", cancelQueueDrag);
+  qdrag.raf = requestAnimationFrame(qdragAutoScroll);
 }
 function onQueueDragMove(e){
   if (!qdrag) return;
-  const dy = e.clientY - qdrag.startY;
-  if (Math.abs(dy) > 4) qdrag.moved = true;
-  qdrag.row.style.transform = "translateY(" + dy + "px)";
-  qdragClearMarks();
-  const peers = qdragPeers();
-  let before = null;
-  for(const r of peers){
-    const b = r.getBoundingClientRect();
-    if (e.clientY < b.top + b.height / 2){ before = r; break; }
-  }
-  qdrag.before = before;
-  if (before) before.classList.add("dropbefore");
-  else if (peers.length) peers[peers.length - 1].classList.add("dropafter");
+  qdrag.y = e.clientY;
+  if (Math.abs((e.clientY + window.scrollY) - qdrag.startY) > 4) qdrag.moved = true;
+  qdragUpdate();
 }
 function finishQueueDrag(e){
   const d = qdrag;
   if (!d) return null;
+  if (d.raf) cancelAnimationFrame(d.raf);
   d.row.style.transform = "";
   d.row.classList.remove("dragging");
   qdragClearMarks();
