@@ -1778,33 +1778,32 @@ function renderAmericanoBoard(ev){
   if (!ms.length) return '<div class="empty">This division has no rounds yet.</div>';
   const rounds = americanoRounds(ev);
   const left = ms.filter(m => m.status === "scheduled");
-  const cur = left.length ? Math.min(...left.map(m => m.round)) : null;
   const pts = evSetting(ev, "points_to_group", 11);
   const done = ms.length - left.length;
 
   let h = '<div class="section-h"><h2>' +
-    (cur ? 'Round ' + cur + ' of ' + rounds.length : 'All rounds played') +
+    (left.length ? 'On court' : 'All rounds played') +
     '</h2><span class="hint">' + done + ' of ' + ms.length + ' matches in · first to ' + pts + '</span></div>';
 
-  if (cur){
+  /* The two courts can be on different rounds (in the box format each court
+     runs its own first three rounds), so show whatever is actually on court now
+     plus the next match waiting to go on, rather than one shared round. */
+  if (left.length){
+    const onNow = ms.filter(m => m.court != null).sort((a, b) => a.court - b.court);
+    const waiting = pendingQueue().filter(m => m.event_id === ev.id);
+    const cards = onNow.concat(waiting.filter(m => !onNow.includes(m)));
     h += '<div class="courtgrid">';
-    ms.filter(m => m.round === cur).sort((a, b) => a.play_order - b.play_order).forEach(m => {
-      const label = m.court != null ? 'Court ' + m.court : 'Waiting for a court';
+    (cards.length ? cards : left.slice(0, 2)).forEach(m => {
+      const label = m.court != null ? 'Court ' + m.court + ' · Round ' + m.round : 'Round ' + m.round + ' · next up';
       h += '<button class="courtcard" onclick="openMatch(\'' + m.id + '\')">' +
         '<div class="chead"><span class="cnum">' + label + '</span></div>' +
         '<div class="team">' + esc(entrantName(m.entrant1_id)) + '</div>' +
         '<div class="vs">vs</div>' +
         '<div class="team">' + esc(entrantName(m.entrant2_id)) + '</div>' +
-        '<div class="cta">' + (m.court != null ? 'Tap to enter the score' : 'Starts when a court frees up') +
+        '<div class="cta">' + (m.court != null ? 'Tap to enter the score' : 'Starts when its players are free') +
         '</div></button>';
     });
     h += '</div>';
-    /* Everyone is on court together, so the next round cannot start until this
-       one is finished. Saying so stops the desk hunting for a missing match. */
-    if (rounds.indexOf(cur) < rounds.length - 1){
-      h += '<p class="note" style="margin-top:8px">Round ' + (cur + 1) +
-        ' starts once both of these are in: every player is in every round.</p>';
-    }
   }
 
   const table = americanoStandings(ev);
@@ -1817,7 +1816,8 @@ function renderAmericanoBoard(ev){
   rounds.forEach(r => {
     const list = ms.filter(m => m.round === r).sort((a, b) => a.play_order - b.play_order);
     const allIn = list.every(m => m.status === "played");
-    h += '<div class="roundblock"><h3>Round ' + r + (allIn ? '' : r === cur ? ' <span class="hint">on now</span>' : ' <span class="hint">to come</span>') + '</h3>';
+    const onNow = list.some(m => m.court != null);
+    h += '<div class="roundblock"><h3>Round ' + r + (allIn ? ' <span class="hint">done</span>' : onNow ? ' <span class="hint">on court</span>' : '') + '</h3>';
     list.forEach(m => { h += scheduleRow(m, false); });
     h += '</div>';
   });
