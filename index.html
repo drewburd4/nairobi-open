@@ -2063,7 +2063,6 @@ function renderStandings(){
     const played = data.matches.filter(m => m.event_id === ev.id && m.status === "played").length;
     const total = data.matches.filter(m => m.event_id === ev.id).length;
     let h = '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + ' · Standings</span>';
-    h += renderEventTabs();
     h += '<div class="section-h"><h2>' + esc(ev.name) + '</h2><span class="hint">' +
       'Every point you win counts, whoever you are partnered with · ' + played + ' of ' + total + ' matches in</span></div>';
     return h + (table.length ? renderAmericanoTable(table) : '<div class="empty">No players yet.</div>');
@@ -2148,7 +2147,6 @@ function renderBracket(){
   if (!ev) return '<div class="empty">No events yet.</div>';
   if (isAmericano(ev)){
     return '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + '</span>' +
-      renderEventTabs() +
       '<div class="empty">' + esc(ev.name) + ' has no bracket. It is decided on total points won, so the Standings tab is the result.</div>';
   }
   const ko = data.matches.filter(m => m.event_id === ev.id && m.stage === "knockout");
@@ -2639,7 +2637,20 @@ function renderOffCourtModal(){
 }
 
 /* ---------- actions ---------- */
-function setView(v){ state.view = v; state.setupPreview = null; render(); }
+function setView(v){
+  state.view = v; state.setupPreview = null;
+  /* Americano is never an option under Bracket (it has none), so switching to
+     Bracket while it is selected would land on a dead end; jump to the first
+     event that does have a bracket instead. */
+  if (v === "bracket"){
+    const cur = currentEvent();
+    if (cur && isAmericano(cur)){
+      const other = data.events.slice().sort((a, b) => a.sort_order - b.sort_order).find(e => !isAmericano(e));
+      if (other) state.eventId = other.id;
+    }
+  }
+  render();
+}
 /* Persisted so a reload keeps you on the division you were watching. */
 function setDivision(d){ state.division = d; state.showAllQueue = false; safeSession("pb_division", d); render(); }
 function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.standingsFilter = "all"; render(); }
