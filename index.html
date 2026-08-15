@@ -707,9 +707,19 @@ function validateGames(games, pts, isAdmin, bestOf, winBy2){
    This is exactly the order courts are filled in. */
 function weavePending(db){
   const act = db.events.filter(e => e.active).sort((a, b) => a.sort_order - b.sort_order);
-  const lists = act.map(ev => db.matches
-    .filter(m => m.event_id === ev.id && m.status === "scheduled" && m.court == null && m.entrant1_id && m.entrant2_id)
-    .sort((a, b) => a.play_order - b.play_order));
+  const lists = act.map(ev => {
+    let ms = db.matches
+      .filter(m => m.event_id === ev.id && m.status === "scheduled" && m.court == null && m.entrant1_id && m.entrant2_id);
+    /* Americano rotates partners every round, so everyone plays in every round.
+       Holding the next round back until the current one is finished is what
+       stops a player being called to a second court. Mirrors the SQL. */
+    if (ev.settings && ev.settings.format === "americano"){
+      const live = db.matches.filter(m => m.event_id === ev.id && m.status === "scheduled");
+      const cur = Math.min(...live.map(m => m.round == null ? Infinity : m.round));
+      if (isFinite(cur)) ms = ms.filter(m => m.round === cur);
+    }
+    return ms.sort((a, b) => a.play_order - b.play_order);
+  });
   return weaveQueues(lists);
 }
 
@@ -1330,7 +1340,7 @@ const state = {
   standingsFilter: "all",
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null, assignCourt: null, offCourtId: null,
   setupPreview: null, adminEventId: null, loadError: null,
-  showAllQueue: false, showRedraw: false, pendingRender: false, dragging: false,
+  showAllQueue: false, showRedraw: false, pendingRender: false, dragging: false, division: "all",
   dismissedCalled: {}, contacts: {}
 };
 
@@ -1402,6 +1412,37 @@ function currentEvent(){
   const act = activeEvents();
   return act[0] || data.events[0] || null;
 }
+/* ---------- americano ---------- */
+/* An Americano division is scored per player, not per team: partners rotate
+   every round, so a "team" only exists for one match. Entrants are stored as
+   the pair that plays ("Drew & Aaron"), the same shape the rest of the app
+   already uses for doubles, and the individual table is derived by splitting
+   on the documented " & ". */
+const isAmericano = ev => !!(ev && ev.settings && ev.settings.format === "americano");
+const americanoEvent = () => data.events.find(isAmericano) || null;
+const splitPair = name => String(name || "").split(" & ").map(s => s.trim()).filter(Boolean);
+/* Points for, points against and matches played for every individual. Both
+   sides' points count towards their players, which is the whole point of the
+   format: you are chasing total points, not wins. */
+function americanoStandings(ev){
+  const rows = {};
+  const touch = n => (rows[n] = rows[n] || { name: n, p: 0, w: 0, pf: 0, pa: 0 });
+  data.entrants.filter(e => e.event_id === ev.id)
+    .forEach(e => splitPair(e.name).forEach(touch));
+  data.matches
+    .filter(m => m.event_id === ev.id && m.status === "played" && m.score1 != null && m.score2 != null)
+    .forEach(m => {
+      const s1 = splitPair(entrantName(m.entrant1_id)), s2 = splitPair(entrantName(m.entrant2_id));
+      s1.forEach(n => { const r = touch(n); r.p++; r.pf += m.score1; r.pa += m.score2; if (m.score1 > m.score2) r.w++; });
+      s2.forEach(n => { const r = touch(n); r.p++; r.pf += m.score2; r.pa += m.score1; if (m.score2 > m.score1) r.w++; });
+    });
+  return Object.values(rows)
+    .map(r => Object.assign(r, { diff: r.pf - r.pa }))
+    .sort((a, b) => b.pf - a.pf || b.diff - a.diff || b.w - a.w || a.name.localeCompare(b.name));
+}
+const americanoRounds = ev => [...new Set(data.matches
+  .filter(m => m.event_id === ev.id).map(m => m.round))].sort((a, b) => a - b);
+
 function groupsOfEvent(ev){
   if (!ev) return [];
   const names = [...new Set(data.entrants.filter(e => e.event_id === ev.id && e.group_name).map(e => e.group_name))];
@@ -1657,8 +1698,15 @@ function render(){
 /* "Go to court now" banners: fresh court assignments, auto-expire.
    Tapping a banner hides it on this phone only; the admin ✓ dismisses it
    for everyone. Scores are never entered from here. */
+/* True when a match belongs to the division currently being viewed. Only the
+   Courts board is filtered; every other tab shows the whole tournament. */
+function inDivision(m){
+  if (state.division === "all" || state.view !== "board") return true;
+  const ev = eventById(m.event_id);
+  return state.division === "americano" ? isAmericano(ev) : !isAmericano(ev);
+}
 function renderCallouts(){
-  const called = calledMatches();
+  const called = calledMatches().filter(inDivision);
   if (!called.length) return "";
   const multi = activeEvents().length > 1;
   let h = "";
@@ -1710,10 +1758,89 @@ function queueRow(m, opts){
   return row;
 }
 
+/* The Americano page is the whole division on one screen: the round on court
+   now, what is coming, and the running individual table. Everyone plays every
+   round, so there is no queue to manage, just a round counter. */
+function renderAmericanoBoard(ev){
+  const ms = data.matches.filter(m => m.event_id === ev.id);
+  if (!ms.length) return '<div class="empty">This division has no rounds yet.</div>';
+  const rounds = americanoRounds(ev);
+  const left = ms.filter(m => m.status === "scheduled");
+  const cur = left.length ? Math.min(...left.map(m => m.round)) : null;
+  const pts = evSetting(ev, "points_to_group", 11);
+  const done = ms.length - left.length;
+
+  let h = '<div class="section-h"><h2>' +
+    (cur ? 'Round ' + cur + ' of ' + rounds.length : 'All rounds played') +
+    '</h2><span class="hint">' + done + ' of ' + ms.length + ' matches in · first to ' + pts + '</span></div>';
+
+  if (cur){
+    h += '<div class="courtgrid">';
+    ms.filter(m => m.round === cur).sort((a, b) => a.play_order - b.play_order).forEach(m => {
+      const label = m.court != null ? 'Court ' + m.court : 'Waiting for a court';
+      h += '<button class="courtcard" onclick="openMatch(\'' + m.id + '\')">' +
+        '<div class="chead"><span class="cnum">' + label + '</span></div>' +
+        '<div class="team">' + esc(entrantName(m.entrant1_id)) + '</div>' +
+        '<div class="vs">vs</div>' +
+        '<div class="team">' + esc(entrantName(m.entrant2_id)) + '</div>' +
+        '<div class="cta">' + (m.court != null ? 'Tap to enter the score' : 'Starts when a court frees up') +
+        '</div></button>';
+    });
+    h += '</div>';
+    /* Everyone is on court together, so the next round cannot start until this
+       one is finished. Saying so stops the desk hunting for a missing match. */
+    if (rounds.indexOf(cur) < rounds.length - 1){
+      h += '<p class="note" style="margin-top:8px">Round ' + (cur + 1) +
+        ' starts once both of these are in: every player is in every round.</p>';
+    }
+  }
+
+  const table = americanoStandings(ev);
+  if (table.length){
+    h += '<div class="section-h"><h2>Standings</h2><span class="hint">Total points won</span></div>';
+    h += renderAmericanoTable(table);
+  }
+
+  h += '<div class="section-h"><h2>All rounds</h2></div>';
+  rounds.forEach(r => {
+    const list = ms.filter(m => m.round === r).sort((a, b) => a.play_order - b.play_order);
+    const allIn = list.every(m => m.status === "played");
+    h += '<div class="roundblock"><h3>Round ' + r + (allIn ? '' : r === cur ? ' <span class="hint">on now</span>' : ' <span class="hint">to come</span>') + '</h3>';
+    list.forEach(m => { h += scheduleRow(m, false); });
+    h += '</div>';
+  });
+  return h;
+}
+function renderAmericanoTable(table){
+  let h = '<table class="standings"><thead><tr><th></th><th class="tname">Player</th>' +
+    '<th>Pld</th><th>Won</th><th>Points</th><th>Diff</th></tr></thead><tbody>';
+  table.forEach((r, i) => {
+    h += '<tr><td>' + (i + 1) + '</td><td class="tname">' + esc(r.name) + '</td>' +
+      '<td>' + r.p + '</td><td>' + r.w + '</td><td><b>' + r.pf + '</b></td>' +
+      '<td>' + (r.diff > 0 ? '+' : '') + r.diff + '</td></tr>';
+  });
+  return h + '</tbody></table>';
+}
+
+/* The Americano division runs on its own courts alongside the main draw, so
+   the board can be filtered rather than showing one mixed grid. */
+function renderDivisionTabs(){
+  const amer = americanoEvent();
+  if (!amer) return "";
+  const tab = (id, label) => '<button class="subtab" aria-current="' + (state.division === id) +
+    '" onclick="setDivision(\'' + id + '\')">' + label + '</button>';
+  return '<div class="subtabs" role="tablist">' + tab("all", "All courts") +
+    tab("main", "Main draw") + tab("americano", esc(amer.name)) + '</div>';
+}
 function renderBoard(){
-  const act = activeEvents();
+  const amer = americanoEvent();
+  if (state.division === "americano" && amer){
+    return '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(amer.name) + '</span>' +
+      renderDivisionTabs() + renderAmericanoBoard(amer);
+  }
+  const act = activeEvents().filter(e => state.division === "main" ? !isAmericano(e) : true);
   const multi = act.length > 1;
-  let h = '<span class="print-title">' + esc(data.tournament.name) + ' · Courts</span>';
+  let h = '<span class="print-title">' + esc(data.tournament.name) + ' · Courts</span>' + renderDivisionTabs();
 
   if (!act.length){
     h += '<div class="empty">Nothing is running right now.';
@@ -1725,11 +1852,22 @@ function renderBoard(){
     return h;
   }
 
-  const on = onCourtMatches();
-  const q = pendingQueue();
+  /* "Main draw" hides the Americano division and the courts it holds, so the
+     two can run side by side without either burying the other. */
+  const inView = m => act.some(e => e.id === m.event_id);
+  const on = onCourtMatches().filter(inView);
+  const q = pendingQueue().filter(inView);
+  const courtsInView = [];
+  for(let c = 1; c <= courtsCount(); c++){
+    if (state.division === "main" && amer){
+      const amerCourts = Array.isArray(amer.settings && amer.settings.courts) ? amer.settings.courts : [];
+      if (amerCourts.includes(c) && !on.some(m => m.court === c)) continue;
+    }
+    courtsInView.push(c);
+  }
   h += '<div class="section-h"><h2>On court</h2></div>';
   h += '<div class="courtgrid">';
-  for(let c = 1; c <= courtsCount(); c++){
+  for(const c of courtsInView){
     const m = on.find(x => x.court === c);
     if (m){
       const ev = eventById(m.event_id);
@@ -1776,7 +1914,7 @@ function renderBoard(){
   }
 
   const postponedList = data.matches.filter(m => m.status === "scheduled" && m.postponed &&
-    (eventById(m.event_id) || {}).active);
+    (eventById(m.event_id) || {}).active && inView(m));
   if (postponedList.length){
     h += '<div class="section-h"><h2>Postponed</h2><span class="hint">Waiting lower in the queue</span></div><div class="roundblock" style="padding-top:2px">';
     h += postponedList.map(m => queueRow(m, { showEvent: multi, action: "playnext", inPostponed: true })).join("");
@@ -1900,6 +2038,18 @@ function renderSchedule(){
 function renderStandings(){
   const ev = currentEvent();
   if (!ev) return '<div class="empty">No events yet.</div>';
+  /* Americano is scored per player across rotating partners, so the group
+     table would be 28 one-match "teams" and tell nobody anything. */
+  if (isAmericano(ev)){
+    const table = americanoStandings(ev);
+    const played = data.matches.filter(m => m.event_id === ev.id && m.status === "played").length;
+    const total = data.matches.filter(m => m.event_id === ev.id).length;
+    let h = '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + ' · Standings</span>';
+    h += renderEventTabs();
+    h += '<div class="section-h"><h2>' + esc(ev.name) + '</h2><span class="hint">' +
+      'Every point you win counts, whoever you are partnered with · ' + played + ' of ' + total + ' matches in</span></div>';
+    return h + (table.length ? renderAmericanoTable(table) : '<div class="empty">No players yet.</div>');
+  }
   const groups = groupsOfEvent(ev);
   if (!groups.length){
     const note = evSetting(ev, "schedule_note", "");
@@ -2150,7 +2300,18 @@ function renderAdmin(){
         (state.setupPreview ? '<div class="preview-box">' + esc(state.setupPreview) + '</div>' : '');
     }
 
-    if (evEntrants.length){
+    if (isAmericano(ev)){
+      const names = [...new Set(evEntrants.flatMap(e => splitPair(e.name)))].sort();
+      h += '<div class="divider"></div><h4>2 &middot; Players</h4>';
+      h += '<p class="note">Each player appears in seven pairings; renaming here updates every one of them.</p>';
+      h += '<div class="roundblock" style="padding-top:2px">';
+      names.forEach(n => {
+        h += '<div class="queue-row"><span class="qnames">' + esc(n) + '</span>' +
+          '<span class="queue-actions"><button class="btn small secondary" onclick="renameAmericanoPlayer(\'' +
+          jsAttr(n) + '\')">Rename</button></span></div>';
+      });
+      h += '</div>';
+    } else if (evEntrants.length){
       const nextLetter = groupLetter(groups.length);
       h += '<div class="divider"></div><h4>' + (hasMatches ? '2 · Teams and groups' : 'Teams') + '</h4>';
       h += '<details class="teamlist"><summary>Team list (' + evEntrants.length + ' in ' + groups.length + ' groups) · rename, move, remove, add</summary>';
@@ -2455,6 +2616,7 @@ function renderOffCourtModal(){
 
 /* ---------- actions ---------- */
 function setView(v){ state.view = v; state.setupPreview = null; render(); }
+function setDivision(d){ state.division = d; state.showAllQueue = false; render(); }
 function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.standingsFilter = "all"; render(); }
 function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; render(); }
 function setRoundFilter(r){ state.roundFilter = String(r); render(); }
@@ -2941,6 +3103,23 @@ async function saveEventSettings(){
   const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, settings);
   if (!r.ok){ toast(r.error); return; }
   toast("Settings saved"); await reload();
+}
+/* An Americano player appears in seven different pairings, so renaming them
+   through the normal team list would mean seven identical edits. */
+async function renameAmericanoPlayer(oldName){
+  const ev = eventById(state.adminEventId);
+  if (!ev) return;
+  const next = (prompt('New name for "' + oldName + '"', oldName) || "").trim();
+  if (!next || next === oldName) return;
+  if (next.includes("&")){ toast('A player name cannot contain "&".'); return; }
+  const rows = data.entrants.filter(e => e.event_id === ev.id && splitPair(e.name).includes(oldName));
+  for(const e of rows){
+    const renamed = splitPair(e.name).map(n => n === oldName ? next : n).join(" & ");
+    const r = await store.adminRenameEntrant(state.adminPin, e.id, renamed);
+    if (!r.ok){ toast(r.error || "Could not rename."); await reload(); return; }
+  }
+  toast("Renamed in " + rows.length + " pairings");
+  await reload();
 }
 async function saveNote(){
   const ev = eventById(state.adminEventId);

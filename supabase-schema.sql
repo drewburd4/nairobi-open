@@ -253,6 +253,15 @@ begin
       join nairobi_events e on e.id = m2.event_id and e.active
       where m2.status = 'scheduled' and m2.court is null
         and m2.entrant1_id is not null and m2.entrant2_id is not null
+        -- Americano rotates partners every round, so the same players appear in
+        -- every round. Without this the queue would drop round r+1 onto a court
+        -- that freed up early while those same players are still finishing
+        -- round r, calling someone to two courts at once.
+        and (
+          coalesce(e.settings ->> 'format', '') <> 'americano'
+          or m2.round = (select min(m3.round) from nairobi_matches m3
+                         where m3.event_id = m2.event_id and m3.status = 'scheduled')
+        )
     ) q
     join nairobi_events ev on ev.id = q.event_id
     -- id last so two matches sharing a play_order always resolve the same way
