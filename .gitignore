@@ -1,0 +1,4 @@
+# Local DUPR tooling and any pulled data. This repo is public: the scraper and
+# the scraped player data (other people's names and ratings) must never ship.
+tools/
+node_modules/
