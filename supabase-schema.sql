@@ -226,23 +226,28 @@ declare
   rec record;
   allowed int[];
   chosen int;
+  ae record;
+  a_courts int[];
+  a_free int[];
 begin
   select coalesce(nullif(settings ->> 'courts', '')::int, 4) into total from nairobi_tournaments limit 1;
   if total is null then return; end if;
   perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
 
-  -- matches of paused events leave their courts
   update nairobi_matches m set court = null, updated_at = now()
   where m.status = 'scheduled' and m.court is not null
     and not exists (select 1 from nairobi_events e where e.id = m.event_id and e.active);
 
-  -- courts with no scheduled match on them right now
+  -- ===== main draw pool: non-Americano events on courts 1..total. Americano is
+  -- a physically separate event with its own courts, so it is handled below as
+  -- its own pool and a shared court number never blocks across the two. =====
   select coalesce(array_agg(c order by c), '{}') into free_courts
   from generate_series(1, total) c
-  where not exists (select 1 from nairobi_matches where status = 'scheduled' and court = c);
+  where not exists (
+    select 1 from nairobi_matches m join nairobi_events e on e.id = m.event_id
+    where m.status = 'scheduled' and m.court = c
+      and coalesce(e.settings ->> 'format', '') <> 'americano');
 
-  -- walk the weighted cross-event queue, dropping each match on the lowest free
-  -- court its event is allowed to use, until the courts (or the queue) run out
   for rec in
     select q.id, ev.settings as evsettings
     from (
@@ -251,53 +256,63 @@ begin
                / count(*) over (partition by m2.event_id) as frac
       from nairobi_matches m2
       join nairobi_events e on e.id = m2.event_id and e.active
-      join nairobi_entrants ea on ea.id = m2.entrant1_id
-      join nairobi_entrants eb on eb.id = m2.entrant2_id
       where m2.status = 'scheduled' and m2.court is null
         and m2.entrant1_id is not null and m2.entrant2_id is not null
-        -- Americano rotates partners every round, so a player appears in every
-        -- round. A match may take a court only when none of its four players are
-        -- on a court now and it is their earliest unplayed match (play_order is
-        -- round-major). No one is called to two courts; with a box schedule each
-        -- court can still run its rounds back to back.
-        and (
-          coalesce(e.settings ->> 'format', '') <> 'americano'
-          or not exists (
-            select 1 from nairobi_matches g
-            join nairobi_entrants ga on ga.id = g.entrant1_id
-            join nairobi_entrants gb on gb.id = g.entrant2_id
-            where g.event_id = m2.event_id and g.status = 'scheduled' and g.id <> m2.id
-              and (g.court is not null or g.play_order < m2.play_order)
-              and (string_to_array(ga.name, ' & ') || string_to_array(gb.name, ' & '))
-                  && (string_to_array(ea.name, ' & ') || string_to_array(eb.name, ' & '))
-          )
-        )
+        and coalesce(e.settings ->> 'format', '') <> 'americano'
     ) q
     join nairobi_events ev on ev.id = q.event_id
-    -- id last so two matches sharing a play_order always resolve the same way
-    -- here and in the browser, instead of whichever row the planner returns first
     order by q.frac, ev.sort_order, q.play_order, q.id
   loop
     exit when array_length(free_courts, 1) is null;
-    if rec.evsettings ? 'courts'
-       and jsonb_typeof(rec.evsettings -> 'courts') = 'array'
+    if rec.evsettings ? 'courts' and jsonb_typeof(rec.evsettings -> 'courts') = 'array'
        and jsonb_array_length(rec.evsettings -> 'courts') > 0 then
-      select array_agg((value)::int) into allowed
-      from jsonb_array_elements_text(rec.evsettings -> 'courts');
-    else
-      allowed := null;
-    end if;
-
-    select c into chosen from unnest(free_courts) c
-    where allowed is null or c = any(allowed)
-    order by c limit 1;
-
+      select array_agg((value)::int) into allowed from jsonb_array_elements_text(rec.evsettings -> 'courts');
+    else allowed := null; end if;
+    select c into chosen from unnest(free_courts) c where allowed is null or c = any(allowed) order by c limit 1;
     if chosen is not null then
-      update nairobi_matches
-      set court = chosen, postponed = false, called_at = now(), called_ack = false, updated_at = now()
+      update nairobi_matches set court = chosen, postponed = false, called_at = now(), called_ack = false, updated_at = now()
       where id = rec.id;
       free_courts := array_remove(free_courts, chosen);
     end if;
+  end loop;
+
+  -- ===== one independent pool per active Americano event, on its own courts.
+  -- Per-player gate: a match takes a court only when none of its four players are
+  -- on a court and it is their earliest unplayed match, so a box schedule lets
+  -- each court run its rounds back to back without double-booking anyone. =====
+  for ae in select * from nairobi_events where active and coalesce(settings ->> 'format', '') = 'americano' loop
+    if ae.settings ? 'courts' and jsonb_typeof(ae.settings -> 'courts') = 'array'
+       and jsonb_array_length(ae.settings -> 'courts') > 0 then
+      select array_agg((value)::int) into a_courts from jsonb_array_elements_text(ae.settings -> 'courts');
+    else a_courts := array[1, 2]; end if;
+    select coalesce(array_agg(c order by c), '{}') into a_free
+    from unnest(a_courts) c
+    where not exists (select 1 from nairobi_matches m
+                      where m.event_id = ae.id and m.status = 'scheduled' and m.court = c);
+
+    for rec in
+      select m2.id
+      from nairobi_matches m2
+      join nairobi_entrants ea on ea.id = m2.entrant1_id
+      join nairobi_entrants eb on eb.id = m2.entrant2_id
+      where m2.event_id = ae.id and m2.status = 'scheduled' and m2.court is null
+        and m2.entrant1_id is not null and m2.entrant2_id is not null
+        and not exists (
+          select 1 from nairobi_matches g
+          join nairobi_entrants ga on ga.id = g.entrant1_id
+          join nairobi_entrants gb on gb.id = g.entrant2_id
+          where g.event_id = ae.id and g.status = 'scheduled' and g.id <> m2.id
+            and (g.court is not null or g.play_order < m2.play_order)
+            and (string_to_array(ga.name, ' & ') || string_to_array(gb.name, ' & '))
+                && (string_to_array(ea.name, ' & ') || string_to_array(eb.name, ' & ')))
+      order by m2.play_order, m2.id
+    loop
+      exit when array_length(a_free, 1) is null;
+      chosen := a_free[1];
+      update nairobi_matches set court = chosen, postponed = false, called_at = now(), called_ack = false, updated_at = now()
+      where id = rec.id;
+      a_free := a_free[2:];
+    end loop;
   end loop;
 end;
 $$;

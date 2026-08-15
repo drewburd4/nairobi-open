@@ -703,61 +703,69 @@ function validateGames(games, pts, isAdmin, bestOf, winBy2){
   return { w1, w2 };
 }
 
-/* The pending queue across all active events, woven so events alternate.
-   This is exactly the order courts are filled in. */
+const dbIsAmericano = ev => !!(ev && ev.settings && ev.settings.format === "americano");
+/* The main-draw queue (non-Americano), woven so events alternate. Americano is
+   a separate pool handled on its own below. */
 function weavePending(db){
-  const act = db.events.filter(e => e.active).sort((a, b) => a.sort_order - b.sort_order);
-  const lists = act.map(ev => {
-    let ms = db.matches
-      .filter(m => m.event_id === ev.id && m.status === "scheduled" && m.court == null && m.entrant1_id && m.entrant2_id);
-    /* Americano gate (mirrors the SQL): a match may take a court when none of
-       its four players are on a court and it is the earliest unplayed match for
-       each of them. A player is never called to two courts, and with a box
-       schedule each court runs its rounds back to back. */
-    if (ev.settings && ev.settings.format === "americano"){
-      const sched = db.matches.filter(m => m.event_id === ev.id && m.status === "scheduled");
-      const nm = id => { const e = db.entrants.find(x => x.id === id); return e ? e.name : ""; };
-      const playersOf = m => splitPair(nm(m.entrant1_id)).concat(splitPair(nm(m.entrant2_id)));
-      const busy = new Set();
-      sched.filter(m => m.court != null).forEach(m => playersOf(m).forEach(p => busy.add(p)));
-      ms = ms.filter(m => {
-        const P = playersOf(m);
-        if (P.some(p => busy.has(p))) return false;
-        return !sched.some(g => g.id !== m.id && g.play_order < m.play_order &&
-          playersOf(g).some(p => P.includes(p)));
-      });
-    }
-    return ms.sort((a, b) => a.play_order - b.play_order);
-  });
+  const act = db.events.filter(e => e.active && !dbIsAmericano(e)).sort((a, b) => a.sort_order - b.sort_order);
+  const lists = act.map(ev => db.matches
+    .filter(m => m.event_id === ev.id && m.status === "scheduled" && m.court == null && m.entrant1_id && m.entrant2_id)
+    .sort((a, b) => a.play_order - b.play_order));
   return weaveQueues(lists);
 }
-
-/* Shared court pool: every free court takes the next match from the woven
-   cross-event queue, so no court sits idle while any active event has
-   matches waiting. Mutates db.matches. Mirrors the SQL function. */
+/* Americano matches ready for a court: none of their players are on a court and
+   it is the earliest unplayed match for each of them (the per-player gate, which
+   mirrors the SQL). */
+function americanoEligible(db, ev){
+  const sched = db.matches.filter(m => m.event_id === ev.id && m.status === "scheduled");
+  const nm = id => { const e = db.entrants.find(x => x.id === id); return e ? e.name : ""; };
+  const playersOf = m => splitPair(nm(m.entrant1_id)).concat(splitPair(nm(m.entrant2_id)));
+  const busy = new Set();
+  sched.filter(m => m.court != null).forEach(m => playersOf(m).forEach(p => busy.add(p)));
+  return sched
+    .filter(m => m.court == null && m.entrant1_id && m.entrant2_id)
+    .filter(m => {
+      const P = playersOf(m);
+      if (P.some(p => busy.has(p))) return false;
+      return !sched.some(g => g.id !== m.id && g.play_order < m.play_order && playersOf(g).some(p => P.includes(p)));
+    })
+    .sort((a, b) => a.play_order - b.play_order);
+}
+/* Court assignment, two independent pools. The main draw fills courts 1..total
+   counting only non-Americano matches; each Americano event fills its own
+   listed courts counting only its own matches. Mirrors the SQL. Mutates db. */
 function assignCourtsGlobal(db){
   const total = (db.tournament && db.tournament.settings && db.tournament.settings.courts) || 4;
+  const evOf = m => db.events.find(e => e.id === m.event_id);
   db.matches.forEach(m => {
-    if (m.status !== "scheduled" || m.court == null) return;
-    const ev = db.events.find(e => e.id === m.event_id);
-    if (!ev || !ev.active) m.court = null;
+    if (m.status === "scheduled" && m.court != null){ const ev = evOf(m); if (!ev || !ev.active) m.court = null; }
   });
-  const taken = new Set(db.matches.filter(m => m.status === "scheduled" && m.court != null).map(m => m.court));
-  const free = [];
-  for(let c = 1; c <= total; c++) if (!taken.has(c)) free.push(c);
-  const queue = weavePending(db);
-  for(const next of queue){
-    if (!free.length) break;
-    const ev = db.events.find(e => e.id === next.event_id);
+  const place = (m, c) => { m.court = c; m.postponed = false; m.called_at = new Date().toISOString(); m.called_ack = false; };
+
+  // main pool
+  const takenMain = new Set(db.matches.filter(m => m.status === "scheduled" && m.court != null && !dbIsAmericano(evOf(m))).map(m => m.court));
+  const freeMain = [];
+  for(let c = 1; c <= total; c++) if (!takenMain.has(c)) freeMain.push(c);
+  for(const next of weavePending(db)){
+    if (!freeMain.length) break;
+    const ev = evOf(next);
     const allowed = ev && ev.settings && Array.isArray(ev.settings.courts) && ev.settings.courts.length ? ev.settings.courts : null;
     let idx = -1;
-    for(let k = 0; k < free.length; k++){ if (!allowed || allowed.includes(free[k])){ idx = k; break; } }
+    for(let k = 0; k < freeMain.length; k++){ if (!allowed || allowed.includes(freeMain[k])){ idx = k; break; } }
     if (idx === -1) continue;
-    next.court = free[idx]; free.splice(idx, 1);
-    next.postponed = false;
-    next.called_at = new Date().toISOString();
-    next.called_ack = false;
+    place(next, freeMain[idx]); freeMain.splice(idx, 1);
   }
+
+  // one independent pool per active Americano event
+  db.events.filter(e => e.active && dbIsAmericano(e)).forEach(ev => {
+    const aCourts = ev.settings && Array.isArray(ev.settings.courts) && ev.settings.courts.length ? ev.settings.courts : [1, 2];
+    const takenA = new Set(db.matches.filter(m => m.event_id === ev.id && m.status === "scheduled" && m.court != null).map(m => m.court));
+    const freeA = aCourts.filter(c => !takenA.has(c));
+    for(const next of americanoEligible(db, ev)){
+      if (!freeA.length) break;
+      place(next, freeA.shift());
+    }
+  });
 }
 
 /* ---------------- mock data ---------------- */
@@ -1486,8 +1494,11 @@ function onCourtMatches(){
     .filter(m => { const ev = eventById(m.event_id); return ev && ev.active; })
     .sort((a, b) => a.court - b.court);
 }
+/* The main-draw queue. Americano is a self-managing separate pool (its board
+   shows its own courts), so it is never part of this queue, the "up next" list,
+   the manual court-assign picker, or the wait estimates. */
 function pendingQueue(){
-  const lists = activeEvents().map(ev => data.matches
+  const lists = activeEvents().filter(ev => !isAmericano(ev)).map(ev => data.matches
     .filter(m => m.event_id === ev.id && m.status === "scheduled" && m.court == null && m.entrant1_id && m.entrant2_id)
     .sort((a, b) => a.play_order - b.play_order));
   return weaveQueues(lists);
@@ -1780,47 +1791,47 @@ function renderAmericanoBoard(ev){
   const left = ms.filter(m => m.status === "scheduled");
   const pts = evSetting(ev, "points_to_group", 11);
   const done = ms.length - left.length;
+  const courts = ev.settings && Array.isArray(ev.settings.courts) && ev.settings.courts.length ? ev.settings.courts : [1, 2];
 
-  let h = '<div class="section-h"><h2>' +
-    (left.length ? 'On court' : 'All rounds played') +
-    '</h2><span class="hint">' + done + ' of ' + ms.length + ' matches in · first to ' + pts + '</span></div>';
-
-  /* The two courts can be on different rounds (in the box format each court
-     runs its own first three rounds), so show whatever is actually on court now
-     plus the next match waiting to go on, rather than one shared round. */
+  /* 1. The courts, one card each, showing the match on that court now. */
+  let h = '<div class="section-h"><h2>' + (left.length ? 'On court' : 'All rounds played') +
+    '</h2><span class="hint">' + done + ' of ' + ms.length + ' matches played · first to ' + pts + '</span></div>';
   if (left.length){
-    const onNow = ms.filter(m => m.court != null).sort((a, b) => a.court - b.court);
-    const waiting = pendingQueue().filter(m => m.event_id === ev.id);
-    const cards = onNow.concat(waiting.filter(m => !onNow.includes(m)));
     h += '<div class="courtgrid">';
-    (cards.length ? cards : left.slice(0, 2)).forEach(m => {
-      const label = m.court != null ? 'Court ' + m.court + ' · Round ' + m.round : 'Round ' + m.round + ' · next up';
-      h += '<button class="courtcard" onclick="openMatch(\'' + m.id + '\')">' +
-        '<div class="chead"><span class="cnum">' + label + '</span></div>' +
-        '<div class="team">' + esc(entrantName(m.entrant1_id)) + '</div>' +
-        '<div class="vs">vs</div>' +
-        '<div class="team">' + esc(entrantName(m.entrant2_id)) + '</div>' +
-        '<div class="cta">' + (m.court != null ? 'Tap to enter the score' : 'Starts when its players are free') +
-        '</div></button>';
+    courts.forEach(c => {
+      const m = ms.find(x => x.court === c && x.status === "scheduled");
+      if (m){
+        h += '<button class="courtcard" onclick="openMatch(\'' + m.id + '\')">' +
+          '<div class="chead"><span class="cnum">Court ' + c + '</span><span class="tag plain">Round ' + m.round + '</span></div>' +
+          '<div class="team">' + esc(entrantName(m.entrant1_id)) + '</div>' +
+          '<div class="vs">vs</div><div class="team">' + esc(entrantName(m.entrant2_id)) + '</div>' +
+          '<div class="cta">Tap to enter the score</div></button>';
+      } else {
+        h += '<div class="courtcard idle"><div class="chead"><span class="cnum">Court ' + c + '</span></div>' +
+          '<div class="team">Free</div><div class="note" style="margin-top:4px">Next match starts once its players are off court</div></div>';
+      }
     });
     h += '</div>';
   }
 
+  /* 2. The schedule, round by round. */
+  h += '<div class="section-h"><h2>Schedule</h2></div>';
+  rounds.forEach(r => {
+    const list = ms.filter(m => m.round === r).sort((a, b) => a.play_order - b.play_order);
+    const allIn = list.every(m => m.status === "played");
+    const onNow = list.some(m => m.court != null);
+    h += '<div class="roundblock"><h3>Round ' + r +
+      (allIn ? ' <span class="hint">done</span>' : onNow ? ' <span class="hint">on court</span>' : '') + '</h3>';
+    list.forEach(m => { h += scheduleRow(m, false); });
+    h += '</div>';
+  });
+
+  /* 3. Standings, at the bottom. */
   const table = americanoStandings(ev);
   if (table.length){
     h += '<div class="section-h"><h2>Standings</h2><span class="hint">Total points won</span></div>';
     h += renderAmericanoTable(table);
   }
-
-  h += '<div class="section-h"><h2>All rounds</h2></div>';
-  rounds.forEach(r => {
-    const list = ms.filter(m => m.round === r).sort((a, b) => a.play_order - b.play_order);
-    const allIn = list.every(m => m.status === "played");
-    const onNow = list.some(m => m.court != null);
-    h += '<div class="roundblock"><h3>Round ' + r + (allIn ? ' <span class="hint">done</span>' : onNow ? ' <span class="hint">on court</span>' : '') + '</h3>';
-    list.forEach(m => { h += scheduleRow(m, false); });
-    h += '</div>';
-  });
   return h;
 }
 function renderAmericanoTable(table){
@@ -1865,17 +1876,16 @@ function renderBoard(){
     return h;
   }
 
-  /* Switch off: the board is exactly the pre-Americano main draw. The courts
-     the Americano division runs on are simply not part of this board at all,
-     so no Americano match, card or callout appears here. */
-  const amerCourts = amer && amer.settings && Array.isArray(amer.settings.courts) ? amer.settings.courts : [];
+  /* Switch off: exactly the pre-Americano main draw, all of courts 1..total.
+     Americano is a physically separate event on its own courts (its own pool),
+     so it never appears here even though a court number is shared. inView and
+     pendingQueue both already drop Americano. */
   const inView = m => act.some(e => e.id === m.event_id);
   const on = onCourtMatches().filter(inView);
   const q = pendingQueue().filter(inView);
   h += '<div class="section-h"><h2>On court</h2></div>';
   h += '<div class="courtgrid">';
   for(let c = 1; c <= courtsCount(); c++){
-    if (amerCourts.includes(c)) continue;
     const m = on.find(x => x.court === c);
     if (m){
       const ev = eventById(m.event_id);
@@ -2245,11 +2255,12 @@ function renderAdmin(){
   if (ev && state.adminEventId !== ev.id) state.adminEventId = ev.id;
 
   let h = '<div class="panel"><h3>Events</h3>' +
-    '<div class="field"><select onchange="setAdminEvent(this.value)" aria-label="Event">' +
+    '<div class="subtabs evtabs" role="tablist">' +
     data.events.slice().sort((a, b) => a.sort_order - b.sort_order).map(e =>
-      '<option value="' + e.id + '"' + (ev && e.id === ev.id ? ' selected' : '') + '>' + esc(eventLabel(e)) + '</option>').join("") +
-    '</select></div>' +
-    '<button class="btn small secondary" onclick="addEvent()">+ New event</button></div>';
+      '<button class="subtab" aria-current="' + (ev && e.id === ev.id) + '" onclick="setAdminEvent(\'' + e.id + '\')">' +
+      esc(e.name) + (e.active ? ' <span class="livedot" aria-hidden="true">●</span>' : '') + '</button>').join("") +
+    '</div>' +
+    '<button class="btn small secondary" style="margin-top:8px" onclick="addEvent()">+ New event</button></div>';
 
   if (ev){
     const hasMatches = data.matches.some(m => m.event_id === ev.id);
@@ -2629,7 +2640,8 @@ function renderOffCourtModal(){
 
 /* ---------- actions ---------- */
 function setView(v){ state.view = v; state.setupPreview = null; render(); }
-function setDivision(d){ state.division = d; state.showAllQueue = false; render(); }
+/* Persisted so a reload keeps you on the division you were watching. */
+function setDivision(d){ state.division = d; state.showAllQueue = false; safeSession("pb_division", d); render(); }
 function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.standingsFilter = "all"; render(); }
 function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; render(); }
 function setRoundFilter(r){ state.roundFilter = String(r); render(); }
@@ -3420,6 +3432,8 @@ async function doChangePin(){
 /* ---------- init ---------- */
 (async function init(){
   state.dismissedCalled = loadDismissedCalled();
+  const savedDiv = safeSession("pb_division");
+  if (savedDiv) state.division = savedDiv;
   /* Paint before the first fetch, so a slow connection shows "Loading…"
      rather than a blank page that reads as a broken link. */
   render();
