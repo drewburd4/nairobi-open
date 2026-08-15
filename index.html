@@ -128,10 +128,11 @@ input,textarea,select{font:inherit; color:var(--ink)}
   background:var(--card); color:var(--muted); font-size:15px; line-height:1;
   cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none}
 .qgrip:active{cursor:grabbing; background:var(--accent-soft); color:var(--accent); border-color:var(--accent)}
-.queue-row.dragging{position:relative; z-index:5; border-radius:8px;
+/* z-index above the sticky topbar (30) so a row dragged to the top edge stays
+   visible while the page auto-scrolls under it. */
+.queue-row.dragging{position:relative; z-index:40; border-radius:8px;
   background:var(--accent-soft); box-shadow:0 6px 18px rgba(0,0,0,.18)}
-.queue-row.dropbefore{box-shadow:inset 0 3px 0 -1px var(--accent)}
-.queue-row.dropafter{box-shadow:inset 0 -3px 0 -1px var(--accent)}
+.queue-row.qshift{transition:transform .12s ease}
 .boardnotes{margin-top:16px}
 .boardnotes .note{display:block; padding:2px 0}
 
@@ -1441,6 +1442,73 @@ function pendingQueue(){
     .sort((a, b) => a.play_order - b.play_order));
   return weaveQueues(lists);
 }
+
+/* ---------- wait estimates ---------- */
+const TURNOVER_MIN = 4;   /* players off, next four on, quick warm-up */
+/* Average games a match takes: best of 3 splits go long about half the time. */
+const expectedGamesFor = m => {
+  const bo = matchBestOf(m);
+  return bo <= 1 ? 1 : (bo + 1) / 2 + (bo - 1) / 4;
+};
+/* Minutes one game takes. Measured from today's finished matches (court call
+   to score entry) once a few exist, so a switch to best of 3 or a slow field
+   feeds straight back into the number; before that, a guess scaled to the
+   points target (one game to 21 runs somewhere near 17 minutes). */
+function perGameMinutes(m){
+  const durs = [];
+  for(const x of data.matches){
+    if (x.status !== "played" || x.walkover || !x.called_at || !x.updated_at) continue;
+    const mins = (Date.parse(x.updated_at) - Date.parse(x.called_at)) / 60000;
+    const g = Array.isArray(x.games) && x.games.length ? x.games.length : 1;
+    const per = (mins - TURNOVER_MIN) / g;
+    if (per >= 5 && per <= 45) durs.push(per);
+  }
+  if (durs.length >= 3){
+    durs.sort((a, b) => a - b);
+    return durs[Math.floor(durs.length / 2)];
+  }
+  return Math.min(30, Math.max(8, matchPts(m) * 0.8));
+}
+const expectedMatchMinutes = m => expectedGamesFor(m) * perGameMinutes(m) + TURNOVER_MIN;
+/* Rough minutes until a waiting match should reach a court. Position in the
+   woven queue already reflects how running events share the courts. */
+function estimatedWaitMinutes(m){
+  const ahead = pendingQueue().findIndex(x => x.id === m.id);
+  if (ahead < 0) return null;
+  const courts = courtsCount();
+  const free = Math.max(0, courts - onCourtMatches().length);
+  if (ahead < free) return 0;
+  /* Courts in play are on average halfway done; after that a court frees up
+     once per match length, and the queue drains one match per court. */
+  return Math.round(((ahead - free) / courts + 0.5) * expectedMatchMinutes(m));
+}
+function eventStartDate(ev){
+  const s = evSetting(ev, "start_time", "");
+  if (!s) return null;
+  const d = new Date(s);
+  return isNaN(d.getTime()) ? null : d;
+}
+/* Before an event starts: its own queue position against the admin-set start
+   time, over the courts the event is allowed to use. */
+function estimatedStartTime(m, ev){
+  const start = eventStartDate(ev);
+  if (!start) return null;
+  const sibs = data.matches
+    .filter(x => x.event_id === ev.id && x.status === "scheduled" && !x.postponed &&
+      x.entrant1_id && x.entrant2_id)
+    .sort((a, b) => a.play_order - b.play_order);
+  const pos = sibs.findIndex(x => x.id === m.id);
+  if (pos < 0) return null;
+  const allowed = ev.settings && Array.isArray(ev.settings.courts) && ev.settings.courts.length
+    ? ev.settings.courts.length : courtsCount();
+  return new Date(start.getTime() + Math.floor(pos / allowed) * expectedMatchMinutes(m) * 60000);
+}
+function fmtWaitMin(w){
+  const r = Math.max(5, Math.round(w / 5) * 5);
+  if (r < 60) return "about " + r + " minutes";
+  return "about " + Math.floor(r / 60) + "h" + (r % 60 ? " " + (r % 60) + "m" : "");
+}
+
 function calledMatches(){
   const now = Date.now();
   return onCourtMatches().filter(m =>
@@ -2049,7 +2117,9 @@ function renderAdmin(){
     h += '<div class="divider"></div><h4>3 · Start and pause</h4>';
     h += '<div class="field" style="margin-top:6px"><label for="adm-note">Schedule note (shown to players, e.g. "Sat 9am")</label>' +
       '<input id="adm-note" type="text" value="' + esc(evSetting(ev, "schedule_note", "")) + '"></div>';
-    h += '<button class="btn small secondary" onclick="saveNote()">Save note</button> ';
+    h += '<div class="field" style="margin-top:6px"><label for="adm-start">Planned start (drives the wait estimates players see)</label>' +
+      '<input id="adm-start" type="datetime-local" value="' + esc(evSetting(ev, "start_time", "")) + '"></div>';
+    h += '<button class="btn small secondary" onclick="saveNote()">Save schedule</button> ';
     h += ev.active
       ? '<button class="btn small secondary" onclick="setActive(false)">Pause event</button>'
       : '<button class="btn small" onclick="setActive(true)">Start event</button>';
@@ -2142,6 +2212,19 @@ function renderScoreModal(){
   } else if (infoOnly){
     h += '<div class="score-line"><label>' + esc(n1) + '</label></div>';
     h += '<div class="score-line"><label>' + esc(n2) + '</label></div>';
+    if (!m.postponed && ev){
+      let est = '';
+      if (ev.active){
+        const w = estimatedWaitMinutes(m);
+        if (w != null) est = w <= 2 ? 'Up any moment now.' : 'Estimated wait: ' + fmtWaitMin(w) + '.';
+      } else {
+        const t = estimatedStartTime(m, ev);
+        if (t) est = 'Estimated play time: around ' +
+          t.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) + '.';
+      }
+      if (est) h += '<p class="note" style="font-weight:700">' + est +
+        ' <span style="font-weight:400">(rough, updates as matches finish)</span></p>';
+    }
     h += '<p class="note">' + (m.postponed ? 'Postponed: waiting lower in the queue.' : 'Waiting for a court.') +
       ' When the match is called, it appears on the Courts tab and the score can be entered. Anything wrong? Ask at the desk.</p>';
     h += '<div class="actions"><span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Close</button></div>';
@@ -2497,42 +2580,48 @@ async function swapTo(offId, onId){
   await reload();
 }
 /* Drag to reorder the queue. Pointer events cover a finger on a phone and a
-   mouse on a laptop in one code path; HTML5 drag and drop ignores touch. A
-   match only ever moves within its own event, so the drop targets are the rows
-   sharing its event id even though the list interleaves every running event. */
+   mouse on a laptop in one code path; HTML5 drag and drop ignores touch. The
+   row can be dropped anywhere in the list; the rows around the drop point
+   decide where it lands. A match still only holds a position within its own
+   event (the display interleaves events to share courts fairly), so the drop
+   resolves to "before the next match of its event at or below the gap". */
 let qdrag = null;
 let qdragUntil = 0;
 const QDRAG_EDGE = 96;   /* start scrolling within this far of a screen edge */
 const QDRAG_SPEED = 18;  /* px per frame at the very edge */
 
-/* Every candidate row on the page, in document order. The queue is rendered as
-   two blocks, the visible top of the list and the rest behind "Show all", so
-   this deliberately searches the whole page rather than the block the drag
-   started in: otherwise a match can never cross between the two. */
-const qdragPeers = () => Array.from(
-  document.querySelectorAll('.queue-block .queue-row[data-eid="' + qdrag.row.dataset.eid + '"]'))
-  .filter(r => r !== qdrag.row);
-function qdragClearMarks(){
-  document.querySelectorAll(".dropbefore,.dropafter")
-    .forEach(r => r.classList.remove("dropbefore", "dropafter"));
-}
-/* Redraw the dragged row and the insertion marker from the last known pointer
-   position. Split out from the move handler because the auto-scroll needs to
-   re-run it while the finger is held still at the edge of the screen. */
+/* Redraw the dragged row and the gap from the last known pointer position.
+   Split out from the move handler because the auto-scroll needs to re-run it
+   while the finger is held still at the edge of the screen. Hit tests use row
+   positions snapshotted at drag start: rows never reflow mid-drag (render is
+   suppressed) and the shift transforms are visual only, so re-measuring would
+   make the test chase its own feedback. */
 function qdragUpdate(){
   if (!qdrag) return;
-  qdrag.row.style.transform =
-    "translateY(" + ((qdrag.y + window.scrollY) - qdrag.startY) + "px)";
-  qdragClearMarks();
-  const peers = qdragPeers();
-  let before = null;
-  for(const r of peers){
-    const b = r.getBoundingClientRect();
-    if (qdrag.y < b.top + b.height / 2){ before = r; break; }
-  }
-  qdrag.before = before;
-  if (before) before.classList.add("dropbefore");
-  else if (peers.length) peers[peers.length - 1].classList.add("dropafter");
+  const docY = qdrag.y + window.scrollY;
+  qdrag.row.style.transform = "translateY(" + (docY - qdrag.startY) + "px)";
+  let t = 0;
+  for(const s of qdrag.others) if (docY > s.top + s.h / 2) t++;
+  if (t !== qdrag.to){ qdrag.to = t; qdragApplyShifts(); }
+}
+/* Slide the other rows apart so a gap opens where the row would land. Kept to
+   the block the row started in: transforms don't grow the target block's card,
+   so a cross-block gap would push its last row outside the border. A cross-
+   block drop still works, there is just no gap drawn for it. */
+function qdragApplyShifts(){
+  const d = qdrag, o = d.fromIdx, t = d.to;
+  const tBlock = d.others.length
+    ? d.others[Math.min(t, d.others.length - 1)].block : d.myBlock;
+  d.others.forEach((s, j) => {
+    let sh = 0;
+    if (s.block === d.myBlock){
+      if (tBlock === d.myBlock){
+        if (t <= j && j < o) sh = d.h0;
+        else if (o <= j && j < t) sh = -d.h0;
+      } else if (j >= o) sh = -d.h0;   /* row is leaving: close the hole */
+    }
+    s.row.style.transform = sh ? "translateY(" + sh + "px)" : "";
+  });
 }
 /* Hold the row near the top or bottom of the screen and the page scrolls, so a
    match can be dragged somewhere off-screen. The grip sets touch-action:none to
@@ -2556,13 +2645,25 @@ function startQueueDrag(e, matchId){
   e.preventDefault();
   const grip = e.currentTarget, row = grip.closest(".queue-row");
   if (!row) return;
-  /* Measured against the document, not the window, so the row keeps tracking
-     the finger while auto-scroll moves the page underneath it. */
-  qdrag = { id: matchId, grip, row, y: e.clientY, startY: e.clientY + window.scrollY,
-            moved: false, before: null, raf: 0 };
-  if (!qdragPeers().length){ qdrag = null; return; }
+  if (pendingQueue().filter(x => x.event_id === row.dataset.eid).length < 2){
+    toast("Only waiting match in its event, so its turn is set by the court rotation.");
+    return;
+  }
+  /* Geometry snapshot, measured against the document rather than the window,
+     so everything keeps tracking the finger while auto-scroll moves the page. */
+  const others = [];
+  let fromIdx = 0, h0 = 0;
+  document.querySelectorAll(".queue-block .queue-row").forEach(r => {
+    const b = r.getBoundingClientRect();
+    if (r === row){ fromIdx = others.length; h0 = b.height; return; }
+    others.push({ row: r, top: b.top + window.scrollY, h: b.height, block: r.parentElement });
+  });
+  qdrag = { id: matchId, grip, row, others, fromIdx, h0, to: fromIdx,
+            myBlock: row.parentElement, y: e.clientY,
+            startY: e.clientY + window.scrollY, moved: false, raf: 0 };
   state.dragging = true;
   row.classList.add("dragging");
+  others.forEach(s => s.row.classList.add("qshift"));
   try{ grip.setPointerCapture(e.pointerId); }catch(_){}
   grip.addEventListener("pointermove", onQueueDragMove);
   grip.addEventListener("pointerup", endQueueDrag);
@@ -2581,7 +2682,7 @@ function finishQueueDrag(e){
   if (d.raf) cancelAnimationFrame(d.raf);
   d.row.style.transform = "";
   d.row.classList.remove("dragging");
-  qdragClearMarks();
+  d.others.forEach(s => { s.row.style.transform = ""; s.row.classList.remove("qshift"); });
   d.grip.removeEventListener("pointermove", onQueueDragMove);
   d.grip.removeEventListener("pointerup", endQueueDrag);
   d.grip.removeEventListener("pointercancel", cancelQueueDrag);
@@ -2595,10 +2696,43 @@ function finishQueueDrag(e){
   return d;
 }
 function cancelQueueDrag(e){ finishQueueDrag(e); render(); }
+/* Mirror of the server's move: slot the match between its event neighbours by
+   play_order midpoint. Applied locally before the round-trip so the row lands
+   where it is going the moment it is dropped instead of snapping back first. */
+function applyLocalMove(matchId, beforeId){
+  const m = data.matches.find(x => x.id === matchId);
+  if (!m) return;
+  const sibs = data.matches
+    .filter(x => x.event_id === m.event_id && x.status === "scheduled" && x.id !== m.id)
+    .sort((a, b) => a.play_order - b.play_order);
+  if (!sibs.length) return;
+  if (beforeId == null){ m.play_order = sibs[sibs.length - 1].play_order + 10; return; }
+  const t = sibs.find(x => x.id === beforeId);
+  if (!t) return;
+  const prev = sibs.filter(x => x.play_order < t.play_order).pop();
+  m.play_order = prev ? (prev.play_order + t.play_order) / 2 : t.play_order - 10;
+}
 async function endQueueDrag(e){
   const d = finishQueueDrag(e);
   if (!d || !d.moved){ render(); return; }
-  const r = await store.adminMoveMatch(state.adminPin, d.id, d.before ? d.before.dataset.mid : null);
+  /* The anchor is the first row of the same event at or below the gap. With
+     "Show all" collapsed there may be none on screen but more of the event
+     hidden below; anchor on the first hidden one so the drop means "just after
+     the visible rows", not "past every hidden match to the very end". */
+  const myEid = d.row.dataset.eid;
+  let beforeId = null;
+  const hit = d.others.slice(d.to).find(s => s.row.dataset.eid === myEid);
+  if (hit) beforeId = hit.row.dataset.mid;
+  else {
+    const shown = new Set(d.others.filter(s => s.row.dataset.eid === myEid)
+      .map(s => s.row.dataset.mid));
+    const firstHidden = pendingQueue()
+      .find(m => m.event_id === myEid && m.id !== d.id && !shown.has(m.id));
+    if (firstHidden) beforeId = firstHidden.id;
+  }
+  applyLocalMove(d.id, beforeId);
+  render();
+  const r = await store.adminMoveMatch(state.adminPin, d.id, beforeId);
   if (!r.ok) toast(r.error || "Could not move it.");
   await reload();
 }
@@ -2708,9 +2842,12 @@ async function saveNote(){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
   const note = document.getElementById("adm-note").value.trim();
-  const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, { schedule_note: note });
+  const startEl = document.getElementById("adm-start");
+  const start = startEl ? startEl.value : evSetting(ev, "start_time", "");
+  const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name,
+    { schedule_note: note, start_time: start || "" });
   if (!r.ok){ toast(r.error); return; }
-  toast("Note saved"); await reload();
+  toast("Schedule saved"); await reload();
 }
 async function setActive(active){
   const ev = eventById(state.adminEventId);
