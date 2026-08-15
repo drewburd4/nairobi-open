@@ -1340,7 +1340,7 @@ const state = {
   standingsFilter: "all",
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null, assignCourt: null, offCourtId: null,
   setupPreview: null, adminEventId: null, loadError: null,
-  showAllQueue: false, showRedraw: false, pendingRender: false, dragging: false, division: "all",
+  showAllQueue: false, showRedraw: false, pendingRender: false, dragging: false, division: "main",
   dismissedCalled: {}, contacts: {}
 };
 
@@ -1701,7 +1701,7 @@ function render(){
 /* True when a match belongs to the division currently being viewed. Only the
    Courts board is filtered; every other tab shows the whole tournament. */
 function inDivision(m){
-  if (state.division === "all" || state.view !== "board") return true;
+  if (state.view !== "board") return true;
   const ev = eventById(m.event_id);
   return state.division === "americano" ? isAmericano(ev) : !isAmericano(ev);
 }
@@ -1827,10 +1827,11 @@ function renderAmericanoTable(table){
 function renderDivisionTabs(){
   const amer = americanoEvent();
   if (!amer) return "";
-  const tab = (id, label) => '<button class="subtab" aria-current="' + (state.division === id) +
-    '" onclick="setDivision(\'' + id + '\')">' + label + '</button>';
-  return '<div class="subtabs" role="tablist">' + tab("all", "All courts") +
-    tab("main", "Main draw") + tab("americano", esc(amer.name)) + '</div>';
+  const on = state.division === "americano";
+  return '<div class="subtabs"><button class="subtab" aria-current="' + on +
+    '" onclick="setDivision(\'' + (on ? "main" : "americano") + '\')">' +
+    (on ? '\u2190 Back to the main draw' : 'Show ' + esc(amer.name) + ' only') +
+    '</button></div>';
 }
 function renderBoard(){
   const amer = americanoEvent();
@@ -1838,7 +1839,7 @@ function renderBoard(){
     return '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(amer.name) + '</span>' +
       renderDivisionTabs() + renderAmericanoBoard(amer);
   }
-  const act = activeEvents().filter(e => state.division === "main" ? !isAmericano(e) : true);
+  const act = activeEvents().filter(e => !isAmericano(e));
   const multi = act.length > 1;
   let h = '<span class="print-title">' + esc(data.tournament.name) + ' · Courts</span>' + renderDivisionTabs();
 
@@ -1852,23 +1853,26 @@ function renderBoard(){
     return h;
   }
 
-  /* "Main draw" hides the Americano division and the courts it holds, so the
-     two can run side by side without either burying the other. */
+  /* With the switch off this is the board exactly as it was before the
+     Americano division existed: every court, main draw only. A court the
+     other division is using still shows as busy rather than free, so nobody
+     tries to drop a match onto an occupied court. */
   const inView = m => act.some(e => e.id === m.event_id);
   const on = onCourtMatches().filter(inView);
   const q = pendingQueue().filter(inView);
-  const courtsInView = [];
-  for(let c = 1; c <= courtsCount(); c++){
-    if (state.division === "main" && amer){
-      const amerCourts = Array.isArray(amer.settings && amer.settings.courts) ? amer.settings.courts : [];
-      if (amerCourts.includes(c) && !on.some(m => m.court === c)) continue;
-    }
-    courtsInView.push(c);
-  }
+  const busyElsewhere = onCourtMatches().filter(m => !inView(m));
   h += '<div class="section-h"><h2>On court</h2></div>';
   h += '<div class="courtgrid">';
-  for(const c of courtsInView){
+  for(let c = 1; c <= courtsCount(); c++){
     const m = on.find(x => x.court === c);
+    const other = busyElsewhere.find(x => x.court === c);
+    if (!m && other){
+      const oev = eventById(other.event_id);
+      h += '<div class="courtcard idle"><div class="chead"><span class="cnum">Court ' + c + '</span></div>' +
+        '<div class="team">In use</div><div class="note" style="margin-top:4px">' +
+        esc(oev ? oev.name : "Another division") + '</div></div>';
+      continue;
+    }
     if (m){
       const ev = eventById(m.event_id);
       h += '<button class="courtcard" onclick="openMatch(\'' + m.id + '\')">' +
