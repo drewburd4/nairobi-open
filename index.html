@@ -1444,16 +1444,26 @@ function pendingQueue(){
 }
 
 /* ---------- wait estimates ---------- */
-const TURNOVER_MIN = 4;   /* players off, next four on, quick warm-up */
+/* Between matches: last point to first serve of the next one. Not just walking
+   off; it is finding four people who wandered off to eat or watch, and warming
+   them up. Six or seven minutes is normal, and it is the single biggest lever
+   an organiser actually controls. */
+const TURNOVER_MIN = 7;
+/* Courts do not stay busy all day. Players are double-entered and can only be
+   on one court, groups run out of playable pairings near the end, and the desk
+   is chasing scores. Even a well-run day with a queue board lands near 80%,
+   which is why a plan built on perfect utilisation always runs late. */
+const COURT_BUSY = 0.8;
 /* Average games a match takes. A best of 3 needs 2 wins, and a minority of
    matches go the distance: the 2025 draws came out around 2.1 games per match,
    so 2.25 leaves a little room without being alarmist. */
 const expectedGamesForBo = bo => (bo <= 1 ? 1 : (bo + 1) / 2 + (bo - 1) / 8);
 const expectedGamesFor = m => expectedGamesForBo(matchBestOf(m));
-/* Minutes of play in a single game. Close to linear in the points target, plus
-   a couple of minutes of serves, side changes and the odd timeout. Win by 2
-   adds a tail of deuce points. */
-const gameMinutesFor = (pts, winBy2) => 0.75 * pts + 2 + (winBy2 ? 1 : 0);
+/* Minutes for a single game: close to linear in the points target, plus a
+   couple of minutes for the warm-up, side changes, chasing balls off the next
+   court and the odd timeout. Win by 2 adds a tail of deuce points. Calibrated
+   against the 2025 event running roughly 12 hours, not against clean play. */
+const gameMinutesFor = (pts, winBy2) => 0.85 * pts + 2 + (winBy2 ? 1 : 0);
 const allowedCourtCount = ev => {
   const a = ev && ev.settings && Array.isArray(ev.settings.courts) ? ev.settings.courts : [];
   return a.length ? a.length : courtsCount();
@@ -1475,7 +1485,7 @@ function perGameMinutes(m){
     durs.sort((a, b) => a - b);
     return durs[Math.floor(durs.length / 2)];
   }
-  return Math.min(30, Math.max(8, matchPts(m) * 0.8));
+  return Math.min(30, Math.max(8, gameMinutesFor(matchPts(m), matchWinBy2(m))));
 }
 const expectedMatchMinutes = m => expectedGamesFor(m) * perGameMinutes(m) + TURNOVER_MIN;
 /* Rough minutes until a waiting match should reach a court. Position in the
@@ -1553,8 +1563,11 @@ function eventDurationEstimate(ev, o){
     nKo = Math.max(0, size - 1);
   }
   const per = (pts, bo) => expectedGamesForBo(bo) * gameMinutesFor(pts, wb2) + TURNOVER_MIN;
+  const ideal = (nGroup * per(pg, bg) + nKo * per(pk, bk)) / courts;
+  /* `minutes` is the day an organiser should plan for; `idealMinutes` is the
+     floor it would hit only if no court ever sat empty. */
   return { group: nGroup, ko: nKo, matches: nGroup + nKo, courts,
-           minutes: (nGroup * per(pg, bg) + nKo * per(pk, bk)) / courts };
+           idealMinutes: ideal, minutes: ideal / COURT_BUSY };
 }
 
 function calledMatches(){
@@ -2889,8 +2902,9 @@ function estimateText(ev, o){
   const bits = [];
   if (est.group) bits.push(est.group + " group match" + (est.group === 1 ? "" : "es"));
   if (est.ko) bits.push(est.ko + " knockout match" + (est.ko === 1 ? "" : "es"));
-  let s = "<b>About " + fmtHours(est.minutes) + " of play</b> on " + est.courts +
-    " court" + (est.courts === 1 ? "" : "s") + ": " + bits.join(" and ") + ".";
+  let s = "<b>Plan for about " + fmtHours(est.minutes) + "</b> on " + est.courts +
+    " court" + (est.courts === 1 ? "" : "s") + ": " + bits.join(" and ") +
+    ". Only " + fmtHours(est.idealMinutes) + " if no court ever sits empty, which never happens.";
   const bg = o ? o.boGroup : parseInt(evSetting(ev, "best_of_group", 1), 10) || 1;
   if (bg > 1){
     const one = eventDurationEstimate(ev, Object.assign({}, o, { boGroup: 1 }));
@@ -2898,7 +2912,9 @@ function estimateText(ev, o){
     if (saved > 20) s += " One game in the group stage instead: about " +
       fmtHours(one.minutes) + ", saving roughly " + fmtHours(saved) + ".";
   }
-  return s + " <span style=\"opacity:.75\">Rough: it assumes courts stay busy and counts a short changeover between matches.</span>";
+  return s + " <span style=\"opacity:.75\">Rough: " + TURNOVER_MIN +
+    " minutes between matches and courts busy " + Math.round(COURT_BUSY * 100) +
+    "% of the day.</span>";
 }
 /* Repriced live as the fields change, without a re-render that would steal
    focus from the input being typed into. */
