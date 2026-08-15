@@ -1445,10 +1445,18 @@ function pendingQueue(){
 
 /* ---------- wait estimates ---------- */
 const TURNOVER_MIN = 4;   /* players off, next four on, quick warm-up */
-/* Average games a match takes: best of 3 splits go long about half the time. */
-const expectedGamesFor = m => {
-  const bo = matchBestOf(m);
-  return bo <= 1 ? 1 : (bo + 1) / 2 + (bo - 1) / 4;
+/* Average games a match takes. A best of 3 needs 2 wins, and a minority of
+   matches go the distance: the 2025 draws came out around 2.1 games per match,
+   so 2.25 leaves a little room without being alarmist. */
+const expectedGamesForBo = bo => (bo <= 1 ? 1 : (bo + 1) / 2 + (bo - 1) / 8);
+const expectedGamesFor = m => expectedGamesForBo(matchBestOf(m));
+/* Minutes of play in a single game. Close to linear in the points target, plus
+   a couple of minutes of serves, side changes and the odd timeout. Win by 2
+   adds a tail of deuce points. */
+const gameMinutesFor = (pts, winBy2) => 0.75 * pts + 2 + (winBy2 ? 1 : 0);
+const allowedCourtCount = ev => {
+  const a = ev && ev.settings && Array.isArray(ev.settings.courts) ? ev.settings.courts : [];
+  return a.length ? a.length : courtsCount();
 };
 /* Minutes one game takes. Measured from today's finished matches (court call
    to score entry) once a few exist, so a switch to best of 3 or a slow field
@@ -1507,6 +1515,46 @@ function fmtWaitMin(w){
   const r = Math.max(5, Math.round(w / 5) * 5);
   if (r < 60) return "about " + r + " minutes";
   return "about " + Math.floor(r / 60) + "h" + (r % 60 ? " " + (r % 60) + "m" : "");
+}
+function fmtHours(mins){
+  const r = Math.round(mins / 15) * 15;
+  const h = Math.floor(r / 60), m = r % 60;
+  if (!h) return m + "m";
+  return h + "h" + (m ? " " + m + "m" : "");
+}
+/* How long a whole event will take under a given format. Counts the real match
+   list once the draw exists, and projects round robins from the entrant list
+   before that, so an organiser can see the cost of "best of 3" before drawing.
+   Overrides let the admin panel price the settings on screen, unsaved. */
+function eventDurationEstimate(ev, o){
+  o = o || {};
+  const pick = (v, dflt) => (v == null || v !== v ? dflt : v);
+  const pg = pick(o.pointsGroup, evSetting(ev, "points_to_group", 21));
+  const pk = pick(o.pointsKo, evSetting(ev, "points_to_knockout", 21));
+  const bg = pick(o.boGroup, parseInt(evSetting(ev, "best_of_group", 1), 10) || 1);
+  const bk = pick(o.boKo, parseInt(evSetting(ev, "best_of_knockout", 1), 10) || 1);
+  const wb2 = pick(o.winBy2, !!evSetting(ev, "win_by_two", false));
+  const courts = Math.max(1, pick(o.courts, allowedCourtCount(ev)));
+
+  const ms = data.matches.filter(m => m.event_id === ev.id);
+  let nGroup = ms.filter(m => m.stage === "group").length;
+  let nKo = ms.filter(m => m.stage === "knockout").length;
+  let nGroups = groupsOfEvent(ev).length;
+  const ents = data.entrants.filter(e => e.event_id === ev.id).length;
+  if (!nGroup && ents > 1){
+    const sizes = groupSizes(ents, pick(o.groupSize, evSetting(ev, "group_size", 6)));
+    nGroup = sizes.reduce((t, s) => t + s * (s - 1) / 2, 0);
+    nGroups = sizes.length;
+  }
+  if (!nKo && nGroups){
+    const adv = pick(o.advance, evSetting(ev, "advance_per_group", 2));
+    const ks = String(pick(o.koSize, evSetting(ev, "knockout_size", "auto")));
+    const size = ks === "auto" ? nextPow2(Math.max(2, nGroups * adv)) : (parseInt(ks, 10) || 0);
+    nKo = Math.max(0, size - 1);
+  }
+  const per = (pts, bo) => expectedGamesForBo(bo) * gameMinutesFor(pts, wb2) + TURNOVER_MIN;
+  return { group: nGroup, ko: nKo, matches: nGroup + nKo, courts,
+           minutes: (nGroup * per(pg, bg) + nKo * per(pk, bk)) / courts };
 }
 
 function calledMatches(){
@@ -2043,20 +2091,20 @@ function renderAdmin(){
 
     h += '<h4>1 · Format and rules</h4>';
     h += '<div class="fieldrow">' +
-      '<div class="field"><label for="adm-ptg">Group games to</label><input id="adm-ptg" type="number" min="5" max="51" value="' + evSetting(ev, "points_to_group", 21) + '"></div>' +
-      '<div class="field"><label for="adm-bog">Group format</label><select id="adm-bog">' +
+      '<div class="field"><label for="adm-ptg">Group games to</label><input id="adm-ptg" type="number" min="5" max="51" oninput="updateTimeEstimate()" value="' + evSetting(ev, "points_to_group", 21) + '"></div>' +
+      '<div class="field"><label for="adm-bog">Group format</label><select id="adm-bog" onchange="updateTimeEstimate()">' +
         [1,3,5].map(n => '<option value="' + n + '"' + (bog == n ? ' selected' : '') + '>Best of ' + n + '</option>').join("") + '</select></div>' +
-      '<div class="field"><label for="adm-ptk">Knockout games to</label><input id="adm-ptk" type="number" min="5" max="51" value="' + evSetting(ev, "points_to_knockout", 21) + '"></div>' +
-      '<div class="field"><label for="adm-bok">Knockout format</label><select id="adm-bok">' +
+      '<div class="field"><label for="adm-ptk">Knockout games to</label><input id="adm-ptk" type="number" min="5" max="51" oninput="updateTimeEstimate()" value="' + evSetting(ev, "points_to_knockout", 21) + '"></div>' +
+      '<div class="field"><label for="adm-bok">Knockout format</label><select id="adm-bok" onchange="updateTimeEstimate()">' +
         [1,3,5].map(n => '<option value="' + n + '"' + (bok == n ? ' selected' : '') + '>Best of ' + n + '</option>').join("") + '</select></div>' +
       '</div><div class="fieldrow">' +
-      '<div class="field"><label for="adm-ksize">Knockout size</label><select id="adm-ksize">' +
+      '<div class="field"><label for="adm-ksize">Knockout size</label><select id="adm-ksize" onchange="updateTimeEstimate()">' +
         ['auto',4,8,16,32].map(v => '<option value="' + v + '"' + (ksize == String(v) ? ' selected' : '') + '>' + (v === 'auto' ? 'Auto' : v + ' teams') + '</option>').join("") + '</select></div>' +
-      '<div class="field"><label for="adm-adv">Advance per group (auto)</label><input id="adm-adv" type="number" min="1" max="4" value="' + evSetting(ev, "advance_per_group", 2) + '"></div>' +
+      '<div class="field"><label for="adm-adv">Advance per group (auto)</label><input id="adm-adv" type="number" min="1" max="4" oninput="updateTimeEstimate()" value="' + evSetting(ev, "advance_per_group", 2) + '"></div>' +
       '</div>' +
       '<div class="field"><label>Ending a game</label><div style="padding:2px 0 0">' +
       '<label style="display:inline-flex;align-items:center;gap:6px;font-weight:600">' +
-      '<input type="checkbox" id="adm-wb2"' + (evSetting(ev, "win_by_two", false) ? ' checked' : '') + '> Win by 2</label>' +
+      '<input type="checkbox" onchange="updateTimeEstimate()" id="adm-wb2"' + (evSetting(ev, "win_by_two", false) ? ' checked' : '') + '> Win by 2</label>' +
       '</div><p class="note" style="margin:2px 0 0">Off: the first team to the target wins, even at ' +
       (evSetting(ev, "points_to_group", 21) - 1) + '-' + evSetting(ev, "points_to_group", 21) +
       ', which keeps matches to a predictable length on shared courts. On: play carries past the target until someone leads by 2.</p></div>' +
@@ -2066,11 +2114,13 @@ function renderAdmin(){
         let s = '';
         for(let cn = 1; cn <= courtsCount(); cn++){
           const on = allowed.length === 0 || allowed.indexOf(cn) !== -1;
-          s += '<label style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 6px 0;font-weight:600"><input type="checkbox" class="adm-court" value="' + cn + '"' + (on ? ' checked' : '') + '> Court ' + cn + '</label>';
+          s += '<label style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 6px 0;font-weight:600"><input type="checkbox" onchange="updateTimeEstimate()" class="adm-court" value="' + cn + '"' + (on ? ' checked' : '') + '> Court ' + cn + '</label>';
         }
         return s;
       })() +
       '</div><p class="note" style="margin:2px 0 0">Leave all ticked to share every court (weighted by how many matches each event still has). Tick only some to keep this event on just those courts.</p></div>' +
+      '<div class="field"><label>How long this will take</label>' +
+      '<p class="note" id="adm-estimate" style="margin:2px 0 0">' + estimateText(ev) + '</p></div>' +
       '<button class="btn small secondary" onclick="saveEventSettings()">Save settings</button>' +
       '<p class="note" style="margin-top:8px">Changes apply right away. "Auto" knockout size takes the top ' + evSetting(ev, "advance_per_group", 2) + ' per group and fills to a full bracket with best next-placed teams; a fixed size does the same math for that exact number.</p>';
 
@@ -2078,7 +2128,7 @@ function renderAdmin(){
       h += '<div class="divider"></div><h4>' + (hasMatches ? 'Start over with a new list' : '2 · Draw groups') + '</h4>';
       h += '<p class="note">Paste entrants one per line. For doubles use one line per team, e.g. "Maya &amp; Owen".</p>';
       h += '<div class="field"><label for="adm-teams">Entrants (one per line)</label><textarea id="adm-teams" placeholder="One team or player per line"></textarea></div>' +
-        '<div class="fieldrow"><div class="field"><label for="adm-gsize">Target group size</label><input id="adm-gsize" type="number" min="3" max="10" value="' + evSetting(ev, "group_size", 6) + '"></div>' +
+        '<div class="fieldrow"><div class="field"><label for="adm-gsize">Target group size</label><input id="adm-gsize" type="number" min="3" max="10" oninput="updateTimeEstimate()" value="' + evSetting(ev, "group_size", 6) + '"></div>' +
         '<div class="field" style="display:flex;align-items:flex-end"><label style="display:flex;align-items:center;gap:6px;margin:0;padding-bottom:10px"><input type="checkbox" id="adm-shuffle" checked> Random draw</label></div></div>' +
         '<button class="btn small secondary" onclick="previewSetup()">Preview</button> ' +
         (hasMatches
@@ -2828,6 +2878,44 @@ function readEventSettings(ev){
     courts: courts
   });
   return bad ? { error: bad } : out;
+}
+/* The sentence under the format fields. Prices the settings currently on
+   screen (not the saved ones) and, when the group stage is multi-game, says
+   what one game would cost instead: organisers reach for best of 3 without
+   seeing that it is most of an extra afternoon. */
+function estimateText(ev, o){
+  const est = eventDurationEstimate(ev, o);
+  if (!est.matches) return "Add entrants and draw the groups to see an estimate.";
+  const bits = [];
+  if (est.group) bits.push(est.group + " group match" + (est.group === 1 ? "" : "es"));
+  if (est.ko) bits.push(est.ko + " knockout match" + (est.ko === 1 ? "" : "es"));
+  let s = "<b>About " + fmtHours(est.minutes) + " of play</b> on " + est.courts +
+    " court" + (est.courts === 1 ? "" : "s") + ": " + bits.join(" and ") + ".";
+  const bg = o ? o.boGroup : parseInt(evSetting(ev, "best_of_group", 1), 10) || 1;
+  if (bg > 1){
+    const one = eventDurationEstimate(ev, Object.assign({}, o, { boGroup: 1 }));
+    const saved = est.minutes - one.minutes;
+    if (saved > 20) s += " One game in the group stage instead: about " +
+      fmtHours(one.minutes) + ", saving roughly " + fmtHours(saved) + ".";
+  }
+  return s + " <span style=\"opacity:.75\">Rough: it assumes courts stay busy and counts a short changeover between matches.</span>";
+}
+/* Repriced live as the fields change, without a re-render that would steal
+   focus from the input being typed into. */
+function updateTimeEstimate(){
+  const el = document.getElementById("adm-estimate");
+  const ev = eventById(state.adminEventId);
+  if (!el || !ev) return;
+  const num = id => { const x = document.getElementById(id); const v = x ? parseInt(x.value, 10) : NaN; return Number.isFinite(v) ? v : null; };
+  const ck = id => { const x = document.getElementById(id); return x ? x.checked : null; };
+  const picked = Array.from(document.querySelectorAll(".adm-court")).filter(b => b.checked).length;
+  const ks = document.getElementById("adm-ksize");
+  el.innerHTML = estimateText(ev, {
+    pointsGroup: num("adm-ptg"), pointsKo: num("adm-ptk"),
+    boGroup: num("adm-bog"), boKo: num("adm-bok"),
+    winBy2: ck("adm-wb2"), advance: num("adm-adv"), groupSize: num("adm-gsize"),
+    koSize: ks ? ks.value : null, courts: picked || null,
+  });
 }
 async function saveEventSettings(){
   const ev = eventById(state.adminEventId);
