@@ -710,13 +710,22 @@ function weavePending(db){
   const lists = act.map(ev => {
     let ms = db.matches
       .filter(m => m.event_id === ev.id && m.status === "scheduled" && m.court == null && m.entrant1_id && m.entrant2_id);
-    /* Americano rotates partners every round, so everyone plays in every round.
-       Holding the next round back until the current one is finished is what
-       stops a player being called to a second court. Mirrors the SQL. */
+    /* Americano gate (mirrors the SQL): a match may take a court when none of
+       its four players are on a court and it is the earliest unplayed match for
+       each of them. A player is never called to two courts, and with a box
+       schedule each court runs its rounds back to back. */
     if (ev.settings && ev.settings.format === "americano"){
-      const live = db.matches.filter(m => m.event_id === ev.id && m.status === "scheduled");
-      const cur = Math.min(...live.map(m => m.round == null ? Infinity : m.round));
-      if (isFinite(cur)) ms = ms.filter(m => m.round === cur);
+      const sched = db.matches.filter(m => m.event_id === ev.id && m.status === "scheduled");
+      const nm = id => { const e = db.entrants.find(x => x.id === id); return e ? e.name : ""; };
+      const playersOf = m => splitPair(nm(m.entrant1_id)).concat(splitPair(nm(m.entrant2_id)));
+      const busy = new Set();
+      sched.filter(m => m.court != null).forEach(m => playersOf(m).forEach(p => busy.add(p)));
+      ms = ms.filter(m => {
+        const P = playersOf(m);
+        if (P.some(p => busy.has(p))) return false;
+        return !sched.some(g => g.id !== m.id && g.play_order < m.play_order &&
+          playersOf(g).some(p => P.includes(p)));
+      });
     }
     return ms.sort((a, b) => a.play_order - b.play_order);
   });
@@ -1732,7 +1741,10 @@ function eventLabel(ev){
 }
 function renderEventTabs(){
   const cur = currentEvent();
-  const evs = data.events.slice().sort((a, b) => a.sort_order - b.sort_order);
+  let evs = data.events.slice().sort((a, b) => a.sort_order - b.sort_order);
+  /* Americano has no knockout, it is decided on total points, so it never
+     appears as an option under the Bracket tab. */
+  if (state.view === "bracket") evs = evs.filter(e => !isAmericano(e));
   return '<div class="subtabs evtabs" role="tablist">' + evs.map(ev =>
     '<button class="subtab" aria-current="' + (cur && ev.id === cur.id) + '" onclick="setEvent(\'' + ev.id + '\')">' +
     esc(ev.name) + (ev.active ? ' <span class="livedot" aria-hidden="true">●</span>' : '') + '</button>').join("") +
@@ -1853,26 +1865,18 @@ function renderBoard(){
     return h;
   }
 
-  /* With the switch off this is the board exactly as it was before the
-     Americano division existed: every court, main draw only. A court the
-     other division is using still shows as busy rather than free, so nobody
-     tries to drop a match onto an occupied court. */
+  /* Switch off: the board is exactly the pre-Americano main draw. The courts
+     the Americano division runs on are simply not part of this board at all,
+     so no Americano match, card or callout appears here. */
+  const amerCourts = amer && amer.settings && Array.isArray(amer.settings.courts) ? amer.settings.courts : [];
   const inView = m => act.some(e => e.id === m.event_id);
   const on = onCourtMatches().filter(inView);
   const q = pendingQueue().filter(inView);
-  const busyElsewhere = onCourtMatches().filter(m => !inView(m));
   h += '<div class="section-h"><h2>On court</h2></div>';
   h += '<div class="courtgrid">';
   for(let c = 1; c <= courtsCount(); c++){
+    if (amerCourts.includes(c)) continue;
     const m = on.find(x => x.court === c);
-    const other = busyElsewhere.find(x => x.court === c);
-    if (!m && other){
-      const oev = eventById(other.event_id);
-      h += '<div class="courtcard idle"><div class="chead"><span class="cnum">Court ' + c + '</span></div>' +
-        '<div class="team">In use</div><div class="note" style="margin-top:4px">' +
-        esc(oev ? oev.name : "Another division") + '</div></div>';
-      continue;
-    }
     if (m){
       const ev = eventById(m.event_id);
       h += '<button class="courtcard" onclick="openMatch(\'' + m.id + '\')">' +
@@ -2132,6 +2136,11 @@ const bkChampTbd = '<div class="bkchamp-card tbd"><div class="bkchamp-trophy">�
 function renderBracket(){
   const ev = currentEvent();
   if (!ev) return '<div class="empty">No events yet.</div>';
+  if (isAmericano(ev)){
+    return '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + '</span>' +
+      renderEventTabs() +
+      '<div class="empty">' + esc(ev.name) + ' has no bracket. It is decided on total points won, so the Standings tab is the result.</div>';
+  }
   const ko = data.matches.filter(m => m.event_id === ev.id && m.stage === "knockout");
 
   /* Projected bracket: before the desk confirms the knockout, show the seeds. */

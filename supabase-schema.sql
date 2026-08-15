@@ -251,16 +251,26 @@ begin
                / count(*) over (partition by m2.event_id) as frac
       from nairobi_matches m2
       join nairobi_events e on e.id = m2.event_id and e.active
+      join nairobi_entrants ea on ea.id = m2.entrant1_id
+      join nairobi_entrants eb on eb.id = m2.entrant2_id
       where m2.status = 'scheduled' and m2.court is null
         and m2.entrant1_id is not null and m2.entrant2_id is not null
-        -- Americano rotates partners every round, so the same players appear in
-        -- every round. Without this the queue would drop round r+1 onto a court
-        -- that freed up early while those same players are still finishing
-        -- round r, calling someone to two courts at once.
+        -- Americano rotates partners every round, so a player appears in every
+        -- round. A match may take a court only when none of its four players are
+        -- on a court now and it is their earliest unplayed match (play_order is
+        -- round-major). No one is called to two courts; with a box schedule each
+        -- court can still run its rounds back to back.
         and (
           coalesce(e.settings ->> 'format', '') <> 'americano'
-          or m2.round = (select min(m3.round) from nairobi_matches m3
-                         where m3.event_id = m2.event_id and m3.status = 'scheduled')
+          or not exists (
+            select 1 from nairobi_matches g
+            join nairobi_entrants ga on ga.id = g.entrant1_id
+            join nairobi_entrants gb on gb.id = g.entrant2_id
+            where g.event_id = m2.event_id and g.status = 'scheduled' and g.id <> m2.id
+              and (g.court is not null or g.play_order < m2.play_order)
+              and (string_to_array(ga.name, ' & ') || string_to_array(gb.name, ' & '))
+                  && (string_to_array(ea.name, ' & ') || string_to_array(eb.name, ' & '))
+          )
         )
     ) q
     join nairobi_events ev on ev.id = q.event_id
