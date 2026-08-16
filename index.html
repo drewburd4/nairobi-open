@@ -69,8 +69,12 @@ input,textarea,select{font:inherit; color:var(--ink)}
 
 /* ---------- header ---------- */
 .topbar{position:sticky; top:0; z-index:30; background:var(--bg); border-bottom:1px solid var(--line)}
-.masthead{max-width:820px; margin:0 auto; padding:14px 14px 0; display:flex; align-items:baseline; justify-content:space-between; gap:10px}
+.masthead{max-width:820px; margin:0 auto; padding:14px 14px 0; display:flex; align-items:center; justify-content:space-between; gap:10px}
+.mast-left{display:flex; align-items:center; gap:10px; min-width:0}
+.clublogo{width:30px; height:30px; flex:none; display:block; color:var(--accent)}
 .wordmark{font-weight:900; font-size:19px; letter-spacing:.05em; text-transform:uppercase}
+.langbtn{flex:none; padding:5px 11px; font-weight:800; font-size:12.5px; letter-spacing:.06em;
+  color:var(--muted); background:var(--card); border:1px solid var(--line); border-radius:999px}
 .stagechip{font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); white-space:nowrap}
 .tabs{max-width:820px; margin:0 auto; padding:8px 14px 0; display:flex; gap:2px; overflow-x:auto}
 .tab{padding:8px 12px 10px; font-weight:700; font-size:14px; color:var(--muted); border-bottom:3px solid transparent; white-space:nowrap; border-radius:6px 6px 0 0}
@@ -1435,6 +1439,7 @@ const state = {
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null, assignCourt: null, offCourtId: null,
   setupPreview: null, adminEventId: null, loadError: null,
   showAllQueue: false, showRedraw: false, pendingRender: false, division: "main",
+  lang: safeLocal("pb_lang") === "sw" ? "sw" : "en",
   dismissedCalled: {}, contacts: {}
 };
 
@@ -1477,7 +1482,85 @@ function loadDismissedCalled(){
     return keep;
   }catch(e){ return {}; }
 }
+/* ---------- Swahili ---------- */
+/* Player-facing strings only; the Admin tab stays English for the desk. The
+   translation runs AFTER render as a text-node pass over the committed DOM,
+   so the hundreds of string-built templates stay untouched: an exact match
+   or a pattern swaps the node's text, anything unknown stays English, and
+   names never change because only mapped phrases are replaced. */
+const SW_EXACT = {
+  "Courts": "Viwanja", "Schedule": "Ratiba", "Standings": "Msimamo", "Bracket": "Mchujo",
+  "On court": "Uwanjani sasa", "Up next": "Zinazofuata", "Then": "Kisha", "Coming up": "Zinazokuja",
+  "Postponed": "Imeahirishwa", "Free": "Wazi", "In use": "Inatumika",
+  "Tap to enter the score": "Gusa kuweka matokeo", "First up here": "Ya kwanza hapa",
+  "Tap to place a match": "Gusa kuweka mechi hapa",
+  "Waiting for a free court": "Inasubiri uwanja", "No match ready yet": "Hakuna mechi iliyo tayari",
+  "Show fewer": "Onyesha chache", "Close": "Funga", "Cancel": "Ghairi",
+  "Nothing is running right now.": "Hakuna kinachoendelea kwa sasa.",
+  "All rounds played": "Raundi zote zimechezwa",
+  "Next match starts once its players are off court": "Mechi inayofuata itaanza wachezaji wakitoka uwanjani",
+  "Waiting lower in the queue": "Inasubiri chini kwenye foleni",
+  "Up any moment now.": "Inaingia wakati wowote sasa.",
+  "Total points won": "Jumla ya pointi", "Player": "Mchezaji", "Winner": "Mshindi",
+  "done": "imekamilika", "on court": "uwanjani", "running": "inaendelea",
+  "Score already recorded. Spot a mistake? Ask at the desk and an organizer can fix it.":
+    "Matokeo yameshaingizwa. Umeona kosa? Uliza dawati na mratibu atarekebisha.",
+  "Postponed: waiting lower in the queue. When the match is called, it appears on the Courts tab and the score can be entered. Anything wrong? Ask at the desk.":
+    "Imeahirishwa: inasubiri chini kwenye foleni. Mechi ikiitwa itaonekana kwenye Viwanja na matokeo yataweza kuwekwa. Kuna tatizo? Uliza dawati.",
+  "Waiting for a court. When the match is called, it appears on the Courts tab and the score can be entered. Anything wrong? Ask at the desk.":
+    "Inasubiri uwanja. Mechi ikiitwa itaonekana kwenye Viwanja na matokeo yataweza kuwekwa. Kuna tatizo? Uliza dawati.",
+  "A look ahead: this is how the courts will stand when play starts (the event turns itself on 5 minutes before). Tap a match for its estimated time; the full order is on the Schedule tab.":
+    "Mtazamo wa mbele: hivi ndivyo viwanja vitakavyokuwa mchezo ukianza (shindano hujiwasha dakika 5 kabla). Gusa mechi kuona makadirio ya muda; mpangilio kamili uko kwenye Ratiba.",
+  "(rough, updates as matches finish)": "(makadirio; hubadilika mechi zikimalizika)",
+  "Score saved": "Matokeo yamehifadhiwa", "Walkover recorded": "Walkover imerekodiwa",
+  "A score is already in. Ask the desk to change it.": "Matokeo yameshaingia. Uliza dawati kuyabadilisha."
+};
+const SW_PATTERNS = [
+  [/^Court (\d+)$/, "Uwanja $1"],
+  [/^Round (\d+)$/, "Raundi $1"],
+  [/^Game (\d+)$/, "Gemu $1"],
+  [/^Group ([A-Z])$/, "Kundi $1"],
+  [/^Estimated wait: about (\d+) minutes\.$/, "Kusubiri: kama dakika $1."],
+  [/^Estimated wait: about (\d+)h (\d+)m\.$/, "Kusubiri: kama saa $1 na dakika $2."],
+  [/^Estimated wait: about (\d+)h\.$/, "Kusubiri: kama saa $1."],
+  [/^Estimated play time: around (.+)\.$/, "Inakadiriwa kuchezwa karibu $1."],
+  [/^(\d+) of (\d+) matches played · first to (\d+)$/, "Mechi $1 kati ya $2 zimechezwa · wa kwanza kufika $3"],
+  [/^(\d+) more matches just called$/, "Mechi $1 zaidi zimeitwa"],
+  [/^Show all matches \((\d+) waiting\)$/, "Onyesha mechi zote ($1 zinasubiri)"],
+  [/^(.+): (\d+) of (\d+) group matches played(, knockout underway)?$/, "$1: mechi $2 kati ya $3 za makundi zimechezwa"],
+  [/^On Court (\d+)$/, "Uwanja $1"],
+  [/^(.+) · running$/, "$1 · inaendelea"],
+  [/^(.+): starts around (.+)\. Courts show here about 5 minutes before; each match has an estimated time on the Schedule tab\.$/,
+    "$1: inaanza karibu $2. Viwanja vitaonekana hapa dakika 5 kabla; kila mechi ina makadirio ya muda kwenye Ratiba."]
+];
+function swText(s){
+  if (state.lang !== "sw" || !s) return s;
+  const t = s.trim();
+  if (!t) return s;
+  if (SW_EXACT[t] != null) return s.replace(t, SW_EXACT[t]);
+  for(const [re, rep] of SW_PATTERNS){
+    if (re.test(t)) return s.replace(t, t.replace(re, rep));
+  }
+  return s;
+}
+function applyLanguage(root){
+  if (state.lang !== "sw" || !root) return;
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach(n => {
+    const v = swText(n.nodeValue);
+    if (v !== n.nodeValue) n.nodeValue = v;
+  });
+}
+function toggleLang(){
+  state.lang = state.lang === "sw" ? "en" : "sw";
+  safeLocal("pb_lang", state.lang);
+  renderedHtml = null;   /* force a fresh commit so English comes back clean */
+  render();
+}
 function toast(msg){
+  msg = swText(msg);
   const t = document.createElement("div");
   t.className = "toast"; t.textContent = msg;
   document.body.appendChild(t);
@@ -1774,6 +1857,7 @@ function commitHtml(app, html){
   if (html === renderedHtml) return false;
   app.innerHTML = html;
   renderedHtml = html;
+  applyLanguage(app);
   return true;
 }
 function render(){
@@ -1805,7 +1889,19 @@ function render(){
   ];
   let html = '<div class="topbar">';
   if (store.mode === "demo") html += '<div class="demo-banner">Demo with sample data. Changes reset on refresh. Admin PIN: ' + esc(store.demoPin) + '</div>';
-  html += '<div class="masthead"><div class="wordmark">' + esc(data.tournament.name) + '</div></div>';
+  /* Club badge, top left. A placeholder pickleball mark until the real
+     Nairobi Pickleball Club logo file lands; swap the SVG for an <img> with
+     a data: URI then. */
+  html += '<div class="masthead"><div class="mast-left">' +
+    '<svg class="clublogo" viewBox="0 0 40 40" aria-label="Nairobi Pickleball Club" role="img">' +
+    '<circle cx="20" cy="20" r="18.5" fill="none" stroke="currentColor" stroke-width="2.6"/>' +
+    '<circle cx="20" cy="20" r="10.5" fill="none" stroke="currentColor" stroke-width="2.2"/>' +
+    '<circle cx="20" cy="15.5" r="1.7" fill="currentColor"/><circle cx="15.8" cy="21.5" r="1.7" fill="currentColor"/>' +
+    '<circle cx="24.2" cy="21.5" r="1.7" fill="currentColor"/><circle cx="20" cy="25.5" r="1.4" fill="currentColor"/>' +
+    '</svg>' +
+    '<div class="wordmark">' + esc(data.tournament.name) + '</div></div>' +
+    '<button class="langbtn" onclick="toggleLang()" aria-label="Badilisha lugha">' +
+    (state.lang === "sw" ? "EN" : "SW") + '</button></div>';
   html += '<nav class="tabs">' + tabs.map(([id, label]) =>
     '<button class="tab" aria-current="' + (state.view === id) + '" onclick="setView(\'' + id + '\')">' + label + '</button>'
   ).join("") + '</nav>';
