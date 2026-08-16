@@ -1924,23 +1924,32 @@ function renderDivisionTabs(){
     (on ? '\u2190 Back to the main draw' : 'Show ' + esc(amer.name) + ' only') +
     '</button></div>';
 }
-/* Events that will preview on the Courts tab: not started, main draw, with a
-   start time inside the next 24 hours and matches ready to play. */
-function upcomingWithin24h(){
+/* Events that may preview on the Courts tab. The tournament's opening events
+   (the earliest start time on the books) show a full day ahead; every later
+   batch holds until 12 hours before its start. Only the next batch to play
+   (starts within an hour of the earliest upcoming) shows at all, so an
+   afternoon event never previews alongside the morning one it waits behind. */
+function upcomingSoon(){
   const now = Date.now();
-  return data.events.filter(e => !e.active && !isAmericano(e) &&
-    eventStartDate(e) &&
-    eventStartDate(e).getTime() > now &&
-    eventStartDate(e).getTime() <= now + 24 * 3600000 &&
-    data.matches.some(m => m.event_id === e.id && m.status === "scheduled" && m.entrant1_id && m.entrant2_id))
-    .sort((a, b) => eventStartDate(a) - eventStartDate(b));
+  const withStart = data.events.filter(e => eventStartDate(e));
+  if (!withStart.length) return [];
+  const minStart = Math.min.apply(null, withStart.map(e => eventStartDate(e).getTime()));
+  const eligible = withStart.filter(e => {
+    if (e.active || isAmericano(e)) return false;
+    const t = eventStartDate(e).getTime();
+    if (t <= now) return false;
+    if (t - now > (t === minStart ? 24 : 12) * 3600000) return false;
+    return data.matches.some(m => m.event_id === e.id && m.status === "scheduled" && m.entrant1_id && m.entrant2_id);
+  }).sort((a, b) => eventStartDate(a) - eventStartDate(b));
+  if (!eligible.length) return [];
+  const first = eventStartDate(eligible[0]).getTime();
+  return eligible.filter(e => eventStartDate(e).getTime() <= first + 3600000);
 }
-/* Tomorrow's board today: run the real court-assignment logic on a copy of
-   the data with the upcoming events switched on, and show the courts and
-   queue exactly as they will stand when play starts. Only rendered while
-   nothing is running on the main courts, so it can never contradict a live
-   board: while today's event still plays, tomorrow stays a one-line note, and
-   pausing for the evening swaps this preview in. */
+/* The next batch's board ahead of time: run the real court-assignment logic
+   on a copy of the data with the upcoming events switched on, and show the
+   courts and queue exactly as they will stand when play starts. Only rendered
+   while nothing is running on the main courts, so it can never contradict a
+   live board: pausing the finished event is what swaps this preview in. */
 function renderCourtsPreview(soon){
   const sim = JSON.parse(JSON.stringify({ tournament: data.tournament, events: data.events, entrants: data.entrants, matches: data.matches }));
   const ids = new Set(soon.map(e => e.id));
@@ -1989,15 +1998,9 @@ function renderBoard(){
   let h = '<span class="print-title">' + esc(data.tournament.name) + ' · Courts</span>' + renderDivisionTabs();
 
   if (!act.length){
-    const soon = upcomingWithin24h();
+    const soon = upcomingSoon();
     if (soon.length){
       h += renderCourtsPreview(soon);
-      const soonIds = new Set(soon.map(e => e.id));
-      const later = data.events.filter(e => !e.active && !soonIds.has(e.id) && evSetting(e, "schedule_note", ""));
-      if (later.length){
-        h += '<div class="boardnotes">' + later.slice(0, 8).map(e =>
-          '<span class="note">' + esc(e.name) + ' · ' + esc(evSetting(e, "schedule_note", "")) + '</span>').join('') + '</div>';
-      }
     } else {
       h += '<div class="empty">Nothing is running right now.';
       const upcoming = data.events.filter(e => !e.active && evSetting(e, "schedule_note", ""));
@@ -2076,18 +2079,6 @@ function renderBoard(){
     const done = data.matches.filter(m => m.event_id === ev.id && m.stage === "group" && m.status === "played").length;
     const ko = data.matches.filter(m => m.event_id === ev.id && m.stage === "knockout").length;
     h += '<span class="note">' + esc(ev.name) + ': ' + done + ' of ' + total + ' group matches played' + (ko ? ', knockout underway' : '') + '</span>';
-  }
-  /* Events that have not started yet but have a planned time: say when, so a
-     player opening the board a day early knows where their draw will appear
-     and that per-match estimated times are on the Schedule tab. */
-  const upcoming = data.events
-    .filter(e => !e.active && eventStartDate(e) && eventStartDate(e).getTime() > Date.now() - 3600000 &&
-      data.matches.some(m => m.event_id === e.id && m.status === "scheduled"))
-    .sort((a, b) => eventStartDate(a) - eventStartDate(b));
-  for(const ev of upcoming){
-    h += '<span class="note">' + esc(ev.name) + ': starts around ' +
-      eventStartDate(ev).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) +
-      '. Courts show here about 5 minutes before; each match has an estimated time on the Schedule tab.</span>';
   }
   h += '</div>';
   return h;
@@ -2541,7 +2532,7 @@ function renderAdmin(){
     'While unlocked: tap any match anywhere (Courts, Schedule, a team in Standings, or the Bracket) to fix or clear its score, enter a walkover, or postpone. ' +
     'Players can only enter a score while a match is on a court; admins can score anything from anywhere. ' +
     'An on-court match can be sent back with "Take off court": either the next match in line takes its court, or you pick the one to bring on. ' +
-    'Pause the finished event in the evening: with nothing running, the Courts tab previews the next day\'s courts for any event starting within 24 hours. ' +
+    'Pause the finished event: with nothing running, the Courts tab previews the next batch\'s courts (the tournament\'s opening events a day ahead, every later batch from 12 hours before its start). ' +
     'The Courts tab has Postpone on the queue and Play next on postponed matches, and each waiting row\'s Move button asks for the queue place it should take. ' +
     'On a "go to court" banner, ✓ On court dismisses it for everyone; a plain tap hides it only on that phone. ' +
     'On the Bracket tab, unplayed matches have an Edit teams link for manual fixes. ' +
