@@ -1489,19 +1489,28 @@ function loadDismissedCalled(){
   }catch(e){ return {}; }
 }
 /* ---------- Swahili ---------- */
-/* Player-facing strings only; the Admin tab stays English for the desk. The
+/* Covers every surface, Admin included (the desk runs in Swahili too). The
    translation runs AFTER render as a text-node pass over the committed DOM,
    so the hundreds of string-built templates stay untouched: an exact match
    or a pattern swaps the node's text, anything unknown stays English, and
-   names never change because only mapped phrases are replaced. */
+   names never change because only mapped phrases are replaced. Composed
+   lines fall back to translating each " · " segment (and each line of a
+   multi-line block) on its own. confirm/prompt/error strings go through
+   swText at the call site, since those never pass through the DOM walker. */
 const SW_EXACT = {
   "Courts": "Viwanja", "Schedule": "Ratiba", "Standings": "Msimamo", "Bracket": "Mchujo",
   "On court": "Uwanjani sasa", "Up next": "Zinazofuata", "Then": "Kisha", "Coming up": "Zinazokuja",
   "Postponed": "Imeahirishwa", "Free": "Wazi", "In use": "Inatumika",
+  "All": "Zote", "Knockout": "Mtoano", "Print": "Chapisha", "Find a name": "Tafuta jina",
+  "Loading…": "Inapakia…", "Retry": "Jaribu tena",
+  "Could not load tournament data.": "Imeshindwa kupakia data ya mashindano.",
+  "Showing the last update. Trying to reconnect…": "Inaonyesha sasisho la mwisho. Inajaribu kuunganisha tena…",
   "Tap to enter the score": "Gusa kuweka matokeo", "First up here": "Ya kwanza hapa",
   "Tap to place a match": "Gusa kuweka mechi hapa",
   "Waiting for a free court": "Inasubiri uwanja", "No match ready yet": "Hakuna mechi iliyo tayari",
   "Show fewer": "Onyesha chache", "Close": "Funga", "Cancel": "Ghairi",
+  "Save score": "Hifadhi matokeo",
+  "Match result": "Matokeo ya mechi", "Upcoming match": "Mechi ijayo", "Enter score": "Weka matokeo",
   "Nothing is running right now.": "Hakuna kinachoendelea kwa sasa.",
   "All rounds played": "Raundi zote zimechezwa",
   "Next match starts once its players are off court": "Mechi inayofuata itaanza wachezaji wakitoka uwanjani",
@@ -1509,6 +1518,21 @@ const SW_EXACT = {
   "Up any moment now.": "Inaingia wakati wowote sasa.",
   "Total points won": "Jumla ya pointi", "Player": "Mchezaji", "Winner": "Mshindi",
   "done": "imekamilika", "on court": "uwanjani", "running": "inaendelea",
+  "complete": "imekamilika", "Complete": "Imekamilika",
+  "Team": "Timu", "Pld": "Mechi", "Won": "Ushindi", "Points": "Pointi", "Diff": "Tofauti",
+  "Final": "Fainali", "Semifinals": "Nusu fainali", "Quarterfinals": "Robo fainali",
+  "Champion": "Bingwa", "To be decided": "Bado hajajulikana",
+  "TBD": "Itajulikana", "Opponent TBD": "Mpinzani atajulikana", "To play": "Bado kuchezwa",
+  "No events yet.": "Hakuna mashindano bado.",
+  "No matches found.": "Hakuna mechi zilizopatikana.",
+  "No knockout matches yet.": "Hakuna mechi za mtoano bado.",
+  "No players yet.": "Hakuna wachezaji bado.",
+  "Not enough teams yet.": "Bado hakuna timu za kutosha.",
+  "This division has no rounds yet.": "Shindano hili halina raundi bado.",
+  "← Back to the main draw": "← Rudi kwenye droo kuu",
+  "tap a team for details": "gusa timu kuona maelezo",
+  "Every point you win counts, whoever you are partnered with":
+    "Kila pointi unayoshinda inahesabika, bila kujali mwenzako ni nani",
   "Score already recorded. Spot a mistake? Ask at the desk and an organizer can fix it.":
     "Matokeo yameshaingizwa. Umeona kosa? Uliza dawati na mratibu atarekebisha.",
   "Postponed: waiting lower in the queue. When the match is called, it appears on the Courts tab and the score can be entered. Anything wrong? Ask at the desk.":
@@ -1519,13 +1543,179 @@ const SW_EXACT = {
     "Mtazamo wa mbele: hivi ndivyo viwanja vitakavyokuwa mchezo ukianza (shindano hujiwasha dakika 5 kabla). Gusa mechi kuona makadirio ya muda; mpangilio kamili uko kwenye Ratiba.",
   "(rough, updates as matches finish)": "(makadirio; hubadilika mechi zikimalizika)",
   "Score saved": "Matokeo yamehifadhiwa", "Walkover recorded": "Walkover imerekodiwa",
-  "A score is already in. Ask the desk to change it.": "Matokeo yameshaingia. Uliza dawati kuyabadilisha."
+  "A score is already in. Ask the desk to change it.": "Matokeo yameshaingia. Uliza dawati kuyabadilisha.",
+  "One entry per match: after that, corrections go through the desk.":
+    "Matokeo huwekwa mara moja tu kwa kila mechi: baada ya hapo, marekebisho hupitia dawati.",
+  "Winners report the score. One entry per match: after that, corrections go through the desk.":
+    "Washindi ndio huweka matokeo. Mara moja tu kwa kila mechi: baada ya hapo, marekebisho hupitia dawati.",
+  "Matches run in this order, group A first, so everyone plays round 1 before round 2 starts. Played matches show their scores; tap a match for details. A score can be entered while the match is on a court, and corrections go through the desk.":
+    "Mechi huchezwa kwa mpangilio huu, kundi A kwanza, ili kila mtu acheze raundi 1 kabla raundi 2 haijaanza. Mechi zilizochezwa huonyesha matokeo yake; gusa mechi kuona maelezo. Matokeo yanaweza kuwekwa mechi ikiwa uwanjani, na marekebisho hupitia dawati.",
+  "Tiebreakers follow the USA Pickleball order: wins, then head to head between the tied teams, then point difference, then head to head point difference. Teams still level after that are split on points scored. A walkover counts as a win but adds no points either way.":
+    "Kuvunja sare hufuata mpangilio wa USA Pickleball: ushindi, kisha mechi za ana kwa ana kati ya timu zilizofungana, kisha tofauti ya pointi, kisha tofauti ya pointi ana kwa ana. Timu zikibaki sawa hutenganishwa kwa pointi zilizofungwa. Walkover huhesabiwa kama ushindi lakini haiongezi pointi upande wowote.",
+  "Winners move to the right, round by round, toward the champion. Tap a match to see or enter its result.":
+    "Washindi husonga kulia, raundi kwa raundi, kuelekea ubingwa. Gusa mechi kuona au kuweka matokeo yake.",
+  /* Score-entry errors, matching both the client checks and the server's
+     wording exactly, so whichever side rejects, the message lands in Swahili. */
+  "Enter both scores as whole numbers.": "Weka alama zote mbili kama namba kamili.",
+  "Scores can't be tied.": "Alama haziwezi kuwa sare.",
+  "Scores cannot be tied.": "Alama haziwezi kuwa sare.",
+  "The winner has to lead by 2.": "Mshindi lazima aongoze kwa 2.",
+  "Enter the game scores in order.": "Weka alama za gemu kwa mpangilio.",
+  "The match was already decided; remove the extra games.": "Mechi ilishaamuliwa; ondoa gemu za ziada.",
+  "Match not found.": "Mechi haijapatikana.",
+  "Teams for this match are not decided yet.": "Timu za mechi hii hazijapangwa bado.",
+  "This match is not on a court yet. Scores are entered from the Courts tab once it is called; otherwise ask the desk.":
+    "Mechi hii bado haiko uwanjani. Matokeo huwekwa kupitia ukurasa wa Viwanja mechi ikiitwa; vinginevyo uliza dawati.",
+  "Something went wrong.": "Hitilafu imetokea.",
+  "Network error.": "Hitilafu ya mtandao.",
+  "vs": "dhidi ya",
+  /* ----- Admin ----- */
+  "Admin": "Msimamizi", "Unlock": "Fungua", "Wrong PIN.": "PIN si sahihi.",
+  "Run the tournament from here: start events, fix scores, postpone no-shows, and confirm brackets.":
+    "Endesha mashindano kutoka hapa: anzisha mashindano, rekebisha matokeo, ahirisha wasiofika, na kuthibitisha michujo.",
+  "Events": "Mashindano", "+ New event": "+ Shindano jipya",
+  "Running": "Inaendelea", "Not started": "Haijaanza",
+  "Format and rules": "Muundo na sheria",
+  "Group games to": "Gemu za kundi hadi", "Group format": "Muundo wa makundi",
+  "Knockout games to": "Gemu za mtoano hadi", "Knockout format": "Muundo wa mtoano",
+  "Knockout size": "Ukubwa wa mtoano", "Auto": "Otomatiki",
+  "Advance per group (auto)": "Wanaofuzu kwa kundi (otomatiki)",
+  "Advance per group": "Wanaofuzu kwa kundi", "Group size": "Ukubwa wa kundi",
+  "Ending a game": "Mwisho wa gemu",
+  "Win by 2 in the group stage": "Ushindi kwa 2 katika hatua ya makundi",
+  "Courts this event may use": "Viwanja ambavyo shindano hili linaweza kutumia",
+  "Leave all ticked to share every court (weighted by how many matches each event still has). Tick only some to keep this event on just those courts.":
+    "Acha vyote vikiwa na alama ili kushiriki kila uwanja (kwa uzito wa mechi zilizobaki za kila shindano). Weka alama baadhi tu ili shindano hili libaki kwenye viwanja hivyo pekee.",
+  "How long this will take": "Muda utakaochukua",
+  "Save settings": "Hifadhi mipangilio", "Not saved yet": "Bado haijahifadhiwa",
+  "Tick at least one court. To take this event off court entirely, pause it instead.":
+    "Weka alama angalau uwanja mmoja. Kuliondoa shindano hili viwanjani kabisa, lisitishe badala yake.",
+  "Draw groups": "Chora makundi", "Start over with a new list": "Anza upya na orodha mpya",
+  "Paste entrants one per line. For doubles use one line per team, e.g. \"Maya & Owen\".":
+    "Bandika washiriki mmoja kwa kila mstari. Kwa jozi tumia mstari mmoja kwa kila timu, mfano \"Maya & Owen\".",
+  "Upload a CSV instead": "Pakia CSV badala yake",
+  "One entrant per row; doubles put the two partner names in the first two columns and they come in joined as \"Maya & Owen\". Got an export in some other shape? Send Drew the file and the upload can be taught to read it.":
+    "Mshiriki mmoja kwa kila safu; kwa jozi weka majina ya wachezaji wawili kwenye safu mbili za kwanza nayo yataunganishwa kama \"Maya & Owen\". Una faili la muundo mwingine? Mtumie Drew faili hilo na upakiaji utafundishwa kulisoma.",
+  "Entrants (one per line)": "Washiriki (mmoja kwa kila mstari)",
+  "One team or player per line": "Timu au mchezaji mmoja kwa kila mstari",
+  "Target group size": "Ukubwa wa kundi unaolengwa", "Random draw": "Droo ya nasibu",
+  "Preview": "Hakikisho",
+  "Draw new groups (wipes this event)": "Chora makundi mapya (inafuta shindano hili)",
+  "Paste at least 4 entrants first.": "Bandika angalau washiriki 4 kwanza.",
+  "Players": "Wachezaji", "Rename": "Badilisha jina",
+  "Each player appears in seven pairings; renaming here updates every one of them.":
+    "Kila mchezaji yumo kwenye jozi saba; kubadilisha jina hapa husasisha zote.",
+  "Teams and groups": "Timu na makundi", "Teams": "Timu",
+  "rename, move, remove, add": "badilisha jina, hamisha, ondoa, ongeza",
+  "Move…": "Hamisha…", "Remove": "Ondoa", "Add": "Ongeza",
+  "New team or player": "Timu au mchezaji mpya",
+  "Moving or removing a team also removes its matches (and results). New or moved teams get catch-up matches at the end of the queue.":
+    "Kuhamisha au kuondoa timu pia huondoa mechi zake (na matokeo). Timu mpya au zilizohamishwa hupata mechi za kufidia mwishoni mwa foleni.",
+  "Start and pause": "Kuanzisha na kusitisha",
+  "Schedule note (shown to players, e.g. \"Sat 9am\")":
+    "Ujumbe wa ratiba (huonyeshwa kwa wachezaji, mfano \"Jumamosi 9 asubuhi\")",
+  "Planned start (drives the wait estimates players see; the event turns itself on 5 minutes before this time)":
+    "Muda wa kuanza uliopangwa (huendesha makadirio ya kusubiri wanayoona wachezaji; shindano hujiwasha dakika 5 kabla ya muda huu)",
+  "Save schedule": "Hifadhi ratiba", "Pause event": "Sitisha shindano", "Start event": "Anzisha shindano",
+  "Courts are shared automatically: every free court takes the next match in line across all running events, alternating between them. Start a second event and they mix in; pause an event and its matches leave the courts and queue.":
+    "Viwanja hushirikiwa kiotomatiki: kila uwanja ulio wazi huchukua mechi inayofuata kwenye foleni kati ya mashindano yote yanayoendelea, kwa kupokezana. Anzisha shindano la pili nazo zitachanganyika; sitisha shindano na mechi zake zitaondoka viwanjani na kwenye foleni.",
+  "Finish group stage": "Maliza hatua ya makundi",
+  "Redo bracket from standings": "Rudia mchujo kutoka msimamo",
+  "Back to group stage": "Rudi hatua ya makundi",
+  "Group play is complete. Check the projected matchups on the Bracket tab, then confirm to create the knockout.":
+    "Hatua ya makundi imekamilika. Kagua mechi zinazotarajiwa kwenye ukurasa wa Mchujo, kisha thibitisha ili kuunda mtoano.",
+  "Confirm group stage finished": "Thibitisha hatua ya makundi imekamilika",
+  "Confirm the group stage is finished and create the knockout bracket?":
+    "Thibitisha hatua ya makundi imekamilika na uunde mchujo wa mtoano?",
+  "Rebuild the bracket from current standings? Knockout scores are wiped.":
+    "Ujenge upya mchujo kutoka msimamo wa sasa? Matokeo ya mtoano yatafutwa.",
+  "Remove the knockout bracket and its scores for this event?":
+    "Uondoe mchujo wa mtoano na matokeo yake kwa shindano hili?",
+  "This event has no groups yet.": "Shindano hili halina makundi bado.",
+  "Not enough qualifiers yet.": "Bado hakuna waliofuzu wa kutosha.",
+  "Bracket created": "Mchujo umeundwa", "Bracket updated": "Mchujo umesasishwa",
+  "Export results": "Pakua matokeo",
+  "One row per played match, players split out of team names, one column pair per game. Made to copy into DUPR's club \"Import Matches via CSV\" template (download that template from the DUPR club dashboard; it wants each player's DUPR ID, so collect those with the roster).":
+    "Safu moja kwa kila mechi iliyochezwa, wachezaji wametenganishwa kutoka majina ya timu, jozi moja ya safu kwa kila gemu. Imetengenezwa kunakiliwa kwenye kiolezo cha DUPR cha klabu \"Import Matches via CSV\" (pakua kiolezo hicho kutoka dashibodi ya klabu ya DUPR; kinahitaji DUPR ID ya kila mchezaji, hivyo zikusanye pamoja na orodha).",
+  "Download this event (CSV)": "Pakua shindano hili (CSV)",
+  "Download all events (CSV)": "Pakua mashindano yote (CSV)",
+  "Download backup (JSON)": "Pakua nakala rudufu (JSON)",
+  "Offline backup on this phone: none yet (a snapshot is kept automatically every 25 played matches).":
+    "Nakala rudufu kwenye simu hii: bado hakuna (nakala huhifadhiwa kiotomatiki kila mechi 25 zilizochezwa).",
+  "Every phone with the page open keeps its own copy, so a wiped database can be rebuilt from any of them.":
+    "Kila simu iliyofungua ukurasa huweka nakala yake, hivyo hifadhidata iliyofutwa inaweza kujengwa upya kutoka yoyote kati yazo.",
+  "Admin powers on the other tabs": "Uwezo wa msimamizi kwenye kurasa zingine",
+  "While unlocked: tap any match anywhere (Courts, Schedule, a team in Standings, or the Bracket) to fix or clear its score, enter a walkover, or postpone. Players can only enter a score while a match is on a court; admins can score anything from anywhere. An on-court match can be sent back with \"Take off court\": either the next match in line takes its court, or you pick the one to bring on. Pause the finished event: with nothing running, the Courts tab previews the next batch's courts (the tournament's opening events a day ahead, every later batch from 12 hours before its start). The Courts tab has Postpone on the queue and Play next on postponed matches, and each waiting row's Move button asks for the queue place it should take. On a \"go to court\" banner, ✓ On court dismisses it for everyone; a plain tap hides it only on that phone. On the Bracket tab, unplayed matches have an Edit teams link for manual fixes. Everything updates live on everyone's phone.":
+    "Ukiwa umefungua: gusa mechi yoyote popote (Viwanja, Ratiba, timu kwenye Msimamo, au Mchujo) kurekebisha au kufuta matokeo yake, kuweka walkover, au kuahirisha. Wachezaji wanaweza kuweka matokeo tu mechi ikiwa uwanjani; wasimamizi wanaweza kuweka matokeo ya chochote kutoka popote. Mechi iliyo uwanjani inaweza kurudishwa kwa \"Ondoa uwanjani\": ama mechi inayofuata kwenye foleni huchukua uwanja wake, au unachagua ya kuingiza. Sitisha shindano lililomalizika: bila kinachoendelea, ukurasa wa Viwanja huonyesha hakikisho la viwanja vya kundi lijalo (mashindano ya ufunguzi siku moja kabla, kila kundi la baadaye kuanzia saa 12 kabla ya kuanza kwake). Ukurasa wa Viwanja una Ahirisha kwenye foleni na Cheza ijayo kwenye mechi zilizoahirishwa, na kitufe cha Hamisha cha kila mstari unaosubiri huuliza nafasi ya foleni inayotakiwa. Kwenye tangazo la \"nenda uwanjani\", ✓ Uwanjani huliondoa kwa kila mtu; kugusa kwa kawaida hulificha kwenye simu hiyo tu. Kwenye ukurasa wa Mchujo, mechi ambazo hazijachezwa zina kitufe cha Badilisha timu kwa marekebisho ya mkono. Kila kitu husasishwa moja kwa moja kwenye simu ya kila mtu.",
+  "Change PIN": "Badilisha PIN", "Current PIN": "PIN ya sasa", "New PIN": "PIN mpya",
+  "New PIN needs at least 4 characters.": "PIN mpya inahitaji angalau herufi 4.",
+  "PIN changed": "PIN imebadilishwa", "Admin unlocked": "Usimamizi umefunguliwa",
+  "Sign out of admin": "Toka kwenye usimamizi",
+  "Edit bracket teams": "Badilisha timu za mchujo",
+  "Top slot": "Nafasi ya juu", "Bottom slot": "Nafasi ya chini", "TBD (empty)": "Itajulikana (wazi)",
+  "Manual override for fixing bracket mistakes. Nothing is validated here, so double-check no one appears twice afterward.":
+    "Marekebisho ya mkono kwa makosa ya mchujo. Hakuna kinachokaguliwa hapa, hivyo hakikisha hakuna anayetokea mara mbili baadaye.",
+  "Save teams": "Hifadhi timu",
+  "No match is waiting right now.": "Hakuna mechi inayosubiri kwa sasa.",
+  "Bring on the next in line": "Ingiza inayofuata kwenye foleni",
+  "Or bring on someone specific": "Au ingiza mechi maalum",
+  "No other match is waiting, so this one would stay on court.":
+    "Hakuna mechi nyingine inayosubiri, hivyo hii ingebaki uwanjani.",
+  "Take off court": "Ondoa uwanjani", "Postpone": "Ahirisha", "Clear score": "Futa matokeo",
+  "Save (admin)": "Hifadhi (msimamizi)", "Edit": "Badilisha",
+  "No-show? Record a walkover win:": "Hawajafika? Rekodi ushindi wa walkover:",
+  "Move": "Hamisha", "Play next": "Cheza ijayo", "✓ On court": "✓ Uwanjani",
+  "Winners move to the right, round by round, toward the champion. Tap a match to see or enter its result. Unplayed matches have an Edit link to fix the teams by hand.":
+    "Washindi husonga kulia, raundi kwa raundi, kuelekea ubingwa. Gusa mechi kuona au kuweka matokeo yake. Mechi ambazo hazijachezwa zina kitufe cha Badilisha kurekebisha timu kwa mkono.",
+  "Save anyway (admin override)?": "Hifadhi hata hivyo (msimamizi)?",
+  "Clear this score? The match goes back into the queue.": "Futa matokeo haya? Mechi itarudi kwenye foleni.",
+  "Settings saved": "Mipangilio imehifadhiwa", "Schedule saved": "Ratiba imehifadhiwa",
+  "Event started": "Shindano limeanza", "Event paused": "Shindano limesitishwa",
+  "Event created": "Shindano limeundwa", "Name for the new event:": "Jina la shindano jipya:",
+  "New name:": "Jina jipya:", "Renamed": "Jina limebadilishwa", "Removed": "Imeondolewa",
+  "Score cleared": "Matokeo yamefutwa",
+  "Moved to the end of the queue": "Imepelekwa mwisho wa foleni",
+  "Moved to the front of the queue": "Imepelekwa mbele ya foleni",
+  "Off court, next one on": "Imetolewa uwanjani, inayofuata imeingia",
+  "Court updated": "Uwanja umesasishwa",
+  "Groups drawn. Pick courts and start when ready.": "Makundi yamechorwa. Chagua viwanja na uanzishe ukiwa tayari.",
+  "Could not postpone.": "Imeshindwa kuahirisha.", "Could not move it.": "Imeshindwa kuihamisha.",
+  "Could not swap them.": "Imeshindwa kuzibadilisha.", "Could not place it.": "Imeshindwa kuiweka.",
+  "Could not rename.": "Imeshindwa kubadilisha jina.",
+  "That match is not waiting in the queue.": "Mechi hiyo haisubiri kwenye foleni.",
+  "Only waiting match in its event, so its turn is set by the court rotation.":
+    "Ndiyo mechi pekee inayosubiri katika shindano lake, hivyo zamu yake hupangwa na mzunguko wa viwanja.",
+  "Type a name first.": "Andika jina kwanza.",
+  "That name is already entered.": "Jina hilo limeshaingizwa.",
+  "No names found in that file.": "Hakuna majina yaliyopatikana kwenye faili hilo.",
+  "A player name cannot contain \"&\".": "Jina la mchezaji haliwezi kuwa na \"&\".",
+  "Numbers saved": "Namba zimehifadhiwa", "Numbers removed": "Namba zimeondolewa",
+  /* Server-side admin errors, word for word. */
+  "That match is not waiting for a court.": "Mechi hiyo haisubiri uwanja.",
+  "This match's teams are not set yet.": "Timu za mechi hii bado hazijapangwa.",
+  "That match's teams are not set yet.": "Timu za mechi hiyo bado hazijapangwa.",
+  "No such court.": "Hakuna uwanja huo.",
+  "That team is already mid-game on another court.": "Timu hiyo tayari inacheza kwenye uwanja mwingine.",
+  "That spot is gone; try again.": "Nafasi hiyo imepita; jaribu tena.",
+  "A match can only move within its own event.": "Mechi inaweza kuhamishwa ndani ya shindano lake tu.",
+  "Pick a different match.": "Chagua mechi nyingine.",
+  "That match is not on a court.": "Mechi hiyo haiko uwanjani.",
+  "The match to bring on was not found.": "Mechi ya kuingiza haijapatikana.",
+  "Americano rounds rotate on their own; enter the score or pause the event instead.":
+    "Raundi za Americano huzunguka zenyewe; weka matokeo au sitisha shindano badala yake.",
+  "A score just came in for this match; close and reopen it before changing anything.":
+    "Matokeo ya mechi hii yameingia sasa hivi; funga na ufungue tena kabla ya kubadilisha chochote.",
+  "Bad walkover score.": "Alama ya walkover si sahihi.",
+  "The next round already has a score. Clear it first.": "Raundi inayofuata tayari ina matokeo. Yafute kwanza."
 };
 const SW_PATTERNS = [
   [/^Court (\d+)$/, "Uwanja $1"],
+  [/^Court (\d+) now: (.+)$/, "Uwanja $1 sasa: $2"],
+  [/^vs (.+)$/, "dhidi ya $1"],
   [/^Round (\d+)$/, "Raundi $1"],
+  [/^Round of (\d+)$/, "Raundi ya $1"],
   [/^Game (\d+)$/, "Gemu $1"],
-  [/^Group ([A-Z])$/, "Kundi $1"],
+  [/^Group (\S+)$/, "Kundi $1"],
   [/^Estimated wait: about (\d+) minutes\.$/, "Kusubiri: kama dakika $1."],
   [/^Estimated wait: about (\d+)h (\d+)m\.$/, "Kusubiri: kama saa $1 na dakika $2."],
   [/^Estimated wait: about (\d+)h\.$/, "Kusubiri: kama saa $1."],
@@ -1534,21 +1724,140 @@ const SW_PATTERNS = [
   [/^Americano: the two scores must add up to (\d+)\.$/, "Americano: alama mbili lazima zijumlishe $1."],
   [/^(\d+) more matches just called$/, "Mechi $1 zaidi zimeitwa"],
   [/^Show all matches \((\d+) waiting\)$/, "Onyesha mechi zote ($1 zinasubiri)"],
-  [/^(.+): (\d+) of (\d+) group matches played(, knockout underway)?$/, "$1: mechi $2 kati ya $3 za makundi zimechezwa"],
+  [/^(.+): (\d+) of (\d+) group matches played$/, "$1: mechi $2 kati ya $3 za makundi zimechezwa"],
+  [/^(.+): (\d+) of (\d+) group matches played, knockout underway$/, "$1: mechi $2 kati ya $3 za makundi zimechezwa, mtoano unaendelea"],
   [/^On Court (\d+)$/, "Uwanja $1"],
   [/^(.+) · running$/, "$1 · inaendelea"],
   [/^(.+): starts around (.+)\. Courts show here about 5 minutes before; each match has an estimated time on the Schedule tab\.$/,
-    "$1: inaanza karibu $2. Viwanja vitaonekana hapa dakika 5 kabla; kila mechi ina makadirio ya muda kwenye Ratiba."]
+    "$1: inaanza karibu $2. Viwanja vitaonekana hapa dakika 5 kabla; kila mechi ina makadirio ya muda kwenye Ratiba."],
+  [/^Show (.+) only$/, "Onyesha $1 pekee"],
+  [/^(\d+) matches$/, "mechi $1"],
+  [/^(\d+) left$/, "zimesalia $1"],
+  [/^(\d+) of (\d+) matches in$/, "mechi $1 kati ya $2 zimeingia"],
+  [/^Top (\d+) per group advance$/, "Bora $1 wa kila kundi wanafuzu"],
+  [/^Top (\d+) per group advance plus (\d+) best next-placed$/, "Bora $1 wa kila kundi wanafuzu, pamoja na $2 bora wa nafasi zinazofuata"],
+  [/^Best (\d+)(?:st|nd|rd|th)$/, "Bora wa $1"],
+  [/^Games: (.+)$/, "Gemu: $1"],
+  [/^Planned: (.+)$/, "Imepangwa: $1"],
+  [/^(.+) has no schedule yet\.$/, "$1 haina ratiba bado."],
+  [/^(.+) has no groups yet\.$/, "$1 haina makundi bado."],
+  [/^(.+) has no bracket\. It is decided on total points won, so the Standings tab is the result\.$/,
+    "$1 haina mchujo. Huamuliwa kwa jumla ya pointi zilizoshindwa, hivyo ukurasa wa Msimamo ndio matokeo."],
+  /* Match-format fragments ("first to 21", "best of 3, games to 11, win by 2"). */
+  [/^first to (\d+)$/, "wa kwanza kufika $1"],
+  [/^first to (\d+), win by 2$/, "wa kwanza kufika $1, ushinde kwa 2"],
+  [/^best of (\d+), games to (\d+)$/, "bora ya $1, gemu hadi $2"],
+  [/^best of (\d+), games to (\d+), win by 2$/, "bora ya $1, gemu hadi $2, ushinde kwa 2"],
+  [/^scores add up to (\d+)$/, "alama hujumlisha $1"],
+  [/^Fill games in order and leave unplayed games blank\. First to (\d+) game wins takes the match\.$/,
+    "Jaza gemu kwa mpangilio na uache tupu gemu zisizochezwa. Wa kwanza kushinda gemu $1 anachukua mechi."],
+  /* Score-entry errors with numbers in them, client and server wording. */
+  [/^The winner needs at least (\d+) points\.$/, "Mshindi anahitaji angalau pointi $1."],
+  [/^The winner needs exactly (\d+) points\.$/, "Mshindi anahitaji pointi $1 kamili."],
+  [/^The losing score must be under (\d+)\.$/, "Alama ya upande ulioshindwa lazima iwe chini ya $1."],
+  [/^Past (\d+), the game ends as soon as someone leads by 2\.$/, "Baada ya $1, gemu huisha mara mtu anapoongoza kwa 2."],
+  [/^Best of (\d+): that(?:'s| is) too many games\.$/, "Bora ya $1: gemu ni nyingi mno."],
+  [/^Best of (\d+): someone needs (\d+) game wins\.$/, "Bora ya $1: mtu anahitaji kushinda gemu $2."],
+  [/^A1 means the group A winner, C2 the group C runner-up, from standings right now, so matchups can shift until group play ends\. Round 1 is on the left and winners move to the right, toward the final and champion\. (\d+) qualify for a (\d+)-slot bracket\. The real bracket is created when the desk confirms the group stage is finished\.$/,
+    "A1 inamaanisha mshindi wa kundi A, C2 wa pili wa kundi C, kwa msimamo wa sasa, hivyo mechi zinaweza kubadilika hadi hatua ya makundi iishe. Raundi 1 iko kushoto na washindi husonga kulia, kuelekea fainali na ubingwa. Timu $1 zinafuzu kwenye mchujo wa nafasi $2. Mchujo halisi hutengenezwa dawati litakapothibitisha hatua ya makundi imekamilika."],
+  [/^A1 means the group A winner, C2 the group C runner-up, from standings right now, so matchups can shift until group play ends\. Round 1 is on the left and winners move to the right, toward the final and champion\. (\d+) qualify for a (\d+)-slot bracket, including (\d+) wildcards? from the next places\. The real bracket is created when the desk confirms the group stage is finished\.$/,
+    "A1 inamaanisha mshindi wa kundi A, C2 wa pili wa kundi C, kwa msimamo wa sasa, hivyo mechi zinaweza kubadilika hadi hatua ya makundi iishe. Raundi 1 iko kushoto na washindi husonga kulia, kuelekea fainali na ubingwa. Timu $1 zinafuzu kwenye mchujo wa nafasi $2, zikiwemo wild card $3 kutoka nafasi zinazofuata. Mchujo halisi hutengenezwa dawati litakapothibitisha hatua ya makundi imekamilika."],
+  /* ----- Admin ----- */
+  [/^Best of (\d+)$/, "Bora ya $1"],
+  [/^(\d+) teams$/, "timu $1"],
+  [/^Court (\d+) was just filled\. Pick another\.$/, "Uwanja $1 umejazwa sasa hivi. Chagua mwingine."],
+  [/^Team list \((\d+) in (\d+) groups\)$/, "Orodha ya timu ($1 katika makundi $2)"],
+  [/^To ([A-Z])$/, "Kwenda $1"],
+  [/^New group ([A-Z])$/, "Kundi jipya $1"],
+  [/^Knockout bracket is live \((\d+) matches\)\.$/, "Mchujo wa mtoano unaendelea (mechi $1)."],
+  [/^(\d+) group matches still unplayed\. Check the projected matchups on the Bracket tab, then confirm to create the knockout\.$/,
+    "Mechi $1 za makundi bado hazijachezwa. Kagua mechi zinazotarajiwa kwenye ukurasa wa Mchujo, kisha thibitisha ili kuunda mtoano."],
+  [/^(\d+) group matches are still unplayed\. Confirm the group stage is finished and create the knockout bracket\?$/,
+    "Mechi $1 za makundi bado hazijachezwa. Thibitisha hatua ya makundi imekamilika na uunde mchujo wa mtoano?"],
+  [/^(\d+) group matches are still unplayed\. Rebuild the bracket from current standings\? Knockout scores are wiped\.$/,
+    "Mechi $1 za makundi bado hazijachezwa. Ujenge upya mchujo kutoka msimamo wa sasa? Matokeo ya mtoano yatafutwa."],
+  [/^Off: a group game ends dead on the target, even at (\d+)-(\d+), which keeps the group stage a predictable length on shared courts\. Knockout games always play win by 2\.$/,
+    "Ikiwa imezimwa: gemu ya kundi huishia papo hapo kwenye lengo, hata ikiwa $1-$2, jambo linalofanya hatua ya makundi iwe na urefu unaotabirika kwenye viwanja vinavyoshirikiwa. Gemu za mtoano huchezwa kwa ushindi wa 2 kila mara."],
+  [/^Nothing above takes effect until you press Save settings; saved changes then apply right away, even mid-event\. "Auto" knockout size takes the top (\d+) per group and fills to a full bracket with best next-placed teams; a fixed size does the same math for that exact number\.$/,
+    "Hakuna kilicho hapo juu kinachotumika hadi ubonyeze Hifadhi mipangilio; mabadiliko yaliyohifadhiwa hutumika mara moja, hata katikati ya shindano. Ukubwa wa mtoano wa \"Otomatiki\" huchukua bora $1 wa kila kundi na kujaza mchujo kamili kwa timu bora za nafasi zinazofuata; ukubwa maalum hufanya hesabu ile ile kwa idadi hiyo kamili."],
+  [/^(.+) has to be between (\d+) and (\d+)\.$/, "$1 lazima iwe kati ya $2 na $3."],
+  [/^Put a match on Court (\d+)$/, "Weka mechi kwenye Uwanja $1"],
+  [/^Pick a waiting match to send to Court (\d+) now\.$/, "Chagua mechi inayosubiri kupelekwa Uwanja $1 sasa."],
+  [/^Take this match off Court (\d+)$/, "Ondoa mechi hii kwenye Uwanja $1"],
+  [/^It goes to the front of its queue\. Who comes on Court (\d+)\?$/,
+    "Itapelekwa mbele ya foleni yake. Nani aingie Uwanja $1?"],
+  [/^Record a walkover win for (.+)\?$/, "Rekodi ushindi wa walkover kwa $1?"],
+  [/^This match is on Court (\d+)\. Pull it off the court and postpone it\?$/,
+    "Mechi hii iko Uwanja $1. Uiondoe uwanjani na kuiahirisha?"],
+  [/^Move to which place in the queue\? 1-(\d+) \(now (\d+)\)$/, "Ipeleke nafasi gani kwenye foleni? 1-$1 (sasa $2)"],
+  [/^Enter a number from 1 to (\d+)\.$/, "Weka namba kati ya 1 na $1."],
+  [/^Pause (.+)\? Its matches leave the courts and queue until it starts again\.$/,
+    "Usitishe $1? Mechi zake zitaondoka viwanjani na kwenye foleni hadi litakapoanzishwa tena."],
+  [/^New name for "(.+)"$/, "Jina jipya la \"$1\""],
+  [/^Renamed in (\d+) pairings$/, "Jina limebadilishwa kwenye jozi $1"],
+  [/^Remove "(.+)"\? Their matches and results are removed too\.$/,
+    "Uondoe \"$1\"? Mechi zao na matokeo yao yataondolewa pia."],
+  [/^Move "(.+)" to group (\S+)\? Their existing matches and results are replaced with catch-up matches\.$/,
+    "Umhamishie \"$1\" kundi $2? Mechi zao za sasa na matokeo yao yatabadilishwa na mechi za kufidia."],
+  [/^(.+) moved to group (\S+)$/, "$1 amehamishiwa kundi $2"],
+  [/^(.+) added to Group (\S+)$/, "$1 ameongezwa kwenye Kundi $2"],
+  [/^Phone number\(s\) for "(.+)", comma separated \(07\.\.\. or \+254\.\.\.\)\. Leave empty to remove\.$/,
+    "Namba za simu za \"$1\", zikitenganishwa kwa koma (07... au +254...). Acha wazi ili kuondoa."],
+  [/^"(.+)" does not look like a phone number\.$/, "\"$1\" haionekani kama namba ya simu."],
+  [/^Replace what is in the entrants box with the (\d+) rows from the file\?$/,
+    "Badilishe kilichomo kwenye kisanduku cha washiriki na safu $1 kutoka kwenye faili?"],
+  [/^(\d+) entrants loaded\. Check the list, then draw\.$/, "Washiriki $1 wamepakiwa. Kagua orodha, kisha chora."],
+  [/^Draw groups for "(.+)" with (\d+) entrants\?$/, "Chora makundi ya \"$1\" na washiriki $2?"],
+  [/^Draw new groups for "(.+)" with (\d+) entrants\? This wipes its current groups, matches, and scores, and pauses it\.$/,
+    "Chora makundi mapya ya \"$1\" na washiriki $2? Hii itafuta makundi yake ya sasa, mechi, na matokeo, na kulisitisha."],
+  [/^Duplicate entries: (.+)$/, "Majina yaliyojirudia: $1"],
+  [/^Offline backup on this phone: (\d+) played matches, saved (.+)\.$/,
+    "Nakala rudufu kwenye simu hii: mechi $1 zilizochezwa, imehifadhiwa $2."],
+  [/^Demo with sample data\. Changes reset on refresh\. Admin PIN: (.+)$/,
+    "Onyesho la data ya mfano. Mabadiliko hupotea ukipakia upya. PIN ya msimamizi: $1"],
+  /* Draw-preview lines (the box under Preview). */
+  [/^(\d+) entrants into (\d+) groups \((.+)\)$/, "Washiriki $1 katika makundi $2 ($3)"],
+  [/^(\d+) group matches$/, "mechi $1 za makundi"],
+  [/^Top (\d+) per group = (\d+) qualifiers; bracket of (\d+)$/,
+    "Bora $1 wa kila kundi = waliofuzu $2; mchujo wa $3"],
+  [/^Top (\d+) per group = (\d+) qualifiers; bracket of (\d+) adds (\d+) best next-placed$/,
+    "Bora $1 wa kila kundi = waliofuzu $2; mchujo wa $3 unaongeza $4 bora wa nafasi zinazofuata"],
+  [/^Knockout of (\d+): top (\d+) per group$/, "Mtoano wa $1: bora $2 wa kila kundi"],
+  [/^Knockout of (\d+): top (\d+) per group plus (\d+) best (\d+)(?:st|nd|rd|th)-placed$/,
+    "Mtoano wa $1: bora $2 wa kila kundi pamoja na $3 bora wa nafasi ya $4"]
 ];
+function swPiece(t){
+  if (SW_EXACT[t] != null) return SW_EXACT[t];
+  for(const [re, rep] of SW_PATTERNS){
+    if (re.test(t)) return t.replace(re, rep);
+  }
+  return null;
+}
+/* Whole string first; failing that, line by line (the draw-preview box), and
+   within a line each " · " segment on its own ("Event · Round 3 · first to
+   21"), leaving unknown pieces (names, dates) untouched. */
+function swFrag(t){
+  const v = swPiece(t);
+  if (v != null) return v;
+  if (t.includes("\n")){
+    return t.split("\n").map(line => {
+      const lt = line.trim();
+      if (!lt) return line;
+      const lv = swFrag(lt);
+      return lv !== lt ? line.replace(lt, lv) : line;
+    }).join("\n");
+  }
+  if (t.includes(" · ")){
+    return t.split(" · ").map(p => { const pv = swPiece(p); return pv != null ? pv : p; }).join(" · ");
+  }
+  return t;
+}
 function swText(s){
   if (state.lang !== "sw" || !s) return s;
   const t = s.trim();
   if (!t) return s;
-  if (SW_EXACT[t] != null) return s.replace(t, SW_EXACT[t]);
-  for(const [re, rep] of SW_PATTERNS){
-    if (re.test(t)) return s.replace(t, t.replace(re, rep));
-  }
-  return s;
+  const out = swFrag(t);
+  return out !== t ? s.replace(t, out) : s;
 }
 function applyLanguage(root){
   if (state.lang !== "sw" || !root) return;
@@ -1558,6 +1867,11 @@ function applyLanguage(root){
   nodes.forEach(n => {
     const v = swText(n.nodeValue);
     if (v !== n.nodeValue) n.nodeValue = v;
+  });
+  /* Placeholders are attributes, not text nodes, so the walker misses them. */
+  root.querySelectorAll("input[placeholder], textarea[placeholder]").forEach(el => {
+    const v = swText(el.placeholder);
+    if (v !== el.placeholder) el.placeholder = v;
   });
 }
 function toggleLang(){
@@ -2118,7 +2432,7 @@ function renderCourtsPreview(soon){
   assignCourtsGlobal(sim);
   const multi = soon.length > 1;
   const when = soon.map(e => esc(e.name) + ' · ' +
-    eventStartDate(e).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })).join('&ensp;');
+    eventStartDate(e).toLocaleString(state.lang === "sw" ? "sw" : [], { weekday: 'short', hour: 'numeric', minute: '2-digit' })).join('&ensp;');
   let h = '<div class="section-h"><h2>Coming up</h2><span class="hint">' + when + '</span></div>';
   h += '<div class="courtgrid">';
   const simOn = sim.matches.filter(m => ids.has(m.event_id) && m.status === "scheduled" && m.court != null);
@@ -2781,7 +3095,7 @@ function renderScoreModal(){
       } else {
         const t = estimatedStartTime(m, ev);
         if (t) est = 'Estimated play time: around ' +
-          t.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) + '.';
+          t.toLocaleString(state.lang === "sw" ? "sw" : [], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) + '.';
       }
       if (est) h += '<p class="note" style="font-weight:700">' + est +
         ' <span style="font-weight:400">(rough, updates as matches finish)</span></p>';
@@ -3131,7 +3445,7 @@ async function saveScore(matchId){
     if (state.adminPin){
       const strict = validateGames(games, pts, false, bo, wb2);
       const lenient = validateGames(games, pts, true, bo, wb2);
-      if (!lenient.error && strict.error && !confirm(strict.error + " Save anyway (admin override)?")) return;
+      if (!lenient.error && strict.error && !confirm(swText(strict.error) + " " + swText("Save anyway (admin override)?"))) return;
     }
     r = state.adminPin
       ? await store.adminSubmitScore(state.adminPin, matchId, null, null, games, false, had)
@@ -3143,13 +3457,13 @@ async function saveScore(matchId){
       const sumTo = m ? matchSumTo(m) : null;
       const strict = validateScore(s1, s2, pts, false, wb2, sumTo);
       const lenient = validateScore(s1, s2, pts, true, wb2, sumTo);
-      if (!lenient && strict && !confirm(strict + " Save anyway (admin override)?")) return;
+      if (!lenient && strict && !confirm(swText(strict) + " " + swText("Save anyway (admin override)?"))) return;
     }
     r = state.adminPin
       ? await store.adminSubmitScore(state.adminPin, matchId, s1, s2, null, false, had)
       : await store.submitScore(matchId, s1, s2);
   }
-  if (!r.ok){ errEl.textContent = r.error || "Something went wrong."; return; }
+  if (!r.ok){ errEl.textContent = swText(r.error || "Something went wrong."); return; }
   state.modalMatchId = null;
   toast("Score saved");
   await reload();
@@ -3158,20 +3472,20 @@ async function walkover(matchId, side){
   const m = data.matches.find(x => x.id === matchId);
   if (!m) return;
   const winner = entrantName(side === 1 ? m.entrant1_id : m.entrant2_id);
-  if (!confirm("Record a walkover win for " + winner + "?")) return;
+  if (!confirm(swText("Record a walkover win for " + winner + "?"))) return;
   const bo = matchBestOf(m);
   const pts = bo > 1 ? Math.floor(bo / 2) + 1 : matchPts(m);
   const s1 = side === 1 ? pts : 0, s2 = side === 1 ? 0 : pts;
   const r = await store.adminSubmitScore(state.adminPin, matchId, s1, s2, null, true, m.status === "played");
-  if (!r.ok){ const errEl = document.getElementById("score-err"); if (errEl) errEl.textContent = r.error; else toast(r.error); return; }
+  if (!r.ok){ const errEl = document.getElementById("score-err"); if (errEl) errEl.textContent = swText(r.error); else toast(r.error); return; }
   state.modalMatchId = null;
   toast("Walkover recorded");
   await reload();
 }
 async function clearScore(matchId){
-  if (!confirm("Clear this score? The match goes back into the queue.")) return;
+  if (!confirm(swText("Clear this score? The match goes back into the queue."))) return;
   const r = await store.adminClearScore(state.adminPin, matchId);
-  if (!r.ok){ const errEl = document.getElementById("score-err"); if (errEl) errEl.textContent = r.error; else toast(r.error); return; }
+  if (!r.ok){ const errEl = document.getElementById("score-err"); if (errEl) errEl.textContent = swText(r.error); else toast(r.error); return; }
   state.modalMatchId = null;
   toast("Score cleared");
   await reload();
@@ -3179,7 +3493,7 @@ async function clearScore(matchId){
 async function postpone(matchId, toEnd, fromModal){
   const m = data.matches.find(x => x.id === matchId);
   if (m && m.court != null &&
-      !confirm("This match is on Court " + m.court + ". Pull it off the court and postpone it?")) return;
+      !confirm(swText("This match is on Court " + m.court + ". Pull it off the court and postpone it?"))) return;
   const r = await store.adminPostpone(state.adminPin, matchId, toEnd);
   if (!r.ok){ toast(r.error || "Could not postpone."); return; }
   if (fromModal) state.modalMatchId = null;
@@ -3241,8 +3555,8 @@ async function moveQueuePrompt(matchId){
     toast("Only waiting match in its event, so its turn is set by the court rotation.");
     return;
   }
-  const raw = prompt("Move to which place in the queue? 1-" + q.length +
-    " (now " + (cur + 1) + ")", "");
+  const raw = prompt(swText("Move to which place in the queue? 1-" + q.length +
+    " (now " + (cur + 1) + ")"), "");
   if (raw == null || !raw.trim()) return;
   const n = parseInt(raw.trim(), 10);
   if (isNaN(n) || n < 1 || n > q.length){
@@ -3292,7 +3606,7 @@ async function tryUnlock(){
   const pin = document.getElementById("pin-input").value.trim();
   const r = await store.verifyPin(pin);
   const errEl = document.getElementById("pin-err");
-  if (!r.ok){ errEl.textContent = r.error || "Wrong PIN."; return; }
+  if (!r.ok){ errEl.textContent = swText(r.error || "Wrong PIN."); return; }
   state.adminPin = pin;
   safeSession("pb_admin_pin", pin);
   toast("Admin unlocked");
@@ -3310,7 +3624,8 @@ function readEventSettings(ev){
     if (!el) return dflt;
     const v = parseInt(el.value, 10);
     if (!Number.isInteger(v) || v < lo || v > hi){
-      if (!bad) bad = label + " has to be between " + lo + " and " + hi + ".";
+      /* Translate the field name here; the sentence around it is a pattern. */
+      if (!bad) bad = swText(label) + " has to be between " + lo + " and " + hi + ".";
       return dflt;
     }
     return v;
@@ -3356,25 +3671,43 @@ function readEventSettings(ev){
    screen (not the saved ones) and, when the group stage is multi-game, says
    what one game would cost instead: organisers reach for best of 3 without
    seeing that it is most of an extra afternoon. */
+/* Built bilingually here rather than through the dictionary: the sentence is
+   assembled from too many moving numbers for a text-node pattern to catch. */
 function estimateText(ev, o){
   const est = eventDurationEstimate(ev, o);
-  if (!est.matches) return "Add entrants and draw the groups to see an estimate.";
+  const sw = state.lang === "sw";
+  if (!est.matches) return sw
+    ? "Weka washiriki na uchore makundi ili kuona makadirio."
+    : "Add entrants and draw the groups to see an estimate.";
   const bits = [];
-  if (est.group) bits.push(est.group + " group match" + (est.group === 1 ? "" : "es"));
-  if (est.ko) bits.push(est.ko + " knockout match" + (est.ko === 1 ? "" : "es"));
-  let s = "<b>Plan for about " + fmtHours(est.minutes) + "</b> on " + est.courts +
-    " court" + (est.courts === 1 ? "" : "s") + ": " + bits.join(" and ") +
-    ". Only " + fmtHours(est.idealMinutes) + " if no court ever sits empty, which never happens.";
+  if (est.group) bits.push(sw ? "mechi " + est.group + " za makundi"
+    : est.group + " group match" + (est.group === 1 ? "" : "es"));
+  if (est.ko) bits.push(sw ? "mechi " + est.ko + " za mtoano"
+    : est.ko + " knockout match" + (est.ko === 1 ? "" : "es"));
+  let s = sw
+    ? "<b>Panga kama " + fmtHours(est.minutes) + "</b> kwenye " +
+      (est.courts === 1 ? "uwanja 1" : "viwanja " + est.courts) + ": " + bits.join(" na ") +
+      ". Ingekuwa " + fmtHours(est.idealMinutes) + " tu kama hakuna uwanja ungekaa wazi, jambo lisilotokea kamwe."
+    : "<b>Plan for about " + fmtHours(est.minutes) + "</b> on " + est.courts +
+      " court" + (est.courts === 1 ? "" : "s") + ": " + bits.join(" and ") +
+      ". Only " + fmtHours(est.idealMinutes) + " if no court ever sits empty, which never happens.";
   const bg = o ? o.boGroup : parseInt(evSetting(ev, "best_of_group", 1), 10) || 1;
   if (bg > 1){
     const one = eventDurationEstimate(ev, Object.assign({}, o, { boGroup: 1 }));
     const saved = est.minutes - one.minutes;
-    if (saved > 20) s += " One game in the group stage instead: about " +
-      fmtHours(one.minutes) + ", saving roughly " + fmtHours(saved) + ".";
+    if (saved > 20) s += sw
+      ? " Gemu moja katika hatua ya makundi badala yake: kama " +
+        fmtHours(one.minutes) + ", ukiokoa karibu " + fmtHours(saved) + "."
+      : " One game in the group stage instead: about " +
+        fmtHours(one.minutes) + ", saving roughly " + fmtHours(saved) + ".";
   }
-  return s + " <span style=\"opacity:.75\">Rough: " + TURNOVER_MIN +
-    " minutes between matches and courts busy " + Math.round(COURT_BUSY * 100) +
-    "% of the day.</span>";
+  return s + (sw
+    ? " <span style=\"opacity:.75\">Makadirio: dakika " + TURNOVER_MIN +
+      " kati ya mechi na viwanja vikiwa na shughuli " + Math.round(COURT_BUSY * 100) +
+      "% ya siku.</span>"
+    : " <span style=\"opacity:.75\">Rough: " + TURNOVER_MIN +
+      " minutes between matches and courts busy " + Math.round(COURT_BUSY * 100) +
+      "% of the day.</span>");
 }
 /* Repriced live as the fields change, without a re-render that would steal
    focus from the input being typed into. Every field that calls this is owned
@@ -3448,7 +3781,7 @@ function entrantsCsvPicked(input){
     if (!names.length){ toast("No names found in that file."); return; }
     const box = document.getElementById("adm-teams");
     if (!box) return;
-    if (box.value.trim() && !confirm("Replace what is in the entrants box with the " + names.length + " rows from the file?")) return;
+    if (box.value.trim() && !confirm(swText("Replace what is in the entrants box with the " + names.length + " rows from the file?"))) return;
     box.value = names.join("\n");
     toast(names.length + " entrants loaded. Check the list, then draw.");
   };
@@ -3459,7 +3792,7 @@ function entrantsCsvPicked(input){
 async function renameAmericanoPlayer(oldName){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
-  const next = (prompt('New name for "' + oldName + '"', oldName) || "").trim();
+  const next = (prompt(swText('New name for "' + oldName + '"'), oldName) || "").trim();
   if (!next || next === oldName) return;
   if (next.includes("&")){ toast('A player name cannot contain "&".'); return; }
   const rows = data.entrants.filter(e => e.event_id === ev.id && splitPair(e.name).includes(oldName));
@@ -3489,14 +3822,14 @@ async function saveNote(){
 async function setActive(active){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
-  if (!active && !confirm("Pause " + ev.name + "? Its matches leave the courts and queue until it starts again.")) return;
+  if (!active && !confirm(swText("Pause " + ev.name + "? Its matches leave the courts and queue until it starts again."))) return;
   const r = await store.adminSetActive(state.adminPin, ev.id, active);
   if (!r.ok){ toast(r.error); return; }
   toast(active ? "Event started" : "Event paused");
   await reload();
 }
 async function addEvent(){
-  const name = prompt("Name for the new event:");
+  const name = prompt(swText("Name for the new event:"));
   if (!name || !name.trim()) return;
   const meta = { name: name.trim(), sort_order: data.events.length, settings: defaultEventSettings() };
   /* Singles are more tiring per point, so their group games run to 15, not 21. */
@@ -3510,7 +3843,7 @@ async function addEvent(){
 async function renameEntrant(id){
   const e = entrantById(id);
   if (!e) return;
-  const name = prompt("New name:", e.name);
+  const name = prompt(swText("New name:"), e.name);
   if (!name || !name.trim() || name.trim() === e.name) return;
   const r = await store.adminRenameEntrant(state.adminPin, id, name.trim());
   if (!r.ok){ toast(r.error); return; }
@@ -3519,7 +3852,7 @@ async function renameEntrant(id){
 async function removeEntrant(id){
   const e = entrantById(id);
   if (!e) return;
-  if (!confirm('Remove "' + e.name + '"? Their matches and results are removed too.')) return;
+  if (!confirm(swText('Remove "' + e.name + '"? Their matches and results are removed too.'))) return;
   const r = await store.adminRemoveEntrant(state.adminPin, id);
   if (!r.ok){ toast(r.error); return; }
   toast("Removed"); await reload();
@@ -3530,7 +3863,7 @@ async function moveEntrant(id, target){
   if (!e) return;
   const ev = eventById(e.event_id);
   const group = target === "__new" ? groupLetter(groupsOfEvent(ev).length) : target;
-  if (!confirm('Move "' + e.name + '" to group ' + group + '? Their existing matches and results are replaced with catch-up matches.')) { render(); return; }
+  if (!confirm(swText('Move "' + e.name + '" to group ' + group + '? Their existing matches and results are replaced with catch-up matches.'))) { render(); return; }
   const members = data.entrants.filter(x => x.event_id === e.event_id && x.group_name === group && x.id !== id);
   const groupMs = data.matches.filter(m => m.event_id === e.event_id && m.stage === "group" && m.group_name === group);
   const startRound = Math.max(0, ...groupMs.map(m => m.round || 0)) + 1;
@@ -3552,7 +3885,7 @@ async function editContacts(id){
   const e = entrantById(id);
   if (!e) return;
   const cur = (state.contacts[id] || []).join(", ");
-  const raw = prompt('Phone number(s) for "' + e.name + '", comma separated (07... or +254...). Leave empty to remove.', cur);
+  const raw = prompt(swText('Phone number(s) for "' + e.name + '", comma separated (07... or +254...). Leave empty to remove.'), cur);
   if (raw == null) return;
   const parts = raw.split(",").map(s => s.trim()).filter(Boolean);
   const phones = [];
@@ -3630,7 +3963,7 @@ async function applySetup(){
   const msg = hasMatches
     ? 'Draw new groups for "' + ev.name + '" with ' + names.length + ' entrants? This wipes its current groups, matches, and scores, and pauses it.'
     : 'Draw groups for "' + ev.name + '" with ' + names.length + ' entrants?';
-  if (!confirm(msg)) return;
+  if (!confirm(swText(msg))) return;
   /* This one replaces the whole event, so it does carry the untouched keys. */
   const settings = Object.assign({}, ev.settings, check);
   const shuffle = document.getElementById("adm-shuffle").checked;
@@ -3661,7 +3994,7 @@ async function confirmGroupStage(){
   const msg = (left ? left + " group matches are still unplayed. " : "") +
     (hadKo ? "Rebuild the bracket from current standings? Knockout scores are wiped." :
       "Confirm the group stage is finished and create the knockout bracket?");
-  if (!confirm(msg)) return;
+  if (!confirm(swText(msg))) return;
   const field = seedFieldFor(ev);
   if (field.seeds.length < 2){ toast("Not enough qualifiers yet."); return; }
   const maxOrder = Math.max(0, ...data.matches.filter(m => m.event_id === ev.id).map(m => m.play_order || 0));
@@ -3675,7 +4008,7 @@ async function confirmGroupStage(){
 async function resetBracket(){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
-  if (!confirm("Remove the knockout bracket and its scores for this event?")) return;
+  if (!confirm(swText("Remove the knockout bracket and its scores for this event?"))) return;
   const r = await store.adminResetBracket(state.adminPin, ev.id);
   if (!r.ok){ toast(r.error); return; }
   toast("Back to group stage");
