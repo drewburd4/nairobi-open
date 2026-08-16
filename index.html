@@ -735,14 +735,26 @@ function assignCourtsGlobal(db){
   const takenMain = new Set(db.matches.filter(m => m.status === "scheduled" && m.court != null && !dbIsAmericano(evOf(m))).map(m => m.court));
   const freeMain = [];
   for(let c = 1; c <= total; c++) if (!takenMain.has(c)) freeMain.push(c);
+  /* Teams already mid-game on a main court can't be called to a second one
+     (their next match can reach the queue front at round boundaries); skip
+     them and take the next eligible match. Mirrors the SQL. */
+  const busy = new Set();
+  db.matches.forEach(m => {
+    if (m.status === "scheduled" && m.court != null && !dbIsAmericano(evOf(m))){
+      if (m.entrant1_id) busy.add(m.entrant1_id);
+      if (m.entrant2_id) busy.add(m.entrant2_id);
+    }
+  });
   for(const next of weavePending(db)){
     if (!freeMain.length) break;
+    if (busy.has(next.entrant1_id) || busy.has(next.entrant2_id)) continue;
     const ev = evOf(next);
     const allowed = ev && ev.settings && Array.isArray(ev.settings.courts) && ev.settings.courts.length ? ev.settings.courts : null;
     let idx = -1;
     for(let k = 0; k < freeMain.length; k++){ if (!allowed || allowed.includes(freeMain[k])){ idx = k; break; } }
     if (idx === -1) continue;
     place(next, freeMain[idx]); freeMain.splice(idx, 1);
+    busy.add(next.entrant1_id); busy.add(next.entrant2_id);
   }
 
   // one independent pool per active Americano event
@@ -926,11 +938,30 @@ function demoStore(){
     return null;
   }
 
+  /* Mirror of nairobi_autostart_due: an admin-set start time flips the event
+     on 5 minutes early, once. Manual Start/Pause consumes the flag, so a
+     deliberately paused event stays paused; saving a new start time re-arms. */
+  function autostartDue(){
+    let hit = false;
+    for(const e of db.events){
+      const s = e.settings || {};
+      if (e.active || s.autostarted || !s.start_time) continue;
+      const t = new Date(s.start_time).getTime();
+      if (isNaN(t)) continue;
+      if (t <= Date.now() + 5 * 60000 && t > Date.now() - 12 * 3600000 &&
+          db.matches.some(m => m.event_id === e.id)){
+        e.active = true; s.autostarted = true; e.settings = s; hit = true;
+      }
+    }
+    if (hit) assignCourtsGlobal(db);
+  }
+
   return {
     mode: "demo",
     demoPin: PIN,
     subscribe(f){ subs.push(f); },
     async loadAll(activeOnly){
+      autostartDue();
       const snap = JSON.parse(JSON.stringify(db));
       if (activeOnly){
         const ids = new Set(snap.events.filter(e => e.active).map(e => e.id));
@@ -1038,7 +1069,15 @@ function demoStore(){
       const m = findMatch(matchId);
       if (!m) return fail("Match not found.");
       if (m.status !== "scheduled" || m.court == null) return fail("That match is not on a court.");
-      const repl = weavePending(db)[0];
+      /* Same gate as court assignment: never bring on a team that is already
+         mid-game on another main court. Mirrors the SQL. */
+      const busyNow = new Set();
+      db.matches.forEach(x => {
+        if (x.status === "scheduled" && x.court != null && x.id !== m.id && !dbIsAmericano(eventOf(x))){
+          busyNow.add(x.entrant1_id); busyNow.add(x.entrant2_id);
+        }
+      });
+      const repl = weavePending(db).find(x => !busyNow.has(x.entrant1_id) && !busyNow.has(x.entrant2_id));
       if (!repl) return fail("No other match is waiting, so it stays on court.");
       repl.court = m.court; repl.postponed = false;
       repl.called_at = new Date().toISOString(); repl.called_ack = false;
@@ -1127,6 +1166,8 @@ function demoStore(){
       if (!ev) return fail("Event not found.");
       if (active && !db.matches.some(m => m.event_id === eventId)) return fail("Draw groups first, then start the event.");
       ev.active = active;
+      /* A manual start or pause consumes the pending auto-start. */
+      ev.settings = Object.assign({}, ev.settings, { autostarted: true });
       assignCourtsGlobal(db);
       notify(); return ok();
     },
@@ -1312,6 +1353,7 @@ function liveStore(){
     adminSwapTo: (pin, offId, onId) => rpc("nairobi_admin_swap_to", { p_pin: pin, p_off_match: offId, p_on_match: onId }),
     adminUpdateEvent: (pin, eventId, name, settings) => rpc("nairobi_admin_update_event", { p_pin: pin, p_event_id: eventId, p_name: name, p_settings: settings }),
     adminSetActive: (pin, eventId, active) => rpc("nairobi_admin_set_active", { p_pin: pin, p_event_id: eventId, p_active: !!active }),
+    autostartDue: () => rpc("nairobi_autostart_due", {}),
     adminReplaceEvent: async (pin, eventId, meta, entrants, matches) => {
       const r = await rpc("nairobi_admin_replace_event", {
         p_pin: pin, p_event_id: eventId, p_name: meta.name,
@@ -1441,8 +1483,12 @@ function americanoStandings(ev){
     .filter(m => m.event_id === ev.id && m.status === "played" && m.score1 != null && m.score2 != null)
     .forEach(m => {
       const s1 = splitPair(entrantName(m.entrant1_id)), s2 = splitPair(entrantName(m.entrant2_id));
-      s1.forEach(n => { const r = touch(n); r.p++; r.pf += m.score1; r.pa += m.score2; if (m.score1 > m.score2) r.w++; });
-      s2.forEach(n => { const r = touch(n); r.p++; r.pf += m.score2; r.pa += m.score1; if (m.score2 > m.score1) r.w++; });
+      /* A walkover counts as a played win but adds no points either way (same
+         rule as the group standings); in a points-first table an invented
+         11-0 would otherwise decide the leaderboard. */
+      const p1 = m.walkover ? 0 : m.score1, p2 = m.walkover ? 0 : m.score2;
+      s1.forEach(n => { const r = touch(n); r.p++; r.pf += p1; r.pa += p2; if (m.score1 > m.score2) r.w++; });
+      s2.forEach(n => { const r = touch(n); r.p++; r.pf += p2; r.pa += p1; if (m.score2 > m.score1) r.w++; });
     });
   return Object.values(rows)
     .map(r => Object.assign(r, { diff: r.pf - r.pa }))
@@ -1540,17 +1586,37 @@ function perGameMinutes(m){
   return Math.min(30, Math.max(8, gameMinutesFor(matchPts(m), matchWinBy2(m))));
 }
 const expectedMatchMinutes = m => expectedGamesFor(m) * perGameMinutes(m) + TURNOVER_MIN;
+/* Turnover for the live wait estimate: last point to the next first serve on
+   the same court. Drew's number; the planning estimator keeps its more
+   conservative 7 because whole-day plans should not assume a sharp desk. */
+const WAIT_TURNOVER_MIN = 5;
 /* Rough minutes until a waiting match should reach a court. Position in the
-   woven queue already reflects how running events share the courts. */
+   woven queue already reflects how running events share the courts. Each
+   occupied court is priced by how long its match has actually been on
+   (called_at), so the number tightens as courts run long or finish early.
+   Main pool only: americano matches hold americano courts, never these. */
 function estimatedWaitMinutes(m){
-  const ahead = pendingQueue().findIndex(x => x.id === m.id);
+  const q = pendingQueue();
+  const ahead = q.findIndex(x => x.id === m.id);
   if (ahead < 0) return null;
-  const courts = courtsCount();
-  const free = Math.max(0, courts - onCourtMatches().length);
-  if (ahead < free) return 0;
-  /* Courts in play are on average halfway done; after that a court frees up
-     once per match length, and the queue drains one match per court. */
-  return Math.round(((ahead - free) / courts + 0.5) * expectedMatchMinutes(m));
+  const now = Date.now();
+  const playMinutes = x => expectedGamesFor(x) * perGameMinutes(x);
+  const mainOn = onCourtMatches().filter(x => !isAmericano(eventById(x.event_id)));
+  const freeAt = [];
+  for(let c = 1; c <= courtsCount(); c++){
+    const on = mainOn.find(x => x.court === c);
+    if (!on){ freeAt.push(0); continue; }
+    const t = on.called_at ? Date.parse(on.called_at) : NaN;
+    const elapsed = isFinite(t) ? (now - t) / 60000 : 0;
+    freeAt.push(Math.max(0, playMinutes(on) - elapsed) + WAIT_TURNOVER_MIN);
+  }
+  if (!freeAt.length) return null;
+  for(let i = 0; i < ahead; i++){
+    let k = 0;
+    for(let j = 1; j < freeAt.length; j++) if (freeAt[j] < freeAt[k]) k = j;
+    freeAt[k] += playMinutes(q[i]) + WAIT_TURNOVER_MIN;
+  }
+  return Math.round(Math.min.apply(null, freeAt));
 }
 function eventStartDate(ev){
   const s = evSetting(ev, "start_time", "");
@@ -1564,8 +1630,8 @@ function estimatedStartTime(m, ev){
   const start = eventStartDate(ev);
   if (!start) return null;
   const sibs = data.matches
-    .filter(x => x.event_id === ev.id && x.status === "scheduled" && !x.postponed &&
-      x.entrant1_id && x.entrant2_id)
+    .filter(x => x.event_id === ev.id && x.status === "scheduled" &&
+      (!x.postponed || x.id === m.id) && x.entrant1_id && x.entrant2_id)
     .sort((a, b) => a.play_order - b.play_order);
   const pos = sibs.findIndex(x => x.id === m.id);
   if (pos < 0) return null;
@@ -1933,6 +1999,18 @@ function renderBoard(){
     const ko = data.matches.filter(m => m.event_id === ev.id && m.stage === "knockout").length;
     h += '<span class="note">' + esc(ev.name) + ': ' + done + ' of ' + total + ' group matches played' + (ko ? ', knockout underway' : '') + '</span>';
   }
+  /* Events that have not started yet but have a planned time: say when, so a
+     player opening the board a day early knows where their draw will appear
+     and that per-match estimated times are on the Schedule tab. */
+  const upcoming = data.events
+    .filter(e => !e.active && eventStartDate(e) && eventStartDate(e).getTime() > Date.now() - 3600000 &&
+      data.matches.some(m => m.event_id === e.id && m.status === "scheduled"))
+    .sort((a, b) => eventStartDate(a) - eventStartDate(b));
+  for(const ev of upcoming){
+    h += '<span class="note">' + esc(ev.name) + ': starts around ' +
+      eventStartDate(ev).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) +
+      '. Courts show here about 5 minutes before; each match has an estimated time on the Schedule tab.</span>';
+  }
   h += '</div>';
   return h;
 }
@@ -2263,16 +2341,16 @@ function renderAdmin(){
 
     h += '<h4>1 · Format and rules</h4>';
     h += '<div class="fieldrow">' +
-      '<div class="field"><label for="adm-ptg">Group games to</label><input id="adm-ptg" type="number" min="5" max="51" oninput="updateTimeEstimate()" value="' + evSetting(ev, "points_to_group", 21) + '"></div>' +
+      '<div class="field"><label for="adm-ptg">Group games to</label><input id="adm-ptg" type="number" min="5" max="51" oninput="updateTimeEstimate()" value="' + esc(String(evSetting(ev, "points_to_group", 21))) + '"></div>' +
       '<div class="field"><label for="adm-bog">Group format</label><select id="adm-bog" onchange="updateTimeEstimate()">' +
         [1,3,5].map(n => '<option value="' + n + '"' + (bog == n ? ' selected' : '') + '>Best of ' + n + '</option>').join("") + '</select></div>' +
-      '<div class="field"><label for="adm-ptk">Knockout games to</label><input id="adm-ptk" type="number" min="5" max="51" oninput="updateTimeEstimate()" value="' + evSetting(ev, "points_to_knockout", 21) + '"></div>' +
+      '<div class="field"><label for="adm-ptk">Knockout games to</label><input id="adm-ptk" type="number" min="5" max="51" oninput="updateTimeEstimate()" value="' + esc(String(evSetting(ev, "points_to_knockout", 21))) + '"></div>' +
       '<div class="field"><label for="adm-bok">Knockout format</label><select id="adm-bok" onchange="updateTimeEstimate()">' +
         [1,3,5].map(n => '<option value="' + n + '"' + (bok == n ? ' selected' : '') + '>Best of ' + n + '</option>').join("") + '</select></div>' +
       '</div><div class="fieldrow">' +
       '<div class="field"><label for="adm-ksize">Knockout size</label><select id="adm-ksize" onchange="updateTimeEstimate()">' +
         ['auto',4,8,16,32].map(v => '<option value="' + v + '"' + (ksize == String(v) ? ' selected' : '') + '>' + (v === 'auto' ? 'Auto' : v + ' teams') + '</option>').join("") + '</select></div>' +
-      '<div class="field"><label for="adm-adv">Advance per group (auto)</label><input id="adm-adv" type="number" min="1" max="4" oninput="updateTimeEstimate()" value="' + evSetting(ev, "advance_per_group", 2) + '"></div>' +
+      '<div class="field"><label for="adm-adv">Advance per group (auto)</label><input id="adm-adv" type="number" min="1" max="4" oninput="updateTimeEstimate()" value="' + esc(String(evSetting(ev, "advance_per_group", 2))) + '"></div>' +
       '</div>' +
       '<div class="field"><label>Ending a game</label><div style="padding:2px 0 0">' +
       '<label style="display:inline-flex;align-items:center;gap:6px;font-weight:600">' +
@@ -2305,7 +2383,7 @@ function renderAdmin(){
         'One entrant per row; doubles put the two partner names in the first two columns and they come in joined as "Maya &amp; Owen". ' +
         'Got an export in some other shape? Send Drew the file and the upload can be taught to read it.</p>';
       h += '<div class="field"><label for="adm-teams">Entrants (one per line)</label><textarea id="adm-teams" placeholder="One team or player per line"></textarea></div>' +
-        '<div class="fieldrow"><div class="field"><label for="adm-gsize">Target group size</label><input id="adm-gsize" type="number" min="3" max="10" oninput="updateTimeEstimate()" value="' + evSetting(ev, "group_size", 6) + '"></div>' +
+        '<div class="fieldrow"><div class="field"><label for="adm-gsize">Target group size</label><input id="adm-gsize" type="number" min="3" max="10" oninput="updateTimeEstimate()" value="' + esc(String(evSetting(ev, "group_size", 6))) + '"></div>' +
         '<div class="field" style="display:flex;align-items:flex-end"><label style="display:flex;align-items:center;gap:6px;margin:0;padding-bottom:10px"><input type="checkbox" id="adm-shuffle" checked> Random draw</label></div></div>' +
         '<button class="btn small secondary" onclick="previewSetup()">Preview</button> ' +
         (hasMatches
@@ -2355,7 +2433,7 @@ function renderAdmin(){
     h += '<div class="divider"></div><h4>3 · Start and pause</h4>';
     h += '<div class="field" style="margin-top:6px"><label for="adm-note">Schedule note (shown to players, e.g. "Sat 9am")</label>' +
       '<input id="adm-note" type="text" value="' + esc(evSetting(ev, "schedule_note", "")) + '"></div>';
-    h += '<div class="field" style="margin-top:6px"><label for="adm-start">Planned start (drives the wait estimates players see)</label>' +
+    h += '<div class="field" style="margin-top:6px"><label for="adm-start">Planned start (drives the wait estimates players see; the event turns itself on 5 minutes before this time)</label>' +
       '<input id="adm-start" type="datetime-local" value="' + esc(evSetting(ev, "start_time", "")) + '"></div>';
     h += '<button class="btn small secondary" onclick="saveNote()">Save schedule</button> ';
     h += ev.active
@@ -2450,7 +2528,7 @@ function renderScoreModal(){
   } else if (infoOnly){
     h += '<div class="score-line"><label>' + esc(n1) + '</label></div>';
     h += '<div class="score-line"><label>' + esc(n2) + '</label></div>';
-    if (!m.postponed && ev){
+    if (ev){
       let est = '';
       if (ev.active){
         const w = estimatedWaitMinutes(m);
@@ -2686,8 +2764,15 @@ document.addEventListener("focusout", () => {
   }, 60);
 });
 
+let lastAutostartPing = 0;
 async function reload(background){
   try{
+    /* Let scheduled events turn themselves on (5 minutes early). Any phone's
+       refresh can trigger it; once a minute per phone is plenty. */
+    if (store.autostartDue && Date.now() - lastAutostartPing > 60000){
+      lastAutostartPing = Date.now();
+      store.autostartDue().catch(() => {});
+    }
     /* A background refresh (realtime/interval) pulls only the running events'
        matches to save egress, then keeps the other events' matches from the
        last full load. Admin actions and the initial load run full. */
@@ -3058,7 +3143,9 @@ function entrantsCsvPicked(input){
       return out.map(c => c.trim()).filter(c => c);
     };
     let rows = String(reader.result).split(/\r\n|\r|\n/).map(cells).filter(cs => cs.length);
-    if (rows.length > 1 && rows[0].every(c => /^(name|player|partner|team|entrant)/i.test(c))) rows = rows.slice(1);
+    /* Skip a header row only when every cell IS a header word (optionally
+       numbered), so a real team called "Team Rocket" never gets eaten. */
+    if (rows.length > 1 && rows[0].every(c => /^(name|player|partner|team|entrant)s?\s*[0-9]*$/i.test(c.trim()))) rows = rows.slice(1);
     const names = rows.map(cs => cs.length > 1 ? cs[0] + " & " + cs[1] : cs[0]);
     if (!names.length){ toast("No names found in that file."); return; }
     const box = document.getElementById("adm-teams");
@@ -3092,8 +3179,9 @@ async function saveNote(){
   const note = document.getElementById("adm-note").value.trim();
   const startEl = document.getElementById("adm-start");
   const start = startEl ? startEl.value : evSetting(ev, "start_time", "");
+  /* autostarted:false re-arms the 5-minutes-early auto-start for the new time. */
   const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name,
-    { schedule_note: note, start_time: start || "" });
+    { schedule_note: note, start_time: start || "", autostarted: false });
   if (!r.ok){ toast(r.error); return; }
   toast("Schedule saved"); await reload();
 }

@@ -229,8 +229,13 @@ declare
   ae record;
   a_courts int[];
   a_free int[];
+  busy uuid[];
 begin
-  select coalesce(nullif(settings ->> 'courts', '')::int, 4) into total from nairobi_tournaments limit 1;
+  -- numeric-guarded: a malformed value fails open to 4 rather than aborting
+  -- every mutating RPC that runs through here
+  select case when coalesce(settings ->> 'courts', '') ~ '^[0-9]+$'
+              then (settings ->> 'courts')::int else 4 end
+  into total from nairobi_tournaments limit 1;
   if total is null then return; end if;
   perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
 
@@ -248,10 +253,28 @@ begin
     where m.status = 'scheduled' and m.court = c
       and coalesce(e.settings ->> 'format', '') <> 'americano');
 
+  -- Teams currently holding a main-pool court. A team's next match must not be
+  -- called while they are mid-game on another court (happens at round
+  -- boundaries and after postpones/moves), so the loop below skips it and
+  -- takes the next eligible match instead. Entrant-id level: cross-event
+  -- double entry has separate entrant rows and cannot be tracked here.
+  select coalesce(array_agg(eid), '{}') into busy
+  from (
+    select m.entrant1_id as eid from nairobi_matches m
+    join nairobi_events e on e.id = m.event_id
+    where m.status = 'scheduled' and m.court is not null
+      and coalesce(e.settings ->> 'format', '') <> 'americano'
+    union
+    select m.entrant2_id from nairobi_matches m
+    join nairobi_events e on e.id = m.event_id
+    where m.status = 'scheduled' and m.court is not null
+      and coalesce(e.settings ->> 'format', '') <> 'americano'
+  ) s where eid is not null;
+
   for rec in
-    select q.id, ev.settings as evsettings
+    select q.id, q.entrant1_id, q.entrant2_id, ev.settings as evsettings
     from (
-      select m2.id, m2.event_id, m2.play_order,
+      select m2.id, m2.event_id, m2.play_order, m2.entrant1_id, m2.entrant2_id,
              ((row_number() over (partition by m2.event_id order by m2.play_order, m2.id) - 1) + 0.5)
                / count(*) over (partition by m2.event_id) as frac
       from nairobi_matches m2
@@ -264,15 +287,18 @@ begin
     order by q.frac, ev.sort_order, q.play_order, q.id
   loop
     exit when array_length(free_courts, 1) is null;
+    if rec.entrant1_id = any(busy) or rec.entrant2_id = any(busy) then continue; end if;
     if rec.evsettings ? 'courts' and jsonb_typeof(rec.evsettings -> 'courts') = 'array'
        and jsonb_array_length(rec.evsettings -> 'courts') > 0 then
-      select array_agg((value)::int) into allowed from jsonb_array_elements_text(rec.evsettings -> 'courts');
+      select array_agg((value)::int) into allowed
+      from jsonb_array_elements_text(rec.evsettings -> 'courts') where value ~ '^[0-9]+$';
     else allowed := null; end if;
     select c into chosen from unnest(free_courts) c where allowed is null or c = any(allowed) order by c limit 1;
     if chosen is not null then
       update nairobi_matches set court = chosen, postponed = false, called_at = now(), called_ack = false, updated_at = now()
       where id = rec.id;
       free_courts := array_remove(free_courts, chosen);
+      busy := busy || rec.entrant1_id || rec.entrant2_id;
     end if;
   end loop;
 
@@ -281,10 +307,13 @@ begin
   -- on a court and it is their earliest unplayed match, so a box schedule lets
   -- each court run its rounds back to back without double-booking anyone. =====
   for ae in select * from nairobi_events where active and coalesce(settings ->> 'format', '') = 'americano' loop
+    a_courts := null;
     if ae.settings ? 'courts' and jsonb_typeof(ae.settings -> 'courts') = 'array'
        and jsonb_array_length(ae.settings -> 'courts') > 0 then
-      select array_agg((value)::int) into a_courts from jsonb_array_elements_text(ae.settings -> 'courts');
-    else a_courts := array[1, 2]; end if;
+      select array_agg((value)::int) into a_courts
+      from jsonb_array_elements_text(ae.settings -> 'courts') where value ~ '^[0-9]+$';
+    end if;
+    if a_courts is null then a_courts := array[1, 2]; end if;
     select coalesce(array_agg(c order by c), '{}') into a_free
     from unnest(a_courts) c
     where not exists (select 1 from nairobi_matches m
@@ -328,7 +357,11 @@ declare
   total int;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
-  select coalesce(nullif(settings ->> 'courts', '')::int, 4) into total from nairobi_tournaments limit 1;
+  -- numeric-guarded: a malformed value fails open to 4 rather than aborting
+  -- every mutating RPC that runs through here
+  select case when coalesce(settings ->> 'courts', '') ~ '^[0-9]+$'
+              then (settings ->> 'courts')::int else 4 end
+  into total from nairobi_tournaments limit 1;
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.status <> 'scheduled' or m.court is not null then return 'That match is not waiting for a court.'; end if;
@@ -713,11 +746,19 @@ begin
       -- main court 1 or 2 passes the courts-restriction check below and pulls
       -- an Americano match on out of round order, leaving the main court free.
       and coalesce(e.settings ->> 'format', '') <> 'americano'
+      -- never a team that is already mid-game on another court
+      and not exists (
+        select 1 from nairobi_matches oc
+        join nairobi_events oe on oe.id = oc.event_id
+        where oc.status = 'scheduled' and oc.court is not null and oc.id <> p_match_id
+          and coalesce(oe.settings ->> 'format', '') <> 'americano'
+          and (oc.entrant1_id in (mm.entrant1_id, mm.entrant2_id)
+            or oc.entrant2_id in (mm.entrant1_id, mm.entrant2_id)))
       and (
         not (e.settings ? 'courts')
         or jsonb_typeof(e.settings -> 'courts') <> 'array'
         or jsonb_array_length(e.settings -> 'courts') = 0
-        or m.court in (select (value)::int from jsonb_array_elements_text(e.settings -> 'courts'))
+        or m.court in (select (value)::int from jsonb_array_elements_text(e.settings -> 'courts') where value ~ '^[0-9]+$')
       )
   )
   select id into repl from pending order by frac, sort_order, play_order, id limit 1;
@@ -841,11 +882,53 @@ begin
   if p_active and not exists (select 1 from nairobi_matches where event_id = p_event_id) then
     return 'Draw groups first, then start the event.';
   end if;
-  update nairobi_events set active = p_active where id = p_event_id;
+  -- Stamping autostarted consumes any pending auto-start for the current
+  -- start_time: a deliberately paused event must stay paused.
+  update nairobi_events
+  set active = p_active,
+      settings = coalesce(settings, '{}'::jsonb) || '{"autostarted": true}'::jsonb
+  where id = p_event_id;
   perform nairobi_assign_courts();
   return 'OK';
 end;
 $$;
+
+-- Events with an admin-set start time turn themselves on 5 minutes early, so
+-- the desk does not have to be watching the clock. Any phone's refresh calls
+-- this (anon-safe: it only enacts the stored schedule). Fires once per set
+-- start time: activation stamps settings.autostarted, manual Start/Pause also
+-- stamps it, and saving a new start time from the admin panel writes
+-- autostarted=false to re-arm. start_time is naive local time from the
+-- admin's phone; the tournament runs in Nairobi, hence the fixed zone. The
+-- 12-hour lower bound keeps long-past start times from ever firing.
+create or replace function nairobi_autostart_due()
+returns void
+language plpgsql security definer set search_path = public
+as $$
+declare
+  n int;
+begin
+  update nairobi_events e
+  set active = true,
+      settings = coalesce(e.settings, '{}'::jsonb) || '{"autostarted": true}'::jsonb
+  where not e.active
+    and coalesce(e.settings ->> 'autostarted', '') <> 'true'
+    and coalesce(e.settings ->> 'start_time', '') <> ''
+    and exists (select 1 from nairobi_matches m where m.event_id = e.id)
+    and case
+      when e.settings ->> 'start_time' ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}' then
+        ((e.settings ->> 'start_time')::timestamp at time zone 'Africa/Nairobi')
+          between now() - interval '12 hours' and now() + interval '5 minutes'
+      else false
+    end;
+  get diagnostics n = row_count;
+  if n > 0 then perform nairobi_assign_courts(); end if;
+exception when others then
+  -- a malformed start_time must never break loading for every phone
+  return;
+end;
+$$;
+grant execute on function nairobi_autostart_due() to anon, authenticated;
 
 -- Creates an event (null p_event_id) or wipes and rebuilds an existing one.
 -- The server forces event_id on every row so a payload can never write into
