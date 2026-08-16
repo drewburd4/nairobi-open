@@ -910,12 +910,17 @@ function demoStore(){
   };
   const checkPin = pin => pin === PIN;
 
-  function advanceWinner(m){
+  function advanceWinner(m, oldW){
     if (!m.next_match_id || m.status !== "played") return;
     const w = m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id;
     const nm = findMatch(m.next_match_id);
     if (nm && nm.status === "scheduled"){
-      if (m.next_slot === 1) nm.entrant1_id = w; else nm.entrant2_id = w;
+      /* Respect a manual bracket edit: only overwrite the slot when it is
+         empty, already the winner, or still holds this feeder's old winner. */
+      const cur = m.next_slot === 1 ? nm.entrant1_id : nm.entrant2_id;
+      if (cur == null || cur === w || (oldW != null && cur === oldW)){
+        if (m.next_slot === 1) nm.entrant1_id = w; else nm.entrant2_id = w;
+      }
     }
   }
 
@@ -985,11 +990,15 @@ function demoStore(){
       assignCourtsGlobal(db);
       notify(); return ok();
     },
-    async adminSubmitScore(pin, matchId, s1, s2, games, walkover){
+    async adminSubmitScore(pin, matchId, s1, s2, games, walkover, hadScore){
       if (!checkPin(pin)) return fail("Wrong PIN.");
       const m = findMatch(matchId);
       if (!m) return fail("Match not found.");
       if (!m.entrant1_id || !m.entrant2_id) return fail("Teams for this match aren't decided yet.");
+      /* The saving screen believed the match was unscored, but a score has
+         landed meanwhile: refuse rather than silently overwrite it. */
+      if (hadScore === false && m.status === "played")
+        return fail("A score just came in for this match; close and reopen it before changing anything.");
       const bo = settingFor(m, "best_of");
       let newW;
       if (walkover){
@@ -1006,17 +1015,16 @@ function demoStore(){
       }
       if (m.next_match_id){
         const nm = findMatch(m.next_match_id);
-        const oldW = m.status === "played" ? (m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id) : null;
-        if (nm && nm.status === "played" && oldW !== newW)
+        /* Refuse only when the played next round actually used a different
+           team in this feeder's slot: a manually pre-filled and played later
+           round with the same winner must not block scoring the feeder. */
+        if (nm && nm.status === "played" &&
+            (m.next_slot === 1 ? nm.entrant1_id : nm.entrant2_id) !== newW)
           return fail("The next round already has a score. Clear it first.");
       }
+      const oldW = m.status === "played" ? (m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id) : null;
       applyScore(m, s1, s2, games, true, walkover);
-      if (m.next_match_id){
-        const nm = findMatch(m.next_match_id);
-        if (nm && nm.status === "scheduled"){
-          if (m.next_slot === 1) nm.entrant1_id = newW; else nm.entrant2_id = newW;
-        }
-      }
+      advanceWinner(m, oldW);
       assignCourtsGlobal(db);
       notify(); return ok();
     },
@@ -1027,8 +1035,12 @@ function demoStore(){
       if (m.next_match_id){
         const nm = findMatch(m.next_match_id);
         if (nm && nm.status === "played") return fail("The next round already has a score. Clear it first.");
-        if (nm){
-          if (m.next_slot === 1) nm.entrant1_id = null; else nm.entrant2_id = null;
+        if (nm && m.status === "played"){
+          /* only pull back this feeder's own winner; a manually substituted
+             team in that slot stays put */
+          const w = m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id;
+          if (m.next_slot === 1){ if (nm.entrant1_id === w) nm.entrant1_id = null; }
+          else if (nm.entrant2_id === w) nm.entrant2_id = null;
         }
       }
       m.score1 = null; m.score2 = null; m.games = null; m.walkover = false;
@@ -1142,6 +1154,8 @@ function demoStore(){
         const prev = sibs.filter(x => x.play_order < t.play_order).pop();
         m.play_order = prev ? (prev.play_order + t.play_order) / 2 : t.play_order - 10;
       }
+      /* moving a match is a re-queue: it is no longer "postponed" */
+      m.postponed = false;
       assignCourtsGlobal(db);
       notify(); return ok();
     },
@@ -1284,6 +1298,7 @@ function demoStore(){
 function liveStore(){
   let client = null;
   const subs = [];
+  let needFullReload = false;
   const notify = () => subs.forEach(f => { try{ f(); }catch(e){} });
   let debounceT = null;
   /* Reload live data only when the tab is actually being looked at, and let a
@@ -1313,7 +1328,16 @@ function liveStore(){
       .on("postgres_changes", { event: "*", schema: "public", table: "nairobi_tournaments" }, debouncedNotify)
       .on("postgres_changes", { event: "*", schema: "public", table: "nairobi_events" }, debouncedNotify)
       .on("postgres_changes", { event: "*", schema: "public", table: "nairobi_entrants" }, debouncedNotify)
-      .on("postgres_changes", { event: "*", schema: "public", table: "nairobi_matches" }, debouncedNotify)
+      .on("postgres_changes", { event: "*", schema: "public", table: "nairobi_matches" }, p => {
+        /* A change to a PAUSED event's match (a Thursday correction made on
+           Friday) never shows up in the active-only background refresh, so
+           flag the next reload to pull everything. */
+        try{
+          const eid = p && ((p.new && p.new.event_id) || (p.old && p.old.event_id));
+          if (eid && data && data.events && !data.events.some(e => e.id === eid && e.active)) needFullReload = true;
+        }catch(_){}
+        debouncedNotify();
+      })
       .subscribe();
     setInterval(() => { if (document.visibilityState === "visible") notify(); }, 180000);
     document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") notify(); });
@@ -1333,6 +1357,7 @@ function liveStore(){
   return {
     mode: "live",
     subscribe(f){ subs.push(f); },
+    takeFullReloadHint(){ const v = needFullReload; needFullReload = false; return v; },
     async loadAll(activeOnly){
       const c = await ensureClient();
       const [t, ev, en] = await Promise.all([
@@ -1363,7 +1388,7 @@ function liveStore(){
       r.ok && r.data === true ? { ok: true } : { ok: false, error: r.error || "Wrong PIN." }),
     changePin: (oldPin, newPin) => rpc("nairobi_change_admin_pin", { p_old: oldPin, p_new: newPin }),
     submitScore: (id, s1, s2, games) => rpc("nairobi_submit_score", { p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null }),
-    adminSubmitScore: (pin, id, s1, s2, games, walkover) => rpc("nairobi_admin_submit_score", { p_pin: pin, p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null, p_walkover: !!walkover }),
+    adminSubmitScore: (pin, id, s1, s2, games, walkover, hadScore) => rpc("nairobi_admin_submit_score", { p_pin: pin, p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null, p_walkover: !!walkover, p_had_score: hadScore == null ? null : !!hadScore }),
     adminClearScore: (pin, id) => rpc("nairobi_admin_clear_score", { p_pin: pin, p_match_id: id }),
     adminPostpone: (pin, id, toEnd) => rpc("nairobi_admin_postpone", { p_pin: pin, p_match_id: id, p_to_end: !!toEnd }),
     adminPlayNext: (pin, id) => rpc("nairobi_admin_play_next", { p_pin: pin, p_match_id: id }),
@@ -1469,11 +1494,11 @@ const courtsCount = () => (data.tournament && data.tournament.settings && data.t
 const evSetting = (ev, key, dflt) => (ev && ev.settings && ev.settings[key] != null) ? ev.settings[key] : dflt;
 const matchPts = m => {
   const ev = eventById(m.event_id);
-  return evSetting(ev, m.stage === "knockout" ? "points_to_knockout" : "points_to_group", 21);
+  return evSetting(ev, m.stage === "knockout" ? "points_to_knockout" : "points_to_group", m.stage === "knockout" ? 11 : 21);
 };
 const matchBestOf = m => {
   const ev = eventById(m.event_id);
-  return parseInt(evSetting(ev, m.stage === "knockout" ? "best_of_knockout" : "best_of_group", 1), 10) || 1;
+  return parseInt(evSetting(ev, m.stage === "knockout" ? "best_of_knockout" : "best_of_group", m.stage === "knockout" ? 3 : 1), 10) || 1;
 };
 /* Knockout games are always win by 2; the win_by_two setting governs only the
    group stage (off by default, for predictable match lengths on shared courts). */
@@ -1593,8 +1618,13 @@ const allowedCourtCount = ev => {
    points target (one game to 21 runs somewhere near 17 minutes). */
 function perGameMinutes(m){
   const durs = [];
+  const now = Date.now();
   for(const x of data.matches){
     if (x.status !== "played" || x.walkover || !x.called_at || !x.updated_at) continue;
+    /* calibrate on this event's own recent matches: another day's (or another
+       format's) game lengths say little about this queue right now */
+    if (x.event_id !== m.event_id) continue;
+    if (now - Date.parse(x.updated_at) > 18 * 3600000) continue;
     const mins = (Date.parse(x.updated_at) - Date.parse(x.called_at)) / 60000;
     const g = Array.isArray(x.games) && x.games.length ? x.games.length : 1;
     const per = (mins - TURNOVER_MIN) / g;
@@ -1622,6 +1652,12 @@ function estimatedWaitMinutes(m){
   if (ahead < 0) return null;
   const now = Date.now();
   const playMinutes = x => expectedGamesFor(x) * perGameMinutes(x);
+  /* Which courts a match may be called to: its event's restriction, or all. */
+  const allowedOf = x => {
+    const ev2 = eventById(x.event_id);
+    const a = ev2 && ev2.settings && Array.isArray(ev2.settings.courts) ? ev2.settings.courts : [];
+    return a.length ? a : null;
+  };
   const mainOn = onCourtMatches().filter(x => !isAmericano(eventById(x.event_id)));
   const freeAt = [];
   for(let c = 1; c <= courtsCount(); c++){
@@ -1632,12 +1668,25 @@ function estimatedWaitMinutes(m){
     freeAt.push(Math.max(0, playMinutes(on) - elapsed) + WAIT_TURNOVER_MIN);
   }
   if (!freeAt.length) return null;
+  /* Drain the queue ahead, each match onto the soonest-free court IT is
+     allowed to use; an event pinned to one court must not be priced as if
+     the whole building were available to it. */
+  const soonestFor = x => {
+    const allowed = allowedOf(x);
+    let k = -1;
+    for(let j = 0; j < freeAt.length; j++){
+      if (allowed && allowed.indexOf(j + 1) === -1) continue;
+      if (k === -1 || freeAt[j] < freeAt[k]) k = j;
+    }
+    return k;
+  };
   for(let i = 0; i < ahead; i++){
-    let k = 0;
-    for(let j = 1; j < freeAt.length; j++) if (freeAt[j] < freeAt[k]) k = j;
-    freeAt[k] += playMinutes(q[i]) + WAIT_TURNOVER_MIN;
+    const k = soonestFor(q[i]);
+    if (k !== -1) freeAt[k] += playMinutes(q[i]) + WAIT_TURNOVER_MIN;
   }
-  return Math.round(Math.min.apply(null, freeAt));
+  const mine = soonestFor(m);
+  if (mine === -1) return null;
+  return Math.round(freeAt[mine]);
 }
 function eventStartDate(ev){
   const s = evSetting(ev, "start_time", "");
@@ -1679,9 +1728,9 @@ function eventDurationEstimate(ev, o){
   o = o || {};
   const pick = (v, dflt) => (v == null || v !== v ? dflt : v);
   const pg = pick(o.pointsGroup, evSetting(ev, "points_to_group", 21));
-  const pk = pick(o.pointsKo, evSetting(ev, "points_to_knockout", 21));
+  const pk = pick(o.pointsKo, evSetting(ev, "points_to_knockout", 11));
   const bg = pick(o.boGroup, parseInt(evSetting(ev, "best_of_group", 1), 10) || 1);
-  const bk = pick(o.boKo, parseInt(evSetting(ev, "best_of_knockout", 1), 10) || 1);
+  const bk = pick(o.boKo, parseInt(evSetting(ev, "best_of_knockout", 3), 10) || 1);
   const wb2 = pick(o.winBy2, !!evSetting(ev, "win_by_two", false));
   const courts = Math.max(1, pick(o.courts, allowedCourtCount(ev)));
 
@@ -1945,7 +1994,10 @@ function upcomingSoon(){
   const eligible = withStart.filter(e => {
     if (e.active || isAmericano(e)) return false;
     const t = eventStartDate(e).getTime();
-    if (t <= now) return false;
+    /* keep previewing through a 10-minute grace past the start, so the board
+       never shows "nothing running" in the sliver between the start moment
+       and the next phone's auto-start ping */
+    if (t <= now - 10 * 60000) return false;
     if (t - now > (t === minStart ? 24 : 12) * 3600000) return false;
     return data.matches.some(m => m.event_id === e.id && m.status === "scheduled" && m.entrant1_id && m.entrant2_id);
   }).sort((a, b) => eventStartDate(a) - eventStartDate(b));
@@ -2408,7 +2460,7 @@ function renderAdmin(){
     const koCount = data.matches.filter(m => m.event_id === ev.id && m.stage === "knockout").length;
     const evEntrants = data.entrants.filter(e => e.event_id === ev.id);
     const groups = groupsOfEvent(ev);
-    const bog = evSetting(ev, "best_of_group", 1), bok = evSetting(ev, "best_of_knockout", 1);
+    const bog = evSetting(ev, "best_of_group", 1), bok = evSetting(ev, "best_of_knockout", 3);
     const ksize = String(evSetting(ev, "knockout_size", "auto"));
 
     h += '<div class="panel">';
@@ -2421,7 +2473,7 @@ function renderAdmin(){
       '<div class="field"><label for="adm-ptg">Group games to</label><input id="adm-ptg" type="number" min="5" max="51" oninput="updateTimeEstimate()" value="' + esc(String(evSetting(ev, "points_to_group", 21))) + '"></div>' +
       '<div class="field"><label for="adm-bog">Group format</label><select id="adm-bog" onchange="updateTimeEstimate()">' +
         [1,3,5].map(n => '<option value="' + n + '"' + (bog == n ? ' selected' : '') + '>Best of ' + n + '</option>').join("") + '</select></div>' +
-      '<div class="field"><label for="adm-ptk">Knockout games to</label><input id="adm-ptk" type="number" min="5" max="51" oninput="updateTimeEstimate()" value="' + esc(String(evSetting(ev, "points_to_knockout", 21))) + '"></div>' +
+      '<div class="field"><label for="adm-ptk">Knockout games to</label><input id="adm-ptk" type="number" min="5" max="51" oninput="updateTimeEstimate()" value="' + esc(String(evSetting(ev, "points_to_knockout", 11))) + '"></div>' +
       '<div class="field"><label for="adm-bok">Knockout format</label><select id="adm-bok" onchange="updateTimeEstimate()">' +
         [1,3,5].map(n => '<option value="' + n + '"' + (bok == n ? ' selected' : '') + '>Best of ' + n + '</option>').join("") + '</select></div>' +
       '</div><div class="fieldrow">' +
@@ -2533,6 +2585,16 @@ function renderAdmin(){
     h += '<p class="note">One row per played match, players split out of team names, one column pair per game. Made to copy into DUPR\'s club "Import Matches via CSV" template (download that template from the DUPR club dashboard; it wants each player\'s DUPR ID, so collect those with the roster).</p>';
     h += '<button class="btn small secondary" onclick="downloadResults(false)">Download this event (CSV)</button> ' +
       '<button class="btn small secondary" onclick="downloadResults(true)">Download all events (CSV)</button>';
+    h += (function(){
+      let bk = null;
+      try{ bk = JSON.parse(safeLocal("pb_backup") || "null"); }catch(_){}
+      return '<p class="note" style="margin-top:10px">Offline backup on this phone: ' +
+        (bk ? bk.played + ' played matches, saved ' +
+          new Date(bk.taken_at).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) +
+          '. <button class="btn small secondary" onclick="downloadBackup()">Download backup (JSON)</button>'
+        : 'none yet (a snapshot is kept automatically every 25 played matches).') +
+        '<br>Every phone with the page open keeps its own copy, so a wiped database can be rebuilt from any of them.</p>';
+    })();
     h += '</div>';
   }
 
@@ -2851,7 +2913,12 @@ document.addEventListener("focusout", () => {
 });
 
 let lastAutostartPing = 0;
+/* Overlapping reloads (realtime storm + the 3-minute interval + a user
+   action) must not let a slower, older fetch overwrite a fresher one: each
+   reload takes a generation number and only the newest is allowed to land. */
+let loadGen = 0;
 async function reload(background){
+  const gen = ++loadGen;
   try{
     /* Let scheduled events turn themselves on (5 minutes early). Any phone's
        refresh can trigger it; once a minute per phone is plenty. */
@@ -2862,7 +2929,8 @@ async function reload(background){
     /* A background refresh (realtime/interval) pulls only the running events'
        matches to save egress, then keeps the other events' matches from the
        last full load. Admin actions and the initial load run full. */
-    const activeOnly = !!(background && data.tournament);
+    const activeOnly = !!(background && data.tournament) &&
+      !(store.takeFullReloadHint && store.takeFullReloadHint());
     let fresh = await store.loadAll(activeOnly);
     if (activeOnly && Array.isArray(data.matches)){
       const was = (data.events || []).filter(e => e.active).map(e => e.id);
@@ -2873,8 +2941,10 @@ async function reload(background){
       if (was.some(id => !now.has(id))) fresh = await store.loadAll(false);
       else fresh.matches = data.matches.filter(m => !now.has(m.event_id)).concat(fresh.matches || []);
     }
+    if (gen !== loadGen) return;   /* a newer reload superseded this one */
     data = fresh;
     state.loadError = null;
+    maybeBackup();
     if (state.eventId && !eventById(state.eventId)) state.eventId = null;
     if (state.adminEventId && !eventById(state.adminEventId)) state.adminEventId = null;
     /* Drop modal state whose record vanished (deleted on another device),
@@ -2900,6 +2970,37 @@ async function reload(background){
   render();
 }
 
+/* Every device quietly keeps an offline copy of the whole tournament in its
+   own browser storage, refreshed each time another 25 matches are recorded.
+   If the database is ever wiped or broken, any phone that had the page open
+   still holds the last snapshot (Admin has a download button for it). Never
+   overwritten by a suddenly emptier database: that is the moment it is for. */
+function maybeBackup(){
+  try{
+    const played = (data.matches || []).filter(m => m.status === "played").length;
+    if (!played) return;
+    let prev = null;
+    try{ prev = JSON.parse(safeLocal("pb_backup") || "null"); }catch(_){}
+    const prevPlayed = (prev && prev.played) || 0;
+    if (played < prevPlayed - 5) return;   /* looks like a wipe: keep the old copy */
+    if (prev && Math.floor(played / 25) <= Math.floor(prevPlayed / 25)) return;
+    safeLocal("pb_backup", JSON.stringify({
+      taken_at: new Date().toISOString(), played,
+      tournament: data.tournament && data.tournament.name,
+      events: data.events, entrants: data.entrants, matches: data.matches
+    }));
+  }catch(_){}
+}
+function downloadBackup(){
+  const raw = safeLocal("pb_backup");
+  if (!raw){ toast("No backup saved on this device yet."); return; }
+  const blob = new Blob([raw], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "nairobi-open-backup.json";
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
 function collectGames(bo){
   const games = [];
   for(let g = 1; g <= bo; g++){
@@ -2915,6 +3016,10 @@ async function saveScore(matchId){
   const bo = m ? matchBestOf(m) : 1;
   const pts = m ? matchPts(m) : 21;
   const wb2 = m ? matchWinBy2(m) : false;
+  /* What this screen believed when saving: if it thought the match was
+     unscored but a score has just arrived from the court, the server refuses
+     rather than silently overwriting someone's fresh entry. */
+  const had = m ? m.status === "played" : null;
   const errEl = document.getElementById("score-err");
   let r;
   if (bo > 1){
@@ -2927,7 +3032,7 @@ async function saveScore(matchId){
       if (!lenient.error && strict.error && !confirm(strict.error + " Save anyway (admin override)?")) return;
     }
     r = state.adminPin
-      ? await store.adminSubmitScore(state.adminPin, matchId, null, null, games, false)
+      ? await store.adminSubmitScore(state.adminPin, matchId, null, null, games, false, had)
       : await store.submitScore(matchId, null, null, games);
   } else {
     const s1 = parseInt(document.getElementById("score1").value, 10);
@@ -2938,7 +3043,7 @@ async function saveScore(matchId){
       if (!lenient && strict && !confirm(strict + " Save anyway (admin override)?")) return;
     }
     r = state.adminPin
-      ? await store.adminSubmitScore(state.adminPin, matchId, s1, s2, null, false)
+      ? await store.adminSubmitScore(state.adminPin, matchId, s1, s2, null, false, had)
       : await store.submitScore(matchId, s1, s2);
   }
   if (!r.ok){ errEl.textContent = r.error || "Something went wrong."; return; }
@@ -2954,7 +3059,7 @@ async function walkover(matchId, side){
   const bo = matchBestOf(m);
   const pts = bo > 1 ? Math.floor(bo / 2) + 1 : matchPts(m);
   const s1 = side === 1 ? pts : 0, s2 = side === 1 ? 0 : pts;
-  const r = await store.adminSubmitScore(state.adminPin, matchId, s1, s2, null, true);
+  const r = await store.adminSubmitScore(state.adminPin, matchId, s1, s2, null, true, m.status === "played");
   if (!r.ok){ const errEl = document.getElementById("score-err"); if (errEl) errEl.textContent = r.error; else toast(r.error); return; }
   state.modalMatchId = null;
   toast("Walkover recorded");
@@ -3012,11 +3117,12 @@ function applyLocalMove(matchId, beforeId){
     .filter(x => x.event_id === m.event_id && x.status === "scheduled" && x.id !== m.id)
     .sort((a, b) => a.play_order - b.play_order);
   if (!sibs.length) return;
-  if (beforeId == null){ m.play_order = sibs[sibs.length - 1].play_order + 10; return; }
+  if (beforeId == null){ m.play_order = sibs[sibs.length - 1].play_order + 10; m.postponed = false; return; }
   const t = sibs.find(x => x.id === beforeId);
   if (!t) return;
   const prev = sibs.filter(x => x.play_order < t.play_order).pop();
   m.play_order = prev ? (prev.play_order + t.play_order) / 2 : t.play_order - 10;
+  m.postponed = false;
 }
 /* Reorder the queue by typing the place a match should take, using the numbers
    the Up next list shows. A match still only holds a position within its own
@@ -3132,9 +3238,9 @@ function readEventSettings(ev){
      made to a different setting on another device. */
   const out = ({
     points_to_group: num("adm-ptg", evSetting(ev, "points_to_group", 21), 5, 51, "Group games to"),
-    points_to_knockout: num("adm-ptk", evSetting(ev, "points_to_knockout", 21), 5, 51, "Knockout games to"),
+    points_to_knockout: num("adm-ptk", evSetting(ev, "points_to_knockout", 11), 5, 51, "Knockout games to"),
     best_of_group: num("adm-bog", evSetting(ev, "best_of_group", 1), 1, 5, "Group format"),
-    best_of_knockout: num("adm-bok", evSetting(ev, "best_of_knockout", 1), 1, 5, "Knockout format"),
+    best_of_knockout: num("adm-bok", evSetting(ev, "best_of_knockout", 3), 1, 5, "Knockout format"),
     knockout_size: ks === "auto" ? "auto" : parseInt(ks, 10),
     advance_per_group: num("adm-adv", evSetting(ev, "advance_per_group", 2), 1, 4, "Advance per group"),
     group_size: num("adm-gsize", evSetting(ev, "group_size", 6), 3, 32, "Group size"),
@@ -3229,9 +3335,12 @@ function entrantsCsvPicked(input){
       return out.map(c => c.trim()).filter(c => c);
     };
     let rows = String(reader.result).split(/\r\n|\r|\n/).map(cells).filter(cs => cs.length);
-    /* Skip a header row only when every cell IS a header word (optionally
-       numbered), so a real team called "Team Rocket" never gets eaten. */
-    if (rows.length > 1 && rows[0].every(c => /^(name|player|partner|team|entrant)s?\s*[0-9]*$/i.test(c.trim()))) rows = rows.slice(1);
+    /* Skip a header row only when every cell IS a header phrase: one header
+       word, optionally followed by another header word or a number ("Player",
+       "Name 1", "Team Name", "First Name"). A real team like "Team Rocket"
+       has a non-header second word, so it is never eaten. */
+    if (rows.length > 1 && rows[0].every(c =>
+      /^(name|player|partner|team|entrant|first|last)s?\s*(name|id|no|number|[0-9]+)?$/i.test(c.trim()))) rows = rows.slice(1);
     const names = rows.map(cs => cs.length > 1 ? cs[0] + " & " + cs[1] : cs[0]);
     if (!names.length){ toast("No names found in that file."); return; }
     const box = document.getElementById("adm-teams");
@@ -3265,9 +3374,12 @@ async function saveNote(){
   const note = document.getElementById("adm-note").value.trim();
   const startEl = document.getElementById("adm-start");
   const start = startEl ? startEl.value : evSetting(ev, "start_time", "");
-  /* autostarted:false re-arms the 5-minutes-early auto-start for the new time. */
-  const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name,
-    { schedule_note: note, start_time: start || "", autostarted: false });
+  /* Re-arm the 5-minutes-early auto-start ONLY when the start time actually
+     changed: blanket re-arming meant that editing just the note on a paused
+     event (rain delay) let the old start time fire again within a minute. */
+  const payload = { schedule_note: note, start_time: start || "" };
+  if ((start || "") !== evSetting(ev, "start_time", "")) payload.autostarted = false;
+  const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, payload);
   if (!r.ok){ toast(r.error); return; }
   toast("Schedule saved"); await reload();
 }
@@ -3434,6 +3546,9 @@ async function applySetup(){
   await reload();
 }
 async function confirmGroupStage(){
+  /* Seed from a fresh pull, not the cached picture: a score entered on
+     another phone seconds ago must be in the standings the bracket uses. */
+  await reload();
   const ev = eventById(state.adminEventId);
   if (!ev) return;
   const groups = groupsOfEvent(ev);

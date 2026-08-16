@@ -46,7 +46,7 @@ create table if not exists nairobi_events (
   sort_order int not null default 0,
   stage text not null default 'group',        -- 'group' or 'knockout'
   active boolean not null default false,      -- true while feeding the courts
-  settings jsonb not null default '{"points_to_group": 21, "points_to_knockout": 21, "best_of_group": 1, "best_of_knockout": 1, "advance_per_group": 2, "knockout_size": "auto", "group_size": 6, "schedule_note": ""}'::jsonb,
+  settings jsonb not null default '{"points_to_group": 21, "points_to_knockout": 11, "best_of_group": 1, "best_of_knockout": 3, "advance_per_group": 2, "knockout_size": "auto", "group_size": 6, "schedule_note": ""}'::jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -188,7 +188,12 @@ end;
 $$;
 
 -- Internal: push a played match's winner into the next knockout round.
-create or replace function nairobi_advance_winner(p_match_id uuid)
+-- p_old_winner: the feeder's winner BEFORE this (re)score, or null on a first
+-- entry. The downstream slot is only overwritten when it is empty, already the
+-- new winner, or still holds that old winner — a manual "Edit teams"
+-- substitution in the next round survives a feeder correction.
+drop function if exists nairobi_advance_winner(uuid);
+create or replace function nairobi_advance_winner(p_match_id uuid, p_old_winner uuid default null)
 returns void
 language plpgsql security definer set search_path = public
 as $$
@@ -202,10 +207,12 @@ begin
   w := case when m.score1 > m.score2 then m.entrant1_id else m.entrant2_id end;
   if m.next_slot = 1 then
     update nairobi_matches set entrant1_id = w, updated_at = now()
-    where id = m.next_match_id and status = 'scheduled';
+    where id = m.next_match_id and status = 'scheduled'
+      and (entrant1_id is null or entrant1_id = w or entrant1_id = p_old_winner);
   else
     update nairobi_matches set entrant2_id = w, updated_at = now()
-    where id = m.next_match_id and status = 'scheduled';
+    where id = m.next_match_id and status = 'scheduled'
+      and (entrant2_id is null or entrant2_id = w or entrant2_id = p_old_winner);
   end if;
 end;
 $$;
@@ -412,10 +419,12 @@ declare
   target numeric;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
-  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.status <> 'scheduled' or m.court is not null then return 'That match is not waiting in the queue.'; end if;
+  -- row lock first, advisory second: same order as the score/swap paths, so
+  -- two admins acting on the same match cannot deadlock
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
 
   -- Span every scheduled match of the event, including ones already on a court.
   -- Those still hold play_order values, so ignoring them lets the new position
@@ -436,7 +445,8 @@ begin
     target := case when prev is null then t.play_order - 10 else (prev + t.play_order) / 2 end;
   end if;
 
-  update nairobi_matches set play_order = target, updated_at = now() where id = m.id;
+  -- moving a match is a re-queue: it is no longer "postponed"
+  update nairobi_matches set play_order = target, postponed = false, updated_at = now() where id = m.id;
   perform nairobi_assign_courts();
   return 'OK';
 end;
@@ -513,8 +523,10 @@ declare
   b int;
   wb2 boolean;
 begin
-  pts := nairobi_ev_int_setting(p_event_id, case when p_stage = 'knockout' then 'points_to_knockout' else 'points_to_group' end, 21);
-  bo := nairobi_ev_int_setting(p_event_id, case when p_stage = 'knockout' then 'best_of_knockout' else 'best_of_group' end, 1);
+  pts := nairobi_ev_int_setting(p_event_id, case when p_stage = 'knockout' then 'points_to_knockout' else 'points_to_group' end,
+                                case when p_stage = 'knockout' then 11 else 21 end);
+  bo := nairobi_ev_int_setting(p_event_id, case when p_stage = 'knockout' then 'best_of_knockout' else 'best_of_group' end,
+                               case when p_stage = 'knockout' then 3 else 1 end);
   -- Knockout games are always win-by-2; the setting governs only the group stage.
   wb2 := p_stage = 'knockout' or nairobi_ev_bool_setting(p_event_id, 'win_by_two', false);
 
@@ -614,7 +626,10 @@ $$;
 
 -- ---------- admin functions ----------
 
-create or replace function nairobi_admin_submit_score(p_pin text, p_match_id uuid, p_score1 int, p_score2 int, p_games jsonb default null, p_walkover boolean default false)
+-- Old signature dropped so the added p_had_score default cannot create an
+-- ambiguous overload for clients still calling with six named arguments.
+drop function if exists nairobi_admin_submit_score(text, uuid, int, int, jsonb, boolean);
+create or replace function nairobi_admin_submit_score(p_pin text, p_match_id uuid, p_score1 int, p_score2 int, p_games jsonb default null, p_walkover boolean default false, p_had_score boolean default null)
 returns text
 language plpgsql security definer set search_path = public
 as $$
@@ -632,6 +647,13 @@ begin
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.entrant1_id is null or m.entrant2_id is null then return 'Teams for this match are not decided yet.'; end if;
+  -- The saving screen believed the match was unscored, but a score landed
+  -- meanwhile: refuse rather than silently overwrite someone's fresh entry.
+  if p_had_score = false and m.status = 'played' then
+    return 'A score just came in for this match; close and reopen it before changing anything.';
+  end if;
+  old_w := case when m.status = 'played' and m.score1 > m.score2 then m.entrant1_id
+                when m.status = 'played' then m.entrant2_id else null end;
 
   if coalesce(p_walkover, false) then
     if p_score1 is null or p_score2 is null or p_score1 = p_score2
@@ -645,11 +667,14 @@ begin
 
   new_w := case when v_s1 > v_s2 then m.entrant1_id else m.entrant2_id end;
   if m.next_match_id is not null then
-    select * into nm from nairobi_matches where id = m.next_match_id;
+    -- locked read: the winner-flip guard must not race a concurrent score on
+    -- the next match, and refuse only when the played next round actually
+    -- used a different team in this feeder's slot (a manually pre-filled and
+    -- played later round with the same winner must not block the feeder).
+    select * into nm from nairobi_matches where id = m.next_match_id for update;
     if found and nm.status = 'played' then
-      old_w := case when m.status = 'played' and m.score1 > m.score2 then m.entrant1_id
-                    when m.status = 'played' then m.entrant2_id else null end;
-      if old_w is distinct from new_w then
+      if (case when m.next_slot = 1 then nm.entrant1_id else nm.entrant2_id end)
+         is distinct from new_w then
         return 'The next round already has a score. Clear it first.';
       end if;
     end if;
@@ -661,7 +686,7 @@ begin
       walkover = coalesce(p_walkover, false), updated_at = now()
   where id = p_match_id;
 
-  perform nairobi_advance_winner(p_match_id);
+  perform nairobi_advance_winner(p_match_id, old_w);
   perform nairobi_assign_courts();
   return 'OK';
 end;
@@ -690,12 +715,14 @@ declare
   front numeric;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
-  -- Same lock every other queue-mutating function takes. Without it two admins
-  -- acting at once can both read this min() and write the same play_order.
-  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.status <> 'scheduled' then return 'That match already has a score.'; end if;
+  -- Same advisory lock every other queue-mutating function takes, and in the
+  -- same ORDER: match row first, advisory second. Taking the advisory lock
+  -- before the row lock deadlocks against the score/swap paths, which lock
+  -- the row first and reach the advisory lock inside nairobi_assign_courts.
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select coalesce(min(play_order), m.play_order) - 1 into front
   from nairobi_matches where event_id = m.event_id and status = 'scheduled' and id <> m.id;
   update nairobi_matches set play_order = front, postponed = false, updated_at = now() where id = p_match_id;
@@ -792,15 +819,23 @@ begin
   if not found then return 'Match not found.'; end if;
 
   if m.next_match_id is not null then
-    select * into nm from nairobi_matches where id = m.next_match_id;
+    -- locked read: without it a concurrent score on the next match could land
+    -- between this check and the slot write, leaving a played match with a
+    -- nulled team. Only this feeder's own winner is pulled back; a manually
+    -- substituted team in that slot stays put.
+    select * into nm from nairobi_matches where id = m.next_match_id for update;
     if found and nm.status = 'played' then
       return 'The next round already has a score. Clear it first.';
     end if;
-    if found then
+    if found and m.status = 'played' and m.score1 is not null then
       if m.next_slot = 1 then
-        update nairobi_matches set entrant1_id = null, updated_at = now() where id = nm.id;
+        update nairobi_matches set entrant1_id = null, updated_at = now()
+        where id = nm.id and status = 'scheduled'
+          and entrant1_id = (case when m.score1 > m.score2 then m.entrant1_id else m.entrant2_id end);
       else
-        update nairobi_matches set entrant2_id = null, updated_at = now() where id = nm.id;
+        update nairobi_matches set entrant2_id = null, updated_at = now()
+        where id = nm.id and status = 'scheduled'
+          and entrant2_id = (case when m.score1 > m.score2 then m.entrant1_id else m.entrant2_id end);
       end if;
     end if;
   end if;
@@ -823,10 +858,12 @@ declare
   anchor numeric;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
-  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.status <> 'scheduled' then return 'That match already has a score.'; end if;
+  -- row lock first, advisory second: same order as the score/swap paths, so
+  -- two admins acting on the same match cannot deadlock
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
 
   if p_to_end then
     select coalesce(max(play_order), m.play_order) + 10 into anchor
@@ -1164,7 +1201,7 @@ $$;
 
 -- ---------- permissions ----------
 
-revoke execute on function nairobi_advance_winner(uuid) from public, anon, authenticated;
+revoke execute on function nairobi_advance_winner(uuid, uuid) from public, anon, authenticated;
 revoke execute on function nairobi_assign_courts() from public, anon, authenticated;
 revoke execute on function nairobi_check_score(uuid, text, int, int, jsonb, boolean) from public, anon, authenticated;
 revoke execute on function nairobi_ev_int_setting(uuid, text, int) from public, anon, authenticated;
@@ -1173,7 +1210,7 @@ revoke execute on function nairobi_ev_bool_setting(uuid, text, boolean) from pub
 grant execute on function nairobi_verify_pin(text) to anon, authenticated;
 grant execute on function nairobi_change_admin_pin(text, text) to anon, authenticated;
 grant execute on function nairobi_submit_score(uuid, int, int, jsonb) to anon, authenticated;
-grant execute on function nairobi_admin_submit_score(text, uuid, int, int, jsonb, boolean) to anon, authenticated;
+grant execute on function nairobi_admin_submit_score(text, uuid, int, int, jsonb, boolean, boolean) to anon, authenticated;
 grant execute on function nairobi_admin_clear_score(text, uuid) to anon, authenticated;
 grant execute on function nairobi_admin_postpone(text, uuid, boolean) to anon, authenticated;
 grant execute on function nairobi_admin_play_next(text, uuid) to anon, authenticated;
@@ -1258,8 +1295,13 @@ select 'Nairobi Open', crypt(nairobi_seed_pin(), gen_salt('bf'))
 where not exists (select 1 from nairobi_tournaments);
 
 -- All category events, ready to fill with entrants from the Admin tab.
-insert into nairobi_events (tournament_id, name, sort_order)
-select t.id, v.name, v.ord
+-- Singles group games run to 15 (more tiring per point); everything else to
+-- 21. Knockouts everywhere default to best of 3 to 11, per the README.
+insert into nairobi_events (tournament_id, name, sort_order, settings)
+select t.id, v.name, v.ord,
+  ('{"points_to_group": ' || case when v.name ilike '%singles%' then 15 else 21 end ||
+   ', "points_to_knockout": 11, "best_of_group": 1, "best_of_knockout": 3,' ||
+   ' "advance_per_group": 2, "knockout_size": "auto", "group_size": 6, "schedule_note": ""}')::jsonb
 from nairobi_tournaments t,
   (values
     ('Open Doubles (Men)', 0), ('Open Singles (Women)', 1), ('Open Singles (Men)', 2),
@@ -1321,7 +1363,7 @@ select
 -- drop function if exists nairobi_submit_score(uuid, int, int, jsonb);
 -- drop function if exists nairobi_check_score(uuid, text, int, int, jsonb, boolean);
 -- drop function if exists nairobi_assign_courts();
--- drop function if exists nairobi_advance_winner(uuid);
+-- drop function if exists nairobi_advance_winner(uuid, uuid);
 -- drop function if exists nairobi_ev_int_setting(uuid, text, int);
 -- drop function if exists nairobi_change_admin_pin(text, text);
 -- drop function if exists nairobi_verify_pin(text);
