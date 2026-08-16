@@ -522,6 +522,7 @@ declare
   a int;
   b int;
   wb2 boolean;
+  is_am boolean;
 begin
   pts := nairobi_ev_int_setting(p_event_id, case when p_stage = 'knockout' then 'points_to_knockout' else 'points_to_group' end,
                                 case when p_stage = 'knockout' then 11 else 21 end);
@@ -529,6 +530,9 @@ begin
                                case when p_stage = 'knockout' then 3 else 1 end);
   -- Knockout games are always win-by-2; the setting governs only the group stage.
   wb2 := p_stage = 'knockout' or nairobi_ev_bool_setting(p_event_id, 'win_by_two', false);
+  -- Americano is rally-scored: one game whose two scores add up to the points
+  -- target exactly (15), nothing more, nothing less. An odd total cannot tie.
+  is_am := coalesce((select e.settings ->> 'format' from nairobi_events e where e.id = p_event_id), '') = 'americano';
 
   if bo > 1 then
     need := bo / 2 + 1;
@@ -573,7 +577,11 @@ begin
     end if;
     if p_score1 = p_score2 then o_err := 'Scores cannot be tied.'; end if;
     if o_err is null and not p_is_admin then
-      if wb2 then
+      if is_am then
+        if p_score1 + p_score2 <> pts then
+          o_err := 'Americano: the two scores must add up to ' || pts || '.';
+        end if;
+      elsif wb2 then
         if greatest(p_score1, p_score2) < pts then o_err := 'The winner needs at least ' || pts || ' points.'; end if;
         if o_err is null and greatest(p_score1, p_score2) - least(p_score1, p_score2) < 2 then
           o_err := 'The winner has to lead by 2.';
