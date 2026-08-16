@@ -314,10 +314,14 @@ begin
       from jsonb_array_elements_text(ae.settings -> 'courts') where value ~ '^[0-9]+$';
     end if;
     if a_courts is null then a_courts := array[1, 2]; end if;
+    -- a court number held by ANY americano event counts as taken, so two
+    -- americano events sharing the default [1,2] cannot double-book
     select coalesce(array_agg(c order by c), '{}') into a_free
     from unnest(a_courts) c
     where not exists (select 1 from nairobi_matches m
-                      where m.event_id = ae.id and m.status = 'scheduled' and m.court = c);
+                      join nairobi_events e2 on e2.id = m.event_id
+                      where coalesce(e2.settings ->> 'format', '') = 'americano'
+                        and m.status = 'scheduled' and m.court = c);
 
     for rec in
       select m2.id
@@ -380,41 +384,10 @@ end;
 $$;
 grant execute on function nairobi_admin_assign_court(text, uuid, int) to anon, authenticated;
 
--- Admin: nudge a waiting match up or down within its own event's queue by
--- swapping play_order with the neighbouring waiting match of the same event.
-create or replace function nairobi_admin_reorder_match(p_pin text, p_match_id uuid, p_dir text)
-returns text
-language plpgsql security definer set search_path = public
-as $$
-declare
-  m nairobi_matches;
-  other nairobi_matches;
-  tmp numeric;
-begin
-  if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
-  select * into m from nairobi_matches where id = p_match_id for update;
-  if not found then return 'Match not found.'; end if;
-  if m.status <> 'scheduled' or m.court is not null then return 'That match is not waiting in the queue.'; end if;
-  if p_dir = 'up' then
-    select * into other from nairobi_matches
-      where event_id = m.event_id and status = 'scheduled' and court is null and postponed = false
-        and entrant1_id is not null and entrant2_id is not null and play_order < m.play_order
-      order by play_order desc limit 1;
-  else
-    select * into other from nairobi_matches
-      where event_id = m.event_id and status = 'scheduled' and court is null and postponed = false
-        and entrant1_id is not null and entrant2_id is not null and play_order > m.play_order
-      order by play_order asc limit 1;
-  end if;
-  if not found then return 'OK'; end if;  -- already at the end of the queue
-  tmp := m.play_order;
-  update nairobi_matches set play_order = other.play_order, updated_at = now() where id = m.id;
-  update nairobi_matches set play_order = tmp, updated_at = now() where id = other.id;
-  perform nairobi_assign_courts();
-  return 'OK';
-end;
-$$;
-grant execute on function nairobi_admin_reorder_match(text, uuid, text) to anon, authenticated;
+-- The old up/down nudge function is gone: the app moved to
+-- nairobi_admin_move_match, and this was the one queue mutator without the
+-- advisory lock. The drop keeps older installs from carrying it.
+drop function if exists nairobi_admin_reorder_match(text, uuid, text);
 
 -- Admin: drop a waiting match directly in front of another one in its own
 -- event's queue (p_before_id null sends it to the back). This is what the drag
@@ -485,6 +458,12 @@ begin
   if not found then return 'The match to bring on was not found.'; end if;
   if onm.status <> 'scheduled' or onm.court is not null then return 'That match is not waiting for a court.'; end if;
   if onm.entrant1_id is null or onm.entrant2_id is null then return 'That match''s teams are not set yet.'; end if;
+  -- Americano matches live in their own court pool; swapping one off (or on)
+  -- would cross the pools and double-book a court number.
+  if exists (select 1 from nairobi_events e where e.id in (offm.event_id, onm.event_id)
+             and coalesce(e.settings ->> 'format', '') = 'americano') then
+    return 'Americano rounds rotate on their own; enter the score or pause the event instead.';
+  end if;
   perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   c := offm.court;
   update nairobi_matches
@@ -725,6 +704,12 @@ begin
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.status <> 'scheduled' or m.court is null then return 'That match is not on a court.'; end if;
+  -- Americano matches live in their own court pool; pulling one off here would
+  -- hand its court number to a main-draw replacement and double-book.
+  if exists (select 1 from nairobi_events e where e.id = m.event_id
+             and coalesce(e.settings ->> 'format', '') = 'americano') then
+    return 'Americano rounds rotate on their own; enter the score or pause the event instead.';
+  end if;
   perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
 
   -- Pick the replacement with the same weighting nairobi_assign_courts uses, so
@@ -1012,6 +997,11 @@ begin
   if exists (select 1 from nairobi_matches where stage = 'knockout' and (entrant1_id = p_entrant_id or entrant2_id = p_entrant_id)) then
     return 'They are in the knockout bracket. Edit the bracket or reset it first.';
   end if;
+  -- Never delete a match that is live on a court out from under its players.
+  if exists (select 1 from nairobi_matches where (entrant1_id = p_entrant_id or entrant2_id = p_entrant_id)
+             and status = 'scheduled' and court is not null) then
+    return 'That team''s match is on a court right now. Score it or take it off court first.';
+  end if;
   delete from nairobi_matches where entrant1_id = p_entrant_id or entrant2_id = p_entrant_id;
   delete from nairobi_entrants where id = p_entrant_id;
   perform nairobi_assign_courts();
@@ -1060,6 +1050,11 @@ begin
   if not found then return 'Team not found.'; end if;
   if exists (select 1 from nairobi_matches where stage = 'knockout' and (entrant1_id = p_entrant_id or entrant2_id = p_entrant_id)) then
     return 'They are in the knockout bracket. Edit the bracket or reset it first.';
+  end if;
+  -- Never delete a match that is live on a court out from under its players.
+  if exists (select 1 from nairobi_matches where (entrant1_id = p_entrant_id or entrant2_id = p_entrant_id)
+             and status = 'scheduled' and court is not null) then
+    return 'That team''s match is on a court right now. Score it or take it off court first.';
   end if;
 
   delete from nairobi_matches where stage = 'group' and (entrant1_id = p_entrant_id or entrant2_id = p_entrant_id);

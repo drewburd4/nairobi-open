@@ -760,7 +760,9 @@ function assignCourtsGlobal(db){
   // one independent pool per active Americano event
   db.events.filter(e => e.active && dbIsAmericano(e)).forEach(ev => {
     const aCourts = ev.settings && Array.isArray(ev.settings.courts) && ev.settings.courts.length ? ev.settings.courts : [1, 2];
-    const takenA = new Set(db.matches.filter(m => m.event_id === ev.id && m.status === "scheduled" && m.court != null).map(m => m.court));
+    /* a court number held by ANY americano event counts as taken, so two
+       americano events sharing the default [1,2] cannot double-book */
+    const takenA = new Set(db.matches.filter(m => m.status === "scheduled" && m.court != null && dbIsAmericano(evOf(m))).map(m => m.court));
     const freeA = aCourts.filter(c => !takenA.has(c));
     for(const next of americanoEligible(db, ev)){
       if (!freeA.length) break;
@@ -1042,12 +1044,16 @@ function demoStore(){
       const pending = db.matches
         .filter(x => x.event_id === m.event_id && x.status === "scheduled" && x.id !== m.id)
         .sort((a, b) => a.play_order - b.play_order);
-      if (toEnd || pending.length <= 8){
+      if (toEnd){
         m.play_order = (pending.length ? pending[pending.length - 1].play_order : m.play_order) + 10;
       } else {
+        /* Mirror the SQL exactly: land midway between the 8th and 9th match
+           behind this one (a flat +1 slowly eats the gaps until two matches
+           share a position), else to the back. */
         const after = pending.filter(x => x.play_order > m.play_order);
-        const anchor = after[7] || after[after.length - 1];
-        if (anchor) m.play_order = anchor.play_order + 1;
+        const a8 = after[7], a9 = after[8];
+        if (a8) m.play_order = (a8.play_order + (a9 ? a9.play_order : a8.play_order + 20)) / 2;
+        else m.play_order = (pending.length ? pending[pending.length - 1].play_order : m.play_order) + 10;
       }
       m.postponed = true; m.court = null;
       assignCourtsGlobal(db);
@@ -1069,6 +1075,7 @@ function demoStore(){
       const m = findMatch(matchId);
       if (!m) return fail("Match not found.");
       if (m.status !== "scheduled" || m.court == null) return fail("That match is not on a court.");
+      if (dbIsAmericano(eventOf(m))) return fail("Americano rounds rotate on their own; enter the score or pause the event instead.");
       /* Same gate as court assignment: never bring on a team that is already
          mid-game on another main court. Mirrors the SQL. */
       const busyNow = new Set();
@@ -1144,6 +1151,8 @@ function demoStore(){
       if (!onm) return fail("The match to bring on was not found.");
       if (onm.status !== "scheduled" || onm.court != null) return fail("That match is not waiting for a court.");
       if (!onm.entrant1_id || !onm.entrant2_id) return fail("That match's teams aren't set yet.");
+      if (dbIsAmericano(eventOf(offm)) || dbIsAmericano(eventOf(onm)))
+        return fail("Americano rounds rotate on their own; enter the score or pause the event instead.");
       const c = offm.court;
       onm.court = c; onm.postponed = false; onm.called_at = new Date().toISOString(); onm.called_ack = false;
       const pending = db.matches.filter(x => x.event_id === offm.event_id && x.status === "scheduled" && x.court == null && x.id !== offm.id);
@@ -1201,6 +1210,8 @@ function demoStore(){
       if (!e) return fail("Team not found.");
       if (db.matches.some(m => m.stage === "knockout" && (m.entrant1_id === entrantId || m.entrant2_id === entrantId)))
         return fail("They're in the knockout bracket. Edit the bracket or reset it first.");
+      if (db.matches.some(m => (m.entrant1_id === entrantId || m.entrant2_id === entrantId) && m.status === "scheduled" && m.court != null))
+        return fail("That team's match is on a court right now. Score it or take it off court first.");
       db.matches = db.matches.filter(m => !(m.entrant1_id === entrantId || m.entrant2_id === entrantId));
       db.entrants = db.entrants.filter(x => x.id !== entrantId);
       assignCourtsGlobal(db);
@@ -1220,6 +1231,8 @@ function demoStore(){
       if (!e) return fail("Team not found.");
       if (db.matches.some(m => m.stage === "knockout" && (m.entrant1_id === entrantId || m.entrant2_id === entrantId)))
         return fail("They're in the knockout bracket. Edit the bracket or reset it first.");
+      if (db.matches.some(m => (m.entrant1_id === entrantId || m.entrant2_id === entrantId) && m.status === "scheduled" && m.court != null))
+        return fail("That team's match is on a court right now. Score it or take it off court first.");
       db.matches = db.matches.filter(m => !(m.stage === "group" && (m.entrant1_id === entrantId || m.entrant2_id === entrantId)));
       e.group_name = newGroup;
       matches.forEach(m => db.matches.push(Object.assign({}, m, { event_id: e.event_id, court: null })));
@@ -2503,7 +2516,10 @@ function renderScoreModal(){
   const adminExtras = () => {
     let x = '';
     if (isAdmin && m.status === "scheduled"){
-      if (m.court != null) x += '<button class="btn small secondary" onclick="openOffCourt(\'' + m.id + '\')">Take off court</button>';
+      /* Americano matches rotate through their own pool; taking one off would
+         hand its court number to a main-draw replacement. */
+      if (m.court != null && !isAmericano(eventById(m.event_id)))
+        x += '<button class="btn small secondary" onclick="openOffCourt(\'' + m.id + '\')">Take off court</button>';
       x += '<button class="btn small secondary" onclick="postpone(\'' + m.id + '\', false, true)">Postpone</button>';
     }
     if (isAdmin && played) x += '<button class="btn small danger" onclick="clearScore(\'' + m.id + '\')">Clear score</button>';
