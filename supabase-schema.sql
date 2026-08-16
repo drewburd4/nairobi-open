@@ -56,8 +56,14 @@ create table if not exists nairobi_entrants (
   name text not null,
   group_name text,
   seed int,
+  -- Free-form per-entrant data; today: {dupr: 3.95, duprs: [4.1, 3.8]} from
+  -- the CSV upload (team average used for snake seeding, individuals shown
+  -- on the admin groups board). Unrated entrants just have {}.
+  meta jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default now()
 );
+-- Existing installs predate the meta column; add it in place.
+alter table nairobi_entrants add column if not exists meta jsonb not null default '{}'::jsonb;
 
 create table if not exists nairobi_matches (
   id uuid primary key,
@@ -1010,8 +1016,9 @@ begin
     delete from nairobi_entrants where event_id = v_eid;
   end if;
 
-  insert into nairobi_entrants (id, event_id, name, group_name, seed)
-  select (x ->> 'id')::uuid, v_eid, x ->> 'name', x ->> 'group_name', (x ->> 'seed')::int
+  insert into nairobi_entrants (id, event_id, name, group_name, seed, meta)
+  select (x ->> 'id')::uuid, v_eid, x ->> 'name', x ->> 'group_name', (x ->> 'seed')::int,
+         coalesce(x -> 'meta', '{}'::jsonb)
   from jsonb_array_elements(coalesce(p_entrants, '[]'::jsonb)) x;
 
   insert into nairobi_matches (id, event_id, stage, group_name, round, bracket_round, bracket_pos,
@@ -1078,8 +1085,9 @@ begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
   if not exists (select 1 from nairobi_events where id = p_event_id) then return 'Event not found.'; end if;
 
-  insert into nairobi_entrants (id, event_id, name, group_name, seed)
-  values ((p_entrant ->> 'id')::uuid, p_event_id, p_entrant ->> 'name', p_entrant ->> 'group_name', (p_entrant ->> 'seed')::int);
+  insert into nairobi_entrants (id, event_id, name, group_name, seed, meta)
+  values ((p_entrant ->> 'id')::uuid, p_event_id, p_entrant ->> 'name', p_entrant ->> 'group_name', (p_entrant ->> 'seed')::int,
+          coalesce(p_entrant -> 'meta', '{}'::jsonb));
 
   insert into nairobi_matches (id, event_id, stage, group_name, round, bracket_round, bracket_pos,
                        entrant1_id, entrant2_id, score1, score2, games, status, play_order, postponed,

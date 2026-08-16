@@ -256,6 +256,18 @@ details.teamlist{margin:10px 0}
 details.teamlist summary{cursor:pointer; font-weight:700; font-size:13.5px; padding:4px 0}
 select.mv{padding:4px 6px; border-radius:6px; border:1px solid var(--line); background:var(--bg); font-size:12px; max-width:96px}
 .addteam{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px}
+/* Admin groups board: tap a team, tap a destination group. */
+.gboard{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; margin-top:4px}
+.gcol{background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:8px}
+.gcol.target{outline:2px dashed var(--accent); outline-offset:2px; cursor:pointer}
+.gcol h5{margin:0 0 4px; font-size:13px; display:flex; justify-content:space-between; gap:8px; align-items:baseline}
+.gcol .gavg{color:var(--muted); font-weight:600; font-size:11px; text-align:right}
+.gchip{display:flex; justify-content:space-between; align-items:center; gap:8px; width:100%; text-align:left; font:inherit; color:inherit; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px 8px; margin-top:5px; cursor:pointer}
+.gchip.sel{border-color:var(--accent); background:var(--accent-soft); box-shadow:0 0 0 1px var(--accent)}
+.gchip .nm{font-weight:650; min-width:0; overflow-wrap:anywhere; font-size:13px}
+.gchip .dupr{flex:none; font-variant-numeric:tabular-nums; font-weight:800; font-size:12px; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:1px 6px}
+.gchip .dupr small{display:block; font-weight:500; color:var(--muted); font-size:9px; text-align:center}
+.gchip .dupr.unrated{color:var(--muted); font-weight:600}
 .addteam input{flex:2; min-width:140px; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg)}
 .addteam select{flex:1; min-width:90px; padding:8px 10px; border-radius:8px; border:1px solid var(--line); background:var(--bg)}
 
@@ -344,6 +356,26 @@ function makeGroups(names, target, rand){
     idx += s;
   });
   return groups;
+}
+
+/* Snake seeding: strongest first, dealt A..K then K..A so every group gets an
+   even spread of ratings. Unrated entries sort last (in pasted order) and fill
+   the tail. Groups that hit their size are skipped, so uneven sizes from
+   groupSizes still come out full. */
+function makeSeededGroups(entries, target){
+  const sizes = groupSizes(entries.length, target);
+  const ordered = entries.slice().sort((a, b) => (b.dupr != null ? b.dupr : -1) - (a.dupr != null ? a.dupr : -1));
+  const groups = sizes.map((s, i) => ({ name: groupLetter(i), size: s, members: [] }));
+  let idx = 0;
+  for(let r = 0; idx < ordered.length && r < entries.length + 2; r++){
+    const order = groups.map((_, i) => i);
+    if (r % 2) order.reverse();
+    for(const gi of order){
+      if (idx >= ordered.length) break;
+      if (groups[gi].members.length < groups[gi].size) groups[gi].members.push(ordered[idx++].name);
+    }
+  }
+  return groups.map(g => ({ name: g.name, members: g.members }));
 }
 
 /* Circle-method round robin. Returns rounds, each an array of [a,b] pairs. */
@@ -1445,6 +1477,7 @@ const state = {
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null, assignCourt: null, offCourtId: null,
   setupPreview: null, adminEventId: null, loadError: null,
   showAllQueue: false, showRedraw: false, pendingRender: false, division: "main",
+  movePick: null,
   lang: safeLocal("pb_lang") === "sw" ? "sw" : "en",
   dismissedCalled: {}, contacts: {}
 };
@@ -1606,6 +1639,12 @@ const SW_EXACT = {
   "Each player appears in seven pairings; renaming here updates every one of them.":
     "Kila mchezaji yumo kwenye jozi saba; kubadilisha jina hapa husasisha zote.",
   "Teams and groups": "Timu na makundi", "Teams": "Timu",
+  "Groups board": "Ubao wa makundi",
+  "Tap a team, then tap another group to move it.": "Gusa timu, kisha gusa kundi jingine kuihamisha.",
+  "tap a destination group, or tap the team again to cancel.": "gusa kundi unakokwenda, au gusa timu tena kughairi.",
+  "Seed groups by DUPR (snake)": "Panga makundi kwa DUPR (mtindo wa nyoka)",
+  "Add ratings after a | on each line (\"Maya & Owen | 4.1 3.8\"); the CSV upload fills them in when the file has rating columns. Snake seeding deals the strongest teams evenly across groups; unrated teams go in last.":
+    "Weka viwango baada ya | kwenye kila mstari (\"Maya & Owen | 4.1 3.8\"); upakiaji wa CSV huvijaza wenyewe faili likiwa na safu wima za viwango. Mpangilio wa nyoka husambaza timu bora sawasawa kwenye makundi yote; timu zisizo na kiwango huingia mwisho.",
   "rename, move, remove, add": "badilisha jina, hamisha, ondoa, ongeza",
   "Move…": "Hamisha…", "Remove": "Ondoa", "Add": "Ongeza",
   "New team or player": "Timu au mchezaji mpya",
@@ -1802,6 +1841,13 @@ const SW_PATTERNS = [
   [/^Move "(.+)" to group (\S+)\? Their existing matches and results are replaced with catch-up matches\.$/,
     "Umhamishie \"$1\" kundi $2? Mechi zao za sasa na matokeo yao yatabadilishwa na mechi za kufidia."],
   [/^(.+) moved to group (\S+)$/, "$1 amehamishiwa kundi $2"],
+  /* [^·] so the whole composed banner line can't be swallowed before the
+     segment pass gets to translate its second half. */
+  [/^Moving ([^·]+)$/, "Inahamisha $1"],
+  [/^Move "(.+)" to group (\S+)\? Nothing has been played, so both groups' schedules are redrawn cleanly\.$/,
+    "Umhamishie \"$1\" kundi $2? Hakuna kilichochezwa bado, hivyo ratiba za makundi yote mawili zitachorwa upya."],
+  [/^Snake-seeded by DUPR \((\d+) rated, (\d+) unrated\)$/,
+    "Imepangwa kwa DUPR mtindo wa nyoka (zenye kiwango $1, zisizo na kiwango $2)"],
   [/^(.+) added to Group (\S+)$/, "$1 ameongezwa kwenye Kundi $2"],
   [/^Phone number\(s\) for "(.+)", comma separated \(07\.\.\. or \+254\.\.\.\)\. Leave empty to remove\.$/,
     "Namba za simu za \"$1\", zikitenganishwa kwa koma (07... au +254...). Acha wazi ili kuondoa."],
@@ -2860,6 +2906,48 @@ function renderBracket(){
 }
 
 /* ---------- admin ---------- */
+/* Groups board: every group as a column of team chips with DUPR (team average
+   large, individual ratings under it) and a group-average header, so balance
+   is visible at a glance. Tap a chip to pick it up, tap another group to move
+   it: before anything is played the whole schedule is redrawn cleanly, after
+   that it falls through to the usual catch-up-matches flow. */
+function avgDuprOf(members){
+  const vals = members.map(e => e.meta && e.meta.dupr).filter(v => v != null);
+  return vals.length ? vals.reduce((a, b) => a + +b, 0) / vals.length : null;
+}
+function renderGroupsBoard(ev, groups, evEntrants){
+  if (groups.length < 2) return '';
+  const sel = state.movePick ? entrantById(state.movePick) : null;
+  let h = '<div class="field" style="margin-top:10px;margin-bottom:0"><label>Groups board</label></div>';
+  h += sel
+    ? '<p class="note" style="margin:0 0 6px;font-weight:700">Moving ' + esc(sel.name) + ' · tap a destination group, or tap the team again to cancel.</p>'
+    : '<p class="note" style="margin:0 0 6px">Tap a team, then tap another group to move it.</p>';
+  h += '<div class="gboard">';
+  for(const g of groups){
+    const members = evEntrants.filter(e => e.group_name === g).sort((a, b) => (a.seed || 0) - (b.seed || 0));
+    const avg = avgDuprOf(members);
+    const target = sel && sel.group_name !== g;
+    h += '<div class="gcol' + (target ? ' target' : '') + '"' +
+      (target ? ' onclick="movePickTo(\'' + jsAttr(g) + '\')"' : '') + '>';
+    h += '<h5><span>Group ' + esc(g) + '</span><span class="gavg">' + members.length + ' teams' +
+      (avg != null ? ' · DUPR ' + avg.toFixed(2) : '') + '</span></h5>';
+    members.forEach(e => {
+      const d = e.meta && e.meta.dupr != null ? e.meta : null;
+      h += '<button class="gchip' + (sel && sel.id === e.id ? ' sel' : '') + '" ' +
+        'onclick="event.stopPropagation();pickForMove(\'' + e.id + '\')">' +
+        '<span class="nm">' + esc(e.name) + '</span>' +
+        (d ? '<span class="dupr">' + (+d.dupr).toFixed(2) +
+             (Array.isArray(d.duprs) && d.duprs.length > 1
+               ? '<small>' + d.duprs.map(x => (+x).toFixed(1)).join(' / ') + '</small>' : '') +
+             '</span>'
+           : '<span class="dupr unrated">–</span>') +
+        '</button>';
+    });
+    h += '</div>';
+  }
+  h += '</div>';
+  return h;
+}
 function renderAdmin(){
   if (!state.adminPin){
     return '<div class="panel" style="max-width:380px;margin:24px auto"><h3>Admin</h3>' +
@@ -2937,8 +3025,10 @@ function renderAdmin(){
         '<button class="btn small secondary" onclick="document.getElementById(\'adm-csv\').click()">Upload a CSV instead</button><br>' +
         'One entrant per row; doubles put the two partner names in the first two columns and they come in joined as "Maya &amp; Owen". ' +
         'Got an export in some other shape? Send Drew the file and the upload can be taught to read it.</p>';
+      h += '<p class="note" style="margin-top:4px">Add ratings after a | on each line ("Maya &amp; Owen | 4.1 3.8"); the CSV upload fills them in when the file has rating columns. Snake seeding deals the strongest teams evenly across groups; unrated teams go in last.</p>';
       h += '<div class="field"><label for="adm-teams">Entrants (one per line)</label><textarea id="adm-teams" placeholder="One team or player per line"></textarea></div>' +
         '<div class="fieldrow"><div class="field"><label for="adm-gsize">Target group size</label><input id="adm-gsize" type="number" min="3" max="10" oninput="updateTimeEstimate()" value="' + esc(String(evSetting(ev, "group_size", 6))) + '"></div>' +
+        '<div class="field" style="display:flex;align-items:flex-end"><label style="display:flex;align-items:center;gap:6px;margin:0;padding-bottom:10px"><input type="checkbox" id="adm-seeddupr" checked> Seed groups by DUPR (snake)</label></div>' +
         '<div class="field" style="display:flex;align-items:flex-end"><label style="display:flex;align-items:center;gap:6px;margin:0;padding-bottom:10px"><input type="checkbox" id="adm-shuffle" checked> Random draw</label></div></div>' +
         '<button class="btn small secondary" onclick="previewSetup()">Preview</button> ' +
         (hasMatches
@@ -2961,12 +3051,15 @@ function renderAdmin(){
     } else if (evEntrants.length){
       const nextLetter = groupLetter(groups.length);
       h += '<div class="divider"></div><h4>' + (hasMatches ? '2 · Teams and groups' : 'Teams') + '</h4>';
+      h += renderGroupsBoard(ev, groups, evEntrants);
       h += '<details class="teamlist"><summary>Team list (' + evEntrants.length + ' in ' + groups.length + ' groups) · rename, move, remove, add</summary>';
       const byGroup = {};
       evEntrants.forEach(e => { (byGroup[e.group_name] = byGroup[e.group_name] || []).push(e); });
       Object.keys(byGroup).sort().forEach(g => {
         byGroup[g].forEach(e => {
-          h += '<div class="queue-row"><span class="qnames">' + esc(e.name) + '</span><span class="qtag">Group ' + esc(g) + '</span>' +
+          h += '<div class="queue-row"><span class="qnames">' + esc(e.name) + '</span>' +
+            (e.meta && e.meta.dupr != null ? '<span class="qtag">' + (+e.meta.dupr).toFixed(2) + '</span>' : '') +
+            '<span class="qtag">Group ' + esc(g) + '</span>' +
             '<span class="queue-actions">' +
             '<select class="mv" onchange="moveEntrant(\'' + e.id + '\', this.value); this.value=\'\'">' +
             '<option value="">Move…</option>' +
@@ -3299,7 +3392,7 @@ function setView(v){
 /* Persisted so a reload keeps you on the division you were watching. */
 function setDivision(d){ state.division = d; state.showAllQueue = false; safeSession("pb_division", d); render(); }
 function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.standingsFilter = "all"; render(); }
-function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; render(); }
+function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; state.movePick = null; render(); }
 function setRoundFilter(r){ state.roundFilter = String(r); render(); }
 function setStandingsFilter(v){ state.standingsFilter = v; render(); }
 function dismissCallout(id){
@@ -3791,11 +3884,20 @@ function entrantsCsvPicked(input){
     let rows = String(reader.result).split(/\r\n|\r|\n/).map(cells).filter(cs => cs.length);
     /* Skip a header row only when every cell IS a header phrase: one header
        word, optionally followed by another header word or a number ("Player",
-       "Name 1", "Team Name", "First Name"). A real team like "Team Rocket"
+       "Name 1", "Team Name", "DUPR 1"). A real team like "Team Rocket"
        has a non-header second word, so it is never eaten. */
     if (rows.length > 1 && rows[0].every(c =>
-      /^(name|player|partner|team|entrant|first|last)s?\s*(name|id|no|number|[0-9]+)?$/i.test(c.trim()))) rows = rows.slice(1);
-    const names = rows.map(cs => cs.length > 1 ? cs[0] + " & " + cs[1] : cs[0]);
+      /^(name|player|partner|team|entrant|first|last|dupr|rating)s?\s*(name|id|no|number|[0-9]+)?$/i.test(c.trim()))) rows = rows.slice(1);
+    /* Any purely numeric cell in DUPR range (1.0-8.0) is a rating; whatever
+       is left is names. Ratings ride along after a "|" so the textarea stays
+       the single reviewable source of truth for the draw. */
+    const isRating = c => /^[0-9]+(\.[0-9]+)?$/.test(c) && parseFloat(c) >= 1 && parseFloat(c) <= 8;
+    const names = rows.map(cs => {
+      const nm = cs.filter(c => !isRating(c));
+      const rt = cs.filter(isRating).slice(0, 2);
+      const base = nm.length > 1 ? nm[0] + " & " + nm[1] : (nm[0] || "");
+      return base + (rt.length ? " | " + rt.join(" ") : "");
+    }).filter(Boolean);
     if (!names.length){ toast("No names found in that file."); return; }
     const box = document.getElementById("adm-teams");
     if (!box) return;
@@ -3875,6 +3977,49 @@ async function removeEntrant(id){
   if (!r.ok){ toast(r.error); return; }
   toast("Removed"); await reload();
 }
+/* Groups-board tap flow. Picking the same chip again cancels. */
+function pickForMove(id){
+  state.movePick = state.movePick === id ? null : id;
+  render();
+}
+async function movePickTo(group){
+  const id = state.movePick;
+  if (!id) return;
+  const e = entrantById(id);
+  state.movePick = null;
+  if (!e || e.group_name === group){ render(); return; }
+  const ev = eventById(e.event_id);
+  const evMs = data.matches.filter(m => m.event_id === e.event_id);
+  /* Before anything has been played (event paused, no scores, no knockout),
+     a move can rebuild both groups' round robins cleanly instead of bolting
+     catch-up matches onto the end of the queue. */
+  const pristine = ev && !ev.active &&
+    !evMs.some(m => m.status === "played") &&
+    !evMs.some(m => m.stage === "knockout");
+  if (pristine){
+    if (!confirm(swText('Move "' + e.name + '" to group ' + group + '? Nothing has been played, so both groups\' schedules are redrawn cleanly.'))){ render(); return; }
+    await redrawWithMove(ev, e, group);
+  } else {
+    await moveEntrant(id, group);
+  }
+}
+async function redrawWithMove(ev, ent, group){
+  const entrants = data.entrants.filter(x => x.event_id === ev.id).map(x => ({
+    id: x.id, event_id: ev.id, name: x.name,
+    group_name: x.id === ent.id ? group : x.group_name,
+    seed: x.seed, meta: x.meta || {}
+  }));
+  const byG = {};
+  entrants.forEach(x => { (byG[x.group_name] = byG[x.group_name] || []).push(x); });
+  Object.values(byG).forEach(list => list.forEach((x, i) => { x.seed = i + 1; }));
+  const groupsArr = Object.keys(byG).sort().map(g => ({ name: g, entrantIds: byG[g].map(x => x.id) }));
+  const matches = buildEventMatches(ev.id, groupsArr, 0);
+  const r = await store.adminReplaceEvent(state.adminPin, ev.id,
+    { name: ev.name, sort_order: ev.sort_order, settings: ev.settings }, entrants, matches);
+  if (!r.ok){ toast(r.error); return; }
+  toast(ent.name + " moved to group " + group);
+  await reload();
+}
 async function moveEntrant(id, target){
   if (!target) return;
   const e = entrantById(id);
@@ -3940,7 +4085,27 @@ function parseTeamsInput(){
   return document.getElementById("adm-teams").value
     .split("\n").map(s => s.trim()).filter(Boolean);
 }
-function setupSummary(names, s){
+/* One entry per line: "Maya & Owen | 4.1 3.8". Everything before the "|" is
+   the name; numbers after it are DUPR ratings (any of space/comma/slash
+   separated), averaged into the team's seeding value. No "|" = unrated. */
+function parseEntrantLines(){
+  return parseTeamsInput().map(line => {
+    const bar = line.indexOf("|");
+    const name = (bar === -1 ? line : line.slice(0, bar)).trim();
+    const duprs = bar === -1 ? [] : line.slice(bar + 1).trim().split(/[\s,;\/]+/)
+      .map(x => parseFloat(x)).filter(v => Number.isFinite(v) && v >= 1 && v <= 8);
+    const dupr = duprs.length ? Math.round(duprs.reduce((a, b) => a + b, 0) / duprs.length * 100) / 100 : null;
+    return { name, duprs, dupr };
+  }).filter(e => e.name);
+}
+const entrantMetaFor = e => (e && e.dupr != null) ? { dupr: e.dupr, duprs: e.duprs } : {};
+/* True when the draw should snake-seed: box ticked and at least one rating. */
+function seedByDuprWanted(entries){
+  const box = document.getElementById("adm-seeddupr");
+  return !!(box && box.checked && entries.some(e => e.dupr != null));
+}
+function setupSummary(entries, s, useDupr){
+  const names = entries.map(e => e.name);
   const sizes = groupSizes(names.length, s.group_size);
   const groups = sizes.length;
   const matchCount = sizes.reduce((sum, n) => sum + n * (n - 1) / 2, 0);
@@ -3957,21 +4122,26 @@ function setupSummary(names, s){
     const fill = size - full * groups;
     lines += "\nKnockout of " + size + ": top " + full + " per group" + (fill ? " plus " + fill + " best " + ordinal(full + 1) + "-placed" : "");
   }
+  if (useDupr){
+    const rated = entries.filter(e => e.dupr != null).length;
+    lines += "\nSnake-seeded by DUPR (" + rated + " rated, " + (entries.length - rated) + " unrated)";
+  }
   return lines;
 }
 function previewSetup(){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
-  const names = parseTeamsInput();
-  if (names.length < 4){ state.setupPreview = "Paste at least 4 entrants first."; render(); return; }
+  const entries = parseEntrantLines();
+  if (entries.length < 4){ state.setupPreview = "Paste at least 4 entrants first."; render(); return; }
   const s = readEventSettings(ev);
-  state.setupPreview = s.error || setupSummary(names, s);
+  state.setupPreview = s.error || setupSummary(entries, s, seedByDuprWanted(entries));
   render();
 }
 async function applySetup(){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
-  const names = parseTeamsInput();
+  const entries = parseEntrantLines();
+  const names = entries.map(e => e.name);
   if (names.length < 4){ state.setupPreview = "Paste at least 4 entrants first."; render(); return; }
   const dupes = names.filter((n, i) => names.indexOf(n) !== i);
   if (dupes.length){ state.setupPreview = "Duplicate entries: " + [...new Set(dupes)].join(", "); render(); return; }
@@ -3984,12 +4154,16 @@ async function applySetup(){
   if (!confirm(swText(msg))) return;
   /* This one replaces the whole event, so it does carry the untouched keys. */
   const settings = Object.assign({}, ev.settings, check);
+  const useDupr = seedByDuprWanted(entries);
   const shuffle = document.getElementById("adm-shuffle").checked;
   const rand = shuffle ? mulberry32(Math.floor(performance.now() * 1000) % 2147483647 + 1) : null;
-  const groups = makeGroups(names, settings.group_size, rand);
+  const groups = useDupr ? makeSeededGroups(entries, settings.group_size)
+                         : makeGroups(names, settings.group_size, rand);
+  const byName = new Map(entries.map(e => [e.name, e]));
   const entrants = [];
   groups.forEach(g => g.members.forEach((name, i) =>
-    entrants.push({ id: uid(), event_id: ev.id, name, group_name: g.name, seed: i + 1 })));
+    entrants.push({ id: uid(), event_id: ev.id, name, group_name: g.name, seed: i + 1,
+                    meta: entrantMetaFor(byName.get(name)) })));
   const idsByGroup = g => entrants.filter(e => e.group_name === g).map(e => e.id);
   const matches = buildEventMatches(ev.id, groups.map(g => ({ name: g.name, entrantIds: idsByGroup(g.name) })), 0);
   const r = await store.adminReplaceEvent(state.adminPin, ev.id, { name: ev.name, sort_order: ev.sort_order, settings }, entrants, matches);
