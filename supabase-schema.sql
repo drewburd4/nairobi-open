@@ -371,6 +371,13 @@ begin
   if m.status <> 'scheduled' or m.court is not null then return 'That match is not waiting for a court.'; end if;
   if m.entrant1_id is null or m.entrant2_id is null then return 'This match''s teams are not set yet.'; end if;
   if p_court < 1 or p_court > total then return 'No such court.'; end if;
+  -- never call a team that is mid-game on another court
+  if exists (select 1 from nairobi_matches oc
+             where oc.status = 'scheduled' and oc.court is not null
+               and (oc.entrant1_id in (m.entrant1_id, m.entrant2_id)
+                 or oc.entrant2_id in (m.entrant1_id, m.entrant2_id))) then
+    return 'That team is already mid-game on another court.';
+  end if;
   perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   if exists (select 1 from nairobi_matches where status = 'scheduled' and court = p_court) then
     return 'Court ' || p_court || ' was just filled. Pick another.';
@@ -463,6 +470,14 @@ begin
   if exists (select 1 from nairobi_events e where e.id in (offm.event_id, onm.event_id)
              and coalesce(e.settings ->> 'format', '') = 'americano') then
     return 'Americano rounds rotate on their own; enter the score or pause the event instead.';
+  end if;
+  -- never call a team that is mid-game on another court (the match being
+  -- taken off does not count: its players are the ones leaving)
+  if exists (select 1 from nairobi_matches oc
+             where oc.status = 'scheduled' and oc.court is not null and oc.id <> p_off_match
+               and (oc.entrant1_id in (onm.entrant1_id, onm.entrant2_id)
+                 or oc.entrant2_id in (onm.entrant1_id, onm.entrant2_id))) then
+    return 'That team is already mid-game on another court.';
   end if;
   perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   c := offm.court;

@@ -1106,6 +1106,9 @@ function demoStore(){
       if (!m) return fail("Match not found.");
       if (m.status !== "scheduled" || m.court != null) return fail("That match is not waiting for a court.");
       if (!m.entrant1_id || !m.entrant2_id) return fail("This match's teams aren't set yet.");
+      if (db.matches.some(x => x.status === "scheduled" && x.court != null &&
+          [x.entrant1_id, x.entrant2_id].some(id => id === m.entrant1_id || id === m.entrant2_id)))
+        return fail("That team is already mid-game on another court.");
       const total = (db.tournament && db.tournament.settings && db.tournament.settings.courts) || 4;
       if (!(court >= 1 && court <= total)) return fail("No such court.");
       if (db.matches.some(x => x.status === "scheduled" && x.court === court)) return fail("Court " + court + " was just filled. Pick another.");
@@ -1153,6 +1156,11 @@ function demoStore(){
       if (!onm.entrant1_id || !onm.entrant2_id) return fail("That match's teams aren't set yet.");
       if (dbIsAmericano(eventOf(offm)) || dbIsAmericano(eventOf(onm)))
         return fail("Americano rounds rotate on their own; enter the score or pause the event instead.");
+      /* never call a team that is mid-game on another court (the off match's
+         own players are the ones leaving, so it does not count) */
+      if (db.matches.some(x => x.status === "scheduled" && x.court != null && x.id !== offm.id &&
+          [x.entrant1_id, x.entrant2_id].some(id => id === onm.entrant1_id || id === onm.entrant2_id)))
+        return fail("That team is already mid-game on another court.");
       const c = offm.court;
       onm.court = c; onm.postponed = false; onm.called_at = new Date().toISOString(); onm.called_ack = false;
       const pending = db.matches.filter(x => x.event_id === offm.event_id && x.status === "scheduled" && x.court == null && x.id !== offm.id);
@@ -2724,7 +2732,10 @@ function renderSlotModal(){
 function renderCourtAssignModal(){
   if (state.assignCourt == null) return "";
   const c = state.assignCourt;
-  const q = pendingQueue();
+  /* only offer matches whose teams are free right now; the server enforces
+     the same rule, this just keeps the picker honest */
+  const busyIds = new Set(onCourtMatches().flatMap(m => [m.entrant1_id, m.entrant2_id]));
+  const q = pendingQueue().filter(m => !busyIds.has(m.entrant1_id) && !busyIds.has(m.entrant2_id));
   const multi = activeEvents().length > 1;
   let h = '<div class="overlay" onclick="if(event.target===this)closeCourtAssign()"><div class="modal" role="dialog" aria-modal="true">';
   h += '<h3>Put a match on Court ' + c + '</h3>';
@@ -2754,7 +2765,9 @@ function renderOffCourtModal(){
   if (!state.offCourtId) return "";
   const m = data.matches.find(x => x.id === state.offCourtId);
   if (!m) return "";
-  const q = pendingQueue();
+  /* the off match's own players are leaving, so they do not count as busy */
+  const busyIds = new Set(onCourtMatches().filter(x => x.id !== m.id).flatMap(x => [x.entrant1_id, x.entrant2_id]));
+  const q = pendingQueue().filter(x => !busyIds.has(x.entrant1_id) && !busyIds.has(x.entrant2_id));
   const multi = activeEvents().length > 1;
   let h = '<div class="overlay" onclick="if(event.target===this)closeOffCourt()"><div class="modal" role="dialog" aria-modal="true">';
   h += '<h3>Take this match off Court ' + m.court + '</h3>';
