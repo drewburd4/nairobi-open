@@ -1924,6 +1924,60 @@ function renderDivisionTabs(){
     (on ? '\u2190 Back to the main draw' : 'Show ' + esc(amer.name) + ' only') +
     '</button></div>';
 }
+/* Events that will preview on the Courts tab: not started, main draw, with a
+   start time inside the next 24 hours and matches ready to play. */
+function upcomingWithin24h(){
+  const now = Date.now();
+  return data.events.filter(e => !e.active && !isAmericano(e) &&
+    eventStartDate(e) &&
+    eventStartDate(e).getTime() > now &&
+    eventStartDate(e).getTime() <= now + 24 * 3600000 &&
+    data.matches.some(m => m.event_id === e.id && m.status === "scheduled" && m.entrant1_id && m.entrant2_id))
+    .sort((a, b) => eventStartDate(a) - eventStartDate(b));
+}
+/* Tomorrow's board today: run the real court-assignment logic on a copy of
+   the data with the upcoming events switched on, and show the courts and
+   queue exactly as they will stand when play starts. Only rendered while
+   nothing is running on the main courts, so it can never contradict a live
+   board: while today's event still plays, tomorrow stays a one-line note, and
+   pausing for the evening swaps this preview in. */
+function renderCourtsPreview(soon){
+  const sim = JSON.parse(JSON.stringify({ tournament: data.tournament, events: data.events, entrants: data.entrants, matches: data.matches }));
+  const ids = new Set(soon.map(e => e.id));
+  sim.events.forEach(e => { if (ids.has(e.id)) e.active = true; });
+  assignCourtsGlobal(sim);
+  const multi = soon.length > 1;
+  const when = soon.map(e => esc(e.name) + ' · ' +
+    eventStartDate(e).toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' })).join('&ensp;');
+  let h = '<div class="section-h"><h2>Coming up</h2><span class="hint">' + when + '</span></div>';
+  h += '<div class="courtgrid">';
+  const simOn = sim.matches.filter(m => ids.has(m.event_id) && m.status === "scheduled" && m.court != null);
+  for(let c = 1; c <= courtsCount(); c++){
+    const m = simOn.find(x => x.court === c);
+    if (m){
+      const ev = sim.events.find(e => e.id === m.event_id);
+      h += '<button class="courtcard" onclick="openMatch(\'' + m.id + '\')">' +
+        '<div class="chead"><span class="cnum">Court ' + c + '</span>' +
+        (multi ? '<span class="tag plain">' + esc(ev.name) + '</span>' : '') + '</div>' +
+        '<div class="team">' + esc(entrantName(m.entrant1_id)) + '</div>' +
+        '<div class="vs">vs</div>' +
+        '<div class="team">' + esc(entrantName(m.entrant2_id)) + '</div>' +
+        '<div class="cta">First up here</div></button>';
+    } else {
+      h += '<div class="courtcard idle"><div class="chead"><span class="cnum">Court ' + c + '</span></div>' +
+        '<div class="team">Free</div></div>';
+    }
+  }
+  h += '</div>';
+  const q = weavePending(sim).filter(m => ids.has(m.event_id)).slice(0, 8);
+  if (q.length){
+    h += '<div class="section-h"><h2>Then</h2></div><div class="roundblock" style="padding-top:2px">';
+    h += q.map((m, i) => queueRow(m, { pos: i + 1, showEvent: multi })).join("");
+    h += '</div>';
+  }
+  h += '<p class="note" style="margin-top:10px">A look ahead: this is how the courts will stand when play starts (the event turns itself on 5 minutes before). Tap a match for its estimated time; the full order is on the Schedule tab.</p>';
+  return h;
+}
 function renderBoard(){
   const amer = americanoEvent();
   if (state.division === "americano" && amer){
@@ -1935,12 +1989,23 @@ function renderBoard(){
   let h = '<span class="print-title">' + esc(data.tournament.name) + ' · Courts</span>' + renderDivisionTabs();
 
   if (!act.length){
-    h += '<div class="empty">Nothing is running right now.';
-    const upcoming = data.events.filter(e => !e.active && evSetting(e, "schedule_note", ""));
-    if (upcoming.length){
-      h += '<br><br>' + upcoming.slice(0, 8).map(e => esc(e.name) + ' · ' + esc(evSetting(e, "schedule_note", ""))).join('<br>');
+    const soon = upcomingWithin24h();
+    if (soon.length){
+      h += renderCourtsPreview(soon);
+      const soonIds = new Set(soon.map(e => e.id));
+      const later = data.events.filter(e => !e.active && !soonIds.has(e.id) && evSetting(e, "schedule_note", ""));
+      if (later.length){
+        h += '<div class="boardnotes">' + later.slice(0, 8).map(e =>
+          '<span class="note">' + esc(e.name) + ' · ' + esc(evSetting(e, "schedule_note", "")) + '</span>').join('') + '</div>';
+      }
+    } else {
+      h += '<div class="empty">Nothing is running right now.';
+      const upcoming = data.events.filter(e => !e.active && evSetting(e, "schedule_note", ""));
+      if (upcoming.length){
+        h += '<br><br>' + upcoming.slice(0, 8).map(e => esc(e.name) + ' · ' + esc(evSetting(e, "schedule_note", ""))).join('<br>');
+      }
+      h += '</div>';
     }
-    h += '</div>';
     return h;
   }
 
@@ -2476,6 +2541,7 @@ function renderAdmin(){
     'While unlocked: tap any match anywhere (Courts, Schedule, a team in Standings, or the Bracket) to fix or clear its score, enter a walkover, or postpone. ' +
     'Players can only enter a score while a match is on a court; admins can score anything from anywhere. ' +
     'An on-court match can be sent back with "Take off court": either the next match in line takes its court, or you pick the one to bring on. ' +
+    'Pause the finished event in the evening: with nothing running, the Courts tab previews the next day\'s courts for any event starting within 24 hours. ' +
     'The Courts tab has Postpone on the queue and Play next on postponed matches, and each waiting row\'s Move button asks for the queue place it should take. ' +
     'On a "go to court" banner, ✓ On court dismisses it for everyone; a plain tap hides it only on that phone. ' +
     'On the Bracket tab, unplayed matches have an Edit teams link for manual fixes. ' +

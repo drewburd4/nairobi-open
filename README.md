@@ -44,7 +44,8 @@ The key in `index.html` is Supabase's publishable key, designed to be public; ev
 ## Day-of cheat sheet (desk)
 
 - Unlock Admin with the PIN once per device; it sticks for the session.
-- Start the day's event(s) in Admin (just Start event; courts share automatically).
+- Start the day's event(s) in Admin (just Start event; courts share automatically). Events with a planned start time start themselves 5 minutes early.
+- Evening: pause the finished event. With nothing running, the Courts tab previews the next day's courts and opening queue for any event starting within 24 hours, so players can see where they land the night before.
 - No-show: Courts tab, Postpone. Reorder the queue: tap a row's Move button and type the place it should take. Players not ready on court: open the match, "Take off court". Wrong score: tap the match anywhere, fix or clear it.
 - Roster problems: Admin team list (rename, remove, add with catch-up matches). Fresh rosters paste one team per line, or upload a CSV (partner names in the first two columns).
 - Pools done: check the Bracket tab, then Admin → "Confirm group stage finished".
