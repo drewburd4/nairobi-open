@@ -779,7 +779,7 @@ const EVENT_CATEGORIES = [
   "Masters Doubles (Men)", "Masters Doubles (Women)", "Masters Mixed Doubles"];
 
 function defaultEventSettings(){
-  return { points_to_group: 21, points_to_knockout: 21, best_of_group: 1, best_of_knockout: 1,
+  return { points_to_group: 21, points_to_knockout: 11, best_of_group: 1, best_of_knockout: 3,
     advance_per_group: 2, knockout_size: "auto", group_size: 6, schedule_note: "" };
 }
 
@@ -909,7 +909,7 @@ function demoStore(){
     const pts = settingFor(m, "points_to");
     const bo = settingFor(m, "best_of");
     const ev = eventOf(m);
-    const wb2 = !!(ev && ev.settings && ev.settings.win_by_two);
+    const wb2 = m.stage === "knockout" || !!(ev && ev.settings && ev.settings.win_by_two);
     if (walkover){
       m.score1 = s1; m.score2 = s2; m.games = null;
     } else if (bo > 1){
@@ -1412,7 +1412,9 @@ const matchBestOf = m => {
   const ev = eventById(m.event_id);
   return parseInt(evSetting(ev, m.stage === "knockout" ? "best_of_knockout" : "best_of_group", 1), 10) || 1;
 };
-const matchWinBy2 = m => !!evSetting(eventById(m.event_id), "win_by_two", false);
+/* Knockout games are always win by 2; the win_by_two setting governs only the
+   group stage (off by default, for predictable match lengths on shared courts). */
+const matchWinBy2 = m => m.stage === "knockout" || !!evSetting(eventById(m.event_id), "win_by_two", false);
 function currentEvent(){
   if (state.eventId && eventById(state.eventId)) return eventById(state.eventId);
   const act = activeEvents();
@@ -1612,8 +1614,8 @@ function eventDurationEstimate(ev, o){
     const size = ks === "auto" ? nextPow2(Math.max(2, nGroups * adv)) : (parseInt(ks, 10) || 0);
     nKo = Math.max(0, size - 1);
   }
-  const per = (pts, bo) => expectedGamesForBo(bo) * gameMinutesFor(pts, wb2) + TURNOVER_MIN;
-  const ideal = (nGroup * per(pg, bg) + nKo * per(pk, bk)) / courts;
+  const per = (pts, bo, w) => expectedGamesForBo(bo) * gameMinutesFor(pts, w) + TURNOVER_MIN;
+  const ideal = (nGroup * per(pg, bg, wb2) + nKo * per(pk, bk, true)) / courts;
   /* `minutes` is the day an organiser should plan for; `idealMinutes` is the
      floor it would hit only if no court ever sat empty. */
   return { group: nGroup, ko: nKo, matches: nGroup + nKo, courts,
@@ -2274,10 +2276,10 @@ function renderAdmin(){
       '</div>' +
       '<div class="field"><label>Ending a game</label><div style="padding:2px 0 0">' +
       '<label style="display:inline-flex;align-items:center;gap:6px;font-weight:600">' +
-      '<input type="checkbox" onchange="updateTimeEstimate()" id="adm-wb2"' + (evSetting(ev, "win_by_two", false) ? ' checked' : '') + '> Win by 2</label>' +
-      '</div><p class="note" style="margin:2px 0 0">Off: the first team to the target wins, even at ' +
+      '<input type="checkbox" onchange="updateTimeEstimate()" id="adm-wb2"' + (evSetting(ev, "win_by_two", false) ? ' checked' : '') + '> Win by 2 in the group stage</label>' +
+      '</div><p class="note" style="margin:2px 0 0">Off: a group game ends dead on the target, even at ' +
       (evSetting(ev, "points_to_group", 21) - 1) + '-' + evSetting(ev, "points_to_group", 21) +
-      ', which keeps matches to a predictable length on shared courts. On: play carries past the target until someone leads by 2.</p></div>' +
+      ', which keeps the group stage a predictable length on shared courts. Knockout games always play win by 2.</p></div>' +
       '<div class="field"><label>Courts this event may use</label><div style="padding:2px 0 0">' +
       (function(){
         const allowed = Array.isArray(ev.settings && ev.settings.courts) ? ev.settings.courts : [];
@@ -2298,6 +2300,10 @@ function renderAdmin(){
     if (!hasMatches || state.showRedraw){
       h += '<div class="divider"></div><h4>' + (hasMatches ? 'Start over with a new list' : '2 · Draw groups') + '</h4>';
       h += '<p class="note">Paste entrants one per line. For doubles use one line per team, e.g. "Maya &amp; Owen".</p>';
+      h += '<p class="note" style="margin-top:4px"><input id="adm-csv" type="file" accept=".csv,.txt,text/csv" style="display:none" onchange="entrantsCsvPicked(this)">' +
+        '<button class="btn small secondary" onclick="document.getElementById(\'adm-csv\').click()">Upload a CSV instead</button><br>' +
+        'One entrant per row; doubles put the two partner names in the first two columns and they come in joined as "Maya &amp; Owen". ' +
+        'Got an export in some other shape? Send Drew the file and the upload can be taught to read it.</p>';
       h += '<div class="field"><label for="adm-teams">Entrants (one per line)</label><textarea id="adm-teams" placeholder="One team or player per line"></textarea></div>' +
         '<div class="fieldrow"><div class="field"><label for="adm-gsize">Target group size</label><input id="adm-gsize" type="number" min="3" max="10" oninput="updateTimeEstimate()" value="' + evSetting(ev, "group_size", 6) + '"></div>' +
         '<div class="field" style="display:flex;align-items:flex-end"><label style="display:flex;align-items:center;gap:6px;margin:0;padding-bottom:10px"><input type="checkbox" id="adm-shuffle" checked> Random draw</label></div></div>' +
@@ -3023,6 +3029,46 @@ async function saveEventSettings(){
   if (!r.ok){ toast(r.error); return; }
   toast("Settings saved"); await reload();
 }
+/* Fill the draw box from a CSV: one entrant per row, partner names in the
+   first one or two cells, joined with " & ". Handles Excel's quoted cells and
+   comma/semicolon/tab separators, and skips a first row that looks like a
+   header. The file only fills the textarea for review; drawing the groups is
+   still its own deliberate step. */
+function entrantsCsvPicked(input){
+  const f = input.files && input.files[0];
+  input.value = "";
+  if (!f) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const cells = line => {
+      const out = [];
+      let cur = "", inQ = false;
+      for(let i = 0; i < line.length; i++){
+        const ch = line[i];
+        if (inQ){
+          if (ch === '"' && line[i + 1] === '"'){ cur += '"'; i++; }
+          else if (ch === '"') inQ = false;
+          else cur += ch;
+        }
+        else if (ch === '"') inQ = true;
+        else if (ch === ',' || ch === ';' || ch === '\t'){ out.push(cur); cur = ""; }
+        else cur += ch;
+      }
+      out.push(cur);
+      return out.map(c => c.trim()).filter(c => c);
+    };
+    let rows = String(reader.result).split(/\r\n|\r|\n/).map(cells).filter(cs => cs.length);
+    if (rows.length > 1 && rows[0].every(c => /^(name|player|partner|team|entrant)/i.test(c))) rows = rows.slice(1);
+    const names = rows.map(cs => cs.length > 1 ? cs[0] + " & " + cs[1] : cs[0]);
+    if (!names.length){ toast("No names found in that file."); return; }
+    const box = document.getElementById("adm-teams");
+    if (!box) return;
+    if (box.value.trim() && !confirm("Replace what is in the entrants box with the " + names.length + " rows from the file?")) return;
+    box.value = names.join("\n");
+    toast(names.length + " entrants loaded. Check the list, then draw.");
+  };
+  reader.readAsText(f);
+}
 /* An Americano player appears in seven different pairings, so renaming them
    through the normal team list would mean seven identical edits. */
 async function renameAmericanoPlayer(oldName){
@@ -3064,6 +3110,8 @@ async function addEvent(){
   const name = prompt("Name for the new event:");
   if (!name || !name.trim()) return;
   const meta = { name: name.trim(), sort_order: data.events.length, settings: defaultEventSettings() };
+  /* Singles are more tiring per point, so their group games run to 15, not 21. */
+  if (/singles/i.test(meta.name)) meta.settings.points_to_group = 15;
   const r = await store.adminReplaceEvent(state.adminPin, null, meta, [], []);
   if (!r.ok){ toast(r.error); return; }
   if (r.eventId) state.adminEventId = r.eventId;

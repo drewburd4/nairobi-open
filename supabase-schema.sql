@@ -488,7 +488,8 @@ declare
 begin
   pts := nairobi_ev_int_setting(p_event_id, case when p_stage = 'knockout' then 'points_to_knockout' else 'points_to_group' end, 21);
   bo := nairobi_ev_int_setting(p_event_id, case when p_stage = 'knockout' then 'best_of_knockout' else 'best_of_group' end, 1);
-  wb2 := nairobi_ev_bool_setting(p_event_id, 'win_by_two', false);
+  -- Knockout games are always win-by-2; the setting governs only the group stage.
+  wb2 := p_stage = 'knockout' or nairobi_ev_bool_setting(p_event_id, 'win_by_two', false);
 
   if bo > 1 then
     need := bo / 2 + 1;
