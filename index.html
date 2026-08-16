@@ -122,17 +122,6 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .queue-row .qv{color:var(--muted); font-weight:400}
 .queue-row .qtag{font-size:11.5px; color:var(--muted); white-space:nowrap}
 .queue-actions{display:flex; gap:8px; align-items:center}
-/* touch-action:none keeps a finger drag from scrolling the page instead */
-.qgrip{display:inline-flex; align-items:center; justify-content:center; flex:none;
-  width:38px; height:34px; border-radius:7px; border:1px solid var(--line);
-  background:var(--card); color:var(--muted); font-size:15px; line-height:1;
-  cursor:grab; touch-action:none; user-select:none; -webkit-user-select:none}
-.qgrip:active{cursor:grabbing; background:var(--accent-soft); color:var(--accent); border-color:var(--accent)}
-/* z-index above the sticky topbar (30) so a row dragged to the top edge stays
-   visible while the page auto-scrolls under it. */
-.queue-row.dragging{position:relative; z-index:40; border-radius:8px;
-  background:var(--accent-soft); box-shadow:0 6px 18px rgba(0,0,0,.18)}
-.queue-row.qshift{transition:transform .12s ease}
 .boardnotes{margin-top:16px}
 .boardnotes .note{display:block; padding:2px 0}
 
@@ -1357,7 +1346,7 @@ const state = {
   standingsFilter: "all",
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null, assignCourt: null, offCourtId: null,
   setupPreview: null, adminEventId: null, loadError: null,
-  showAllQueue: false, showRedraw: false, pendingRender: false, dragging: false, division: "main",
+  showAllQueue: false, showRedraw: false, pendingRender: false, division: "main",
   dismissedCalled: {}, contacts: {}
 };
 
@@ -1651,8 +1640,6 @@ function commitHtml(app, html){
 }
 function render(){
   const app = document.getElementById("app");
-  /* Replacing the DOM mid-drag would drop the row being held. */
-  if (state.dragging){ state.pendingRender = true; return; }
   const ae = document.activeElement;
   const typingInForm = ae && app.contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && ae.id !== "pin-input" && ae.id !== "search-input";
   if (typingInForm && (state.view === "admin" || state.modalMatchId || state.slotEditId)){
@@ -1772,8 +1759,8 @@ function queueRow(m, opts){
   if (opts.showEvent && ev) row += '<span class="qtag">' + esc(ev.name) + '</span>';
   if (state.adminPin && opts.action === "postpone")
     row += '<span class="queue-actions">' +
-      '<span class="qgrip" role="button" tabindex="0" aria-label="Drag to reorder" title="Drag to reorder within this event"' +
-      ' onpointerdown="startQueueDrag(event, \'' + m.id + '\')">⠿</span>' +
+      '<button class="btn small secondary" title="Type the queue place this match should take"' +
+      ' onclick="event.stopPropagation();moveQueuePrompt(\'' + m.id + '\')">Move</button>' +
       '<button class="btn small secondary" onclick="event.stopPropagation();postpone(\'' + m.id + '\', false)">Postpone</button></span>';
   if (state.adminPin && opts.action === "playnext")
     row += '<span class="queue-actions"><button class="btn small secondary" onclick="event.stopPropagation();playNext(\'' + m.id + '\')">Play next</button></span>';
@@ -1915,9 +1902,7 @@ function renderBoard(){
 
   const upNext = q.slice(0, 8);
   if (upNext.length){
-    /* Both halves of the queue carry .queue-block so a drag can move a match
-       between the visible top of the list and everything behind "Show all". */
-    h += '<div class="section-h"><h2>Up next</h2></div><div class="roundblock queue-block" style="padding-top:2px">';
+    h += '<div class="section-h"><h2>Up next</h2></div><div class="roundblock" style="padding-top:2px">';
     h += upNext.map((m, i) => queueRow(m, { pos: i + 1, showEvent: multi, action: "postpone" })).join("");
     h += '</div>';
     if (q.length > upNext.length || state.showAllQueue){
@@ -1925,7 +1910,7 @@ function renderBoard(){
         (state.showAllQueue ? 'Show fewer' : 'Show all matches (' + q.length + ' waiting)') + '</button></p>';
     }
     if (state.showAllQueue && q.length > upNext.length){
-      h += '<div class="roundblock queue-block" style="padding-top:2px">';
+      h += '<div class="roundblock" style="padding-top:2px">';
       h += q.slice(8).map((m, i) => queueRow(m, { pos: i + 9, showEvent: multi, action: "postpone" })).join("");
       h += '</div>';
     }
@@ -2306,8 +2291,9 @@ function renderAdmin(){
       '</div><p class="note" style="margin:2px 0 0">Leave all ticked to share every court (weighted by how many matches each event still has). Tick only some to keep this event on just those courts.</p></div>' +
       '<div class="field"><label>How long this will take</label>' +
       '<p class="note" id="adm-estimate" style="margin:2px 0 0">' + estimateText(ev) + '</p></div>' +
-      '<button class="btn small secondary" onclick="saveEventSettings()">Save settings</button>' +
-      '<p class="note" style="margin-top:8px">Changes apply right away. "Auto" knockout size takes the top ' + evSetting(ev, "advance_per_group", 2) + ' per group and fills to a full bracket with best next-placed teams; a fixed size does the same math for that exact number.</p>';
+      '<button id="adm-save" class="btn small secondary" onclick="saveEventSettings()">Save settings</button>' +
+      '<span id="adm-dirty" class="note" style="display:none;margin-left:10px;font-weight:700;color:var(--accent)">Not saved yet</span>' +
+      '<p class="note" style="margin-top:8px">Nothing above takes effect until you press Save settings; saved changes then apply right away, even mid-event. "Auto" knockout size takes the top ' + evSetting(ev, "advance_per_group", 2) + ' per group and fills to a full bracket with best next-placed teams; a fixed size does the same math for that exact number.</p>';
 
     if (!hasMatches || state.showRedraw){
       h += '<div class="divider"></div><h4>' + (hasMatches ? 'Start over with a new list' : '2 · Draw groups') + '</h4>';
@@ -2393,7 +2379,7 @@ function renderAdmin(){
     'While unlocked: tap any match anywhere (Courts, Schedule, a team in Standings, or the Bracket) to fix or clear its score, enter a walkover, or postpone. ' +
     'Players can only enter a score while a match is on a court; admins can score anything from anywhere. ' +
     'An on-court match can be sent back with "Take off court": either the next match in line takes its court, or you pick the one to bring on. ' +
-    'The Courts tab has Postpone on the queue and Play next on postponed matches, and the ⠿ handle drags a match up or down its own event\'s queue. ' +
+    'The Courts tab has Postpone on the queue and Play next on postponed matches, and each waiting row\'s Move button asks for the queue place it should take. ' +
     'On a "go to court" banner, ✓ On court dismisses it for everyone; a plain tap hides it only on that phone. ' +
     'On the Bracket tab, unplayed matches have an Edit teams link for manual fixes. ' +
     'Everything updates live on everyone\'s phone.</p></div>';
@@ -2668,7 +2654,6 @@ function toggleRedraw(){ state.showRedraw = !state.showRedraw; state.setupPrevie
 let searchT = null;
 function setSearch(v){ state.search = v; clearTimeout(searchT); searchT = setTimeout(render, 150); }
 function openMatch(id){
-  if (performance.now() < qdragUntil) return;
   state.modalMatchId = id; render();
 }
 function closeModal(){ state.modalMatchId = null; render(); }
@@ -2840,126 +2825,9 @@ async function swapTo(offId, onId){
   toast("Court updated");
   await reload();
 }
-/* Drag to reorder the queue. Pointer events cover a finger on a phone and a
-   mouse on a laptop in one code path; HTML5 drag and drop ignores touch. The
-   row can be dropped anywhere in the list; the rows around the drop point
-   decide where it lands. A match still only holds a position within its own
-   event (the display interleaves events to share courts fairly), so the drop
-   resolves to "before the next match of its event at or below the gap". */
-let qdrag = null;
-let qdragUntil = 0;
-const QDRAG_EDGE = 96;   /* start scrolling within this far of a screen edge */
-const QDRAG_SPEED = 18;  /* px per frame at the very edge */
-
-/* Redraw the dragged row and the gap from the last known pointer position.
-   Split out from the move handler because the auto-scroll needs to re-run it
-   while the finger is held still at the edge of the screen. Hit tests use row
-   positions snapshotted at drag start: rows never reflow mid-drag (render is
-   suppressed) and the shift transforms are visual only, so re-measuring would
-   make the test chase its own feedback. */
-function qdragUpdate(){
-  if (!qdrag) return;
-  const docY = qdrag.y + window.scrollY;
-  qdrag.row.style.transform = "translateY(" + (docY - qdrag.startY) + "px)";
-  let t = 0;
-  for(const s of qdrag.others) if (docY > s.top + s.h / 2) t++;
-  if (t !== qdrag.to){ qdrag.to = t; qdragApplyShifts(); }
-}
-/* Slide the other rows apart so a gap opens where the row would land. Kept to
-   the block the row started in: transforms don't grow the target block's card,
-   so a cross-block gap would push its last row outside the border. A cross-
-   block drop still works, there is just no gap drawn for it. */
-function qdragApplyShifts(){
-  const d = qdrag, o = d.fromIdx, t = d.to;
-  const tBlock = d.others.length
-    ? d.others[Math.min(t, d.others.length - 1)].block : d.myBlock;
-  d.others.forEach((s, j) => {
-    let sh = 0;
-    if (s.block === d.myBlock){
-      if (tBlock === d.myBlock){
-        if (t <= j && j < o) sh = d.h0;
-        else if (o <= j && j < t) sh = -d.h0;
-      } else if (j >= o) sh = -d.h0;   /* row is leaving: close the hole */
-    }
-    s.row.style.transform = sh ? "translateY(" + sh + "px)" : "";
-  });
-}
-/* Hold the row near the top or bottom of the screen and the page scrolls, so a
-   match can be dragged somewhere off-screen. The grip sets touch-action:none to
-   stop a finger drag scrolling the page, which is what makes this necessary. */
-function qdragAutoScroll(){
-  if (!qdrag) return;
-  const h = window.innerHeight;
-  let d = 0;
-  if (qdrag.y < QDRAG_EDGE) d = -Math.ceil((QDRAG_EDGE - qdrag.y) / QDRAG_EDGE * QDRAG_SPEED);
-  else if (qdrag.y > h - QDRAG_EDGE) d = Math.ceil((qdrag.y - (h - QDRAG_EDGE)) / QDRAG_EDGE * QDRAG_SPEED);
-  if (d){
-    const was = window.scrollY;
-    window.scrollBy(0, d);
-    if (window.scrollY !== was) qdragUpdate();
-  }
-  qdrag.raf = requestAnimationFrame(qdragAutoScroll);
-}
-function startQueueDrag(e, matchId){
-  if (!state.adminPin || qdrag) return;
-  e.stopPropagation();
-  e.preventDefault();
-  const grip = e.currentTarget, row = grip.closest(".queue-row");
-  if (!row) return;
-  if (pendingQueue().filter(x => x.event_id === row.dataset.eid).length < 2){
-    toast("Only waiting match in its event, so its turn is set by the court rotation.");
-    return;
-  }
-  /* Geometry snapshot, measured against the document rather than the window,
-     so everything keeps tracking the finger while auto-scroll moves the page. */
-  const others = [];
-  let fromIdx = 0, h0 = 0;
-  document.querySelectorAll(".queue-block .queue-row").forEach(r => {
-    const b = r.getBoundingClientRect();
-    if (r === row){ fromIdx = others.length; h0 = b.height; return; }
-    others.push({ row: r, top: b.top + window.scrollY, h: b.height, block: r.parentElement });
-  });
-  qdrag = { id: matchId, grip, row, others, fromIdx, h0, to: fromIdx,
-            myBlock: row.parentElement, y: e.clientY,
-            startY: e.clientY + window.scrollY, moved: false, raf: 0 };
-  state.dragging = true;
-  row.classList.add("dragging");
-  others.forEach(s => s.row.classList.add("qshift"));
-  try{ grip.setPointerCapture(e.pointerId); }catch(_){}
-  grip.addEventListener("pointermove", onQueueDragMove);
-  grip.addEventListener("pointerup", endQueueDrag);
-  grip.addEventListener("pointercancel", cancelQueueDrag);
-  qdrag.raf = requestAnimationFrame(qdragAutoScroll);
-}
-function onQueueDragMove(e){
-  if (!qdrag) return;
-  qdrag.y = e.clientY;
-  if (Math.abs((e.clientY + window.scrollY) - qdrag.startY) > 4) qdrag.moved = true;
-  qdragUpdate();
-}
-function finishQueueDrag(e){
-  const d = qdrag;
-  if (!d) return null;
-  if (d.raf) cancelAnimationFrame(d.raf);
-  d.row.style.transform = "";
-  d.row.classList.remove("dragging");
-  d.others.forEach(s => { s.row.style.transform = ""; s.row.classList.remove("qshift"); });
-  d.grip.removeEventListener("pointermove", onQueueDragMove);
-  d.grip.removeEventListener("pointerup", endQueueDrag);
-  d.grip.removeEventListener("pointercancel", cancelQueueDrag);
-  if (e) try{ d.grip.releasePointerCapture(e.pointerId); }catch(_){}
-  qdrag = null;
-  state.dragging = false;
-  state.pendingRender = false;
-  /* Swallow the click the browser fires after the drop, so letting go of a row
-     does not also open its match. */
-  if (d.moved) qdragUntil = performance.now() + 400;
-  return d;
-}
-function cancelQueueDrag(e){ finishQueueDrag(e); render(); }
 /* Mirror of the server's move: slot the match between its event neighbours by
    play_order midpoint. Applied locally before the round-trip so the row lands
-   where it is going the moment it is dropped instead of snapping back first. */
+   where it is going the moment the number is entered instead of jumping late. */
 function applyLocalMove(matchId, beforeId){
   const m = data.matches.find(x => x.id === matchId);
   if (!m) return;
@@ -2973,27 +2841,35 @@ function applyLocalMove(matchId, beforeId){
   const prev = sibs.filter(x => x.play_order < t.play_order).pop();
   m.play_order = prev ? (prev.play_order + t.play_order) / 2 : t.play_order - 10;
 }
-async function endQueueDrag(e){
-  const d = finishQueueDrag(e);
-  if (!d || !d.moved){ render(); return; }
-  /* The anchor is the first row of the same event at or below the gap. With
-     "Show all" collapsed there may be none on screen but more of the event
-     hidden below; anchor on the first hidden one so the drop means "just after
-     the visible rows", not "past every hidden match to the very end". */
-  const myEid = d.row.dataset.eid;
-  let beforeId = null;
-  const hit = d.others.slice(d.to).find(s => s.row.dataset.eid === myEid);
-  if (hit) beforeId = hit.row.dataset.mid;
-  else {
-    const shown = new Set(d.others.filter(s => s.row.dataset.eid === myEid)
-      .map(s => s.row.dataset.mid));
-    const firstHidden = pendingQueue()
-      .find(m => m.event_id === myEid && m.id !== d.id && !shown.has(m.id));
-    if (firstHidden) beforeId = firstHidden.id;
+/* Reorder the queue by typing the place a match should take, using the numbers
+   the Up next list shows. A match still only holds a position within its own
+   event (the display interleaves events to share courts fairly), so the number
+   resolves to "before the next match of its own event at or below that place";
+   with one event running, that lands exactly on the number typed. */
+async function moveQueuePrompt(matchId){
+  const q = pendingQueue();
+  const cur = q.findIndex(x => x.id === matchId);
+  if (cur === -1){ toast("That match is not waiting in the queue."); return; }
+  const m = q[cur];
+  if (q.filter(x => x.event_id === m.event_id).length < 2){
+    toast("Only waiting match in its event, so its turn is set by the court rotation.");
+    return;
   }
-  applyLocalMove(d.id, beforeId);
+  const raw = prompt("Move to which place in the queue? 1-" + q.length +
+    " (now " + (cur + 1) + ")", "");
+  if (raw == null || !raw.trim()) return;
+  const n = parseInt(raw.trim(), 10);
+  if (isNaN(n) || n < 1 || n > q.length){
+    toast("Enter a number from 1 to " + q.length + ".");
+    return;
+  }
+  if (n === cur + 1) return;
+  const rest = q.filter(x => x.id !== matchId);
+  const anchor = rest.slice(n - 1).find(x => x.event_id === m.event_id);
+  const beforeId = anchor ? anchor.id : null;
+  applyLocalMove(matchId, beforeId);
   render();
-  const r = await store.adminMoveMatch(state.adminPin, d.id, beforeId);
+  const r = await store.adminMoveMatch(state.adminPin, matchId, beforeId);
   if (!r.ok) toast(r.error || "Could not move it.");
   await reload();
 }
@@ -3115,8 +2991,15 @@ function estimateText(ev, o){
     "% of the day.</span>";
 }
 /* Repriced live as the fields change, without a re-render that would steal
-   focus from the input being typed into. */
+   focus from the input being typed into. Every field that calls this is owned
+   by Save settings, so it doubles as the unsaved-changes marker: the estimate
+   updates live but nothing takes effect until saved, and organisers were
+   reading the live repricing as the settings already being applied. */
 function updateTimeEstimate(){
+  const sb = document.getElementById("adm-save");
+  if (sb) sb.classList.remove("secondary");
+  const dirty = document.getElementById("adm-dirty");
+  if (dirty) dirty.style.display = "";
   const el = document.getElementById("adm-estimate");
   const ev = eventById(state.adminEventId);
   if (!el || !ev) return;

@@ -707,6 +707,11 @@ begin
     where mm.status = 'scheduled' and mm.court is null
       and mm.entrant1_id is not null and mm.entrant2_id is not null
       and mm.id <> p_match_id
+      -- Never an Americano match: that pool is physically separate, and its
+      -- court numbers overlap the main draw's, so without this test a vacated
+      -- main court 1 or 2 passes the courts-restriction check below and pulls
+      -- an Americano match on out of round order, leaving the main court free.
+      and coalesce(e.settings ->> 'format', '') <> 'americano'
       and (
         not (e.settings ? 'courts')
         or jsonb_typeof(e.settings -> 'courts') <> 'array'
