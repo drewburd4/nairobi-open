@@ -1475,7 +1475,7 @@ const state = {
   view: "board", eventId: null, search: "", roundFilter: "all",
   standingsFilter: "all",
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null, assignCourt: null, offCourtId: null,
-  setupPreview: null, adminEventId: null, loadError: null,
+  setupPreview: null, adminEventId: null, loadError: null, teamsText: "",
   showAllQueue: false, showRedraw: false, pendingRender: false, division: "main",
   movePick: null,
   lang: safeLocal("pb_lang") === "sw" ? "sw" : "en",
@@ -3026,7 +3026,10 @@ function renderAdmin(){
         'One entrant per row; doubles put the two partner names in the first two columns and they come in joined as "Maya &amp; Owen". ' +
         'Got an export in some other shape? Send Drew the file and the upload can be taught to read it.</p>';
       h += '<p class="note" style="margin-top:4px">Add ratings after a | on each line ("Maya &amp; Owen | 4.1 3.8"); the CSV upload fills them in when the file has rating columns. Snake seeding deals the strongest teams evenly across groups; unrated teams go in last.</p>';
-      h += '<div class="field"><label for="adm-teams">Entrants (one per line)</label><textarea id="adm-teams" placeholder="One team or player per line"></textarea></div>' +
+      /* The list lives in state, not just in the DOM: any re-render replaces
+         the panel's HTML, and a preview or a score landing on another phone
+         would otherwise silently empty a list someone just uploaded. */
+      h += '<div class="field"><label for="adm-teams">Entrants (one per line)</label><textarea id="adm-teams" oninput="state.teamsText = this.value" placeholder="One team or player per line">' + esc(state.teamsText) + '</textarea></div>' +
         '<div class="fieldrow"><div class="field"><label for="adm-gsize">Target group size</label><input id="adm-gsize" type="number" min="3" max="10" oninput="updateTimeEstimate()" value="' + esc(String(evSetting(ev, "group_size", 6))) + '"></div>' +
         '<div class="field" style="display:flex;align-items:flex-end"><label style="display:flex;align-items:center;gap:6px;margin:0;padding-bottom:10px"><input type="checkbox" id="adm-seeddupr" checked> Seed groups by DUPR (snake)</label></div>' +
         '<div class="field" style="display:flex;align-items:flex-end"><label style="display:flex;align-items:center;gap:6px;margin:0;padding-bottom:10px"><input type="checkbox" id="adm-shuffle" checked> Random draw</label></div></div>' +
@@ -3392,7 +3395,7 @@ function setView(v){
 /* Persisted so a reload keeps you on the division you were watching. */
 function setDivision(d){ state.division = d; state.showAllQueue = false; safeSession("pb_division", d); render(); }
 function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.standingsFilter = "all"; render(); }
-function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; state.movePick = null; render(); }
+function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; state.movePick = null; state.teamsText = ""; render(); }
 function setRoundFilter(r){ state.roundFilter = String(r); render(); }
 function setStandingsFilter(v){ state.standingsFilter = v; render(); }
 function dismissCallout(id){
@@ -3402,7 +3405,7 @@ function dismissCallout(id){
   render();
 }
 function toggleAllQueue(){ state.showAllQueue = !state.showAllQueue; render(); }
-function toggleRedraw(){ state.showRedraw = !state.showRedraw; state.setupPreview = null; render(); }
+function toggleRedraw(){ state.showRedraw = !state.showRedraw; state.setupPreview = null; state.teamsText = ""; render(); }
 let searchT = null;
 function setSearch(v){ state.search = v; clearTimeout(searchT); searchT = setTimeout(render, 150); }
 function openMatch(id){
@@ -3903,6 +3906,7 @@ function entrantsCsvPicked(input){
     if (!box) return;
     if (box.value.trim() && !confirm(swText("Replace what is in the entrants box with the " + names.length + " rows from the file?"))) return;
     box.value = names.join("\n");
+    state.teamsText = box.value;
     toast(names.length + " entrants loaded. Check the list, then draw.");
   };
   reader.readAsText(f);
@@ -3957,6 +3961,7 @@ async function addEvent(){
   const r = await store.adminReplaceEvent(state.adminPin, null, meta, [], []);
   if (!r.ok){ toast(r.error); return; }
   if (r.eventId) state.adminEventId = r.eventId;
+  state.teamsText = "";
   toast("Event created");
   await reload();
 }
@@ -4082,7 +4087,9 @@ async function addTeamToGroup(){
   await reload();
 }
 function parseTeamsInput(){
-  return document.getElementById("adm-teams").value
+  const box = document.getElementById("adm-teams");
+  if (box) state.teamsText = box.value;
+  return String(state.teamsText || "")
     .split("\n").map(s => s.trim()).filter(Boolean);
 }
 /* One entry per line: "Maya & Owen | 4.1 3.8". Everything before the "|" is
@@ -4170,6 +4177,7 @@ async function applySetup(){
   if (!r.ok){ toast(r.error); return; }
   state.setupPreview = null;
   state.showRedraw = false;
+  state.teamsText = "";
   toast("Groups drawn. Pick courts and start when ready.");
   await reload();
 }
