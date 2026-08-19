@@ -73,6 +73,8 @@ input,textarea,select{font:inherit; color:var(--ink)}
 .mast-left{display:flex; align-items:center; gap:10px; min-width:0}
 .clublogo{width:32px; height:32px; flex:none; display:block}
 .wordmark{font-weight:900; font-size:19px; letter-spacing:.05em; text-transform:uppercase}
+button.mast-left{cursor:pointer; border-radius:8px; padding:2px 4px; margin:-2px -4px}
+button.mast-left:hover,button.mast-left:focus-visible{background:var(--accent-soft)}
 .langbtn{flex:none; padding:5px 11px; font-weight:800; font-size:12.5px; letter-spacing:.06em;
   color:var(--muted); background:var(--card); border:1px solid var(--line); border-radius:999px}
 .stagechip{font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); white-space:nowrap}
@@ -175,17 +177,19 @@ details.roundblock .hint{font-weight:600; letter-spacing:0; text-transform:none}
   text-transform:uppercase; color:var(--court); white-space:nowrap}
 .bkconn .bkhead{border-bottom-color:transparent}
 .bkbody{position:relative; overflow:visible}
-.bkmatch{position:absolute; left:0; right:0; height:76px; background:var(--card); border:1px solid var(--line);
+.bkmatch{position:absolute; left:0; right:0; height:92px; background:var(--card); border:1px solid var(--line);
   border-radius:12px; box-shadow:var(--shadow); overflow:hidden; display:block; text-align:left}
 button.bkmatch,.bkmatch .bkmain{cursor:pointer}
 .bkmatch .bkmain{display:block; width:100%; text-align:left}
 .bkmatch.editable .bkteam:first-child{padding-right:46px}
-.bkteam{height:38px; display:flex; align-items:center; gap:6px; padding:0 9px; min-width:0}
+.bkteam{height:46px; display:flex; align-items:center; gap:6px; padding:0 9px; min-width:0}
 .bkteam + .bkteam{border-top:1px solid var(--line)}
 .bkseed{flex:0 0 auto; font-size:10px; font-weight:800; letter-spacing:.02em; padding:2px 5px; border-radius:5px;
   background:var(--accent); color:var(--accent-ink); line-height:1.3}
-.bkname{flex:1 1 auto; min-width:0; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis}
-.bkscore{flex:0 0 auto; font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; min-width:18px; text-align:right}
+.bkname{flex:1 1 auto; min-width:0; font-size:13.5px; line-height:1.18; overflow-wrap:anywhere;
+  display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden}
+.bkscore{flex:0 0 auto; font-size:13px; font-weight:700; font-variant-numeric:tabular-nums; min-width:18px; text-align:right;
+  letter-spacing:.02em; white-space:nowrap}
 .bkteam.bkm-win{background:var(--good-soft)}
 .bkteam.bkm-win .bkname,.bkteam.bkm-win .bkscore{color:var(--good); font-weight:800}
 .bkteam.bkm-lose .bkname,.bkteam.bkm-lose .bkscore{color:var(--muted); font-weight:500}
@@ -257,6 +261,21 @@ details.teamlist summary{cursor:pointer; font-weight:700; font-size:13.5px; padd
 select.mv{padding:4px 6px; border-radius:6px; border:1px solid var(--line); background:var(--bg); font-size:12px; max-width:96px}
 .addteam{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px}
 /* Admin groups board: tap a team, tap a destination group. */
+/* Entrant entry grid. One row per entrant; for doubles the second player's
+   three cells sit on the same six-column grid on a wide screen and wrap onto
+   a second line on a phone, so the markup is identical either way. */
+.egrid{display:flex; flex-direction:column; gap:7px; margin:8px 0 12px}
+.erow{display:grid; grid-template-columns:20px 1fr 26px; gap:6px; align-items:start}
+.erow .enum{font-size:11px; font-weight:800; color:var(--muted); padding-top:11px; font-variant-numeric:tabular-nums}
+.erow .ecells{display:grid; grid-template-columns:1fr 68px 96px; gap:6px}
+.erow.dbl .ecells{grid-template-columns:1fr 68px 96px 1fr 68px 96px}
+@media (max-width:760px){ .erow.dbl .ecells{grid-template-columns:1fr 62px 84px} }
+.erow input{width:100%; padding:8px 9px; border-radius:8px; border:1px solid var(--line); background:var(--bg); font-size:14px; min-width:0}
+.erow input.edupr,.erow input.eid{font-variant-numeric:tabular-nums; font-size:13px}
+.erow input.efilled{border-color:var(--accent-soft); background:var(--card)}
+.eclear{color:var(--muted); font-size:17px; line-height:1; padding:8px 4px; text-align:center; border-radius:6px}
+.eclear:hover,.eclear:focus-visible{color:var(--danger); background:var(--danger-soft)}
+.esum{background:var(--court-soft); border:1px solid var(--line); border-radius:8px; padding:9px 11px; font-size:13px; margin:10px 0; white-space:pre-line}
 .gboard{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; margin-top:4px}
 .gcol{background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:8px}
 .gcol.target{outline:2px dashed var(--accent); outline-offset:2px; cursor:pointer}
@@ -1244,6 +1263,16 @@ function demoStore(){
       assignCourtsGlobal(db);
       notify(); return ok();
     },
+    async adminDeleteEvent(pin, eventId){
+      if (!checkPin(pin)) return fail("Wrong PIN.");
+      const ev = db.events.find(e => e.id === eventId);
+      if (!ev) return fail("Event not found.");
+      db.matches = db.matches.filter(m => m.event_id !== eventId);
+      db.entrants = db.entrants.filter(e => e.event_id !== eventId);
+      db.events = db.events.filter(e => e.id !== eventId);
+      assignCourtsGlobal(db);
+      notify(); return ok();
+    },
     async adminReplaceEvent(pin, eventId, meta, entrants, matches){
       if (!checkPin(pin)) return fail("Wrong PIN.");
       let ev = eventId ? db.events.find(e => e.id === eventId) : null;
@@ -1441,6 +1470,7 @@ function liveStore(){
     adminSwapTo: (pin, offId, onId) => rpc("nairobi_admin_swap_to", { p_pin: pin, p_off_match: offId, p_on_match: onId }),
     adminUpdateEvent: (pin, eventId, name, settings) => rpc("nairobi_admin_update_event", { p_pin: pin, p_event_id: eventId, p_name: name, p_settings: settings }),
     adminSetActive: (pin, eventId, active) => rpc("nairobi_admin_set_active", { p_pin: pin, p_event_id: eventId, p_active: !!active }),
+    adminDeleteEvent: (pin, eventId) => rpc("nairobi_admin_delete_event", { p_pin: pin, p_event_id: eventId }),
     autostartDue: () => rpc("nairobi_autostart_due", {}),
     adminReplaceEvent: async (pin, eventId, meta, entrants, matches) => {
       const r = await rpc("nairobi_admin_replace_event", {
@@ -1475,7 +1505,8 @@ const state = {
   view: "board", eventId: null, search: "", roundFilter: "all",
   standingsFilter: "all",
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null, assignCourt: null, offCourtId: null,
-  setupPreview: null, adminEventId: null, loadError: null, teamsText: "",
+  setupPreview: null, adminEventId: null, loadError: null,
+  entryRows: null, entryDoubles: null, unallocated: null,
   showAllQueue: false, showRedraw: false, pendingRender: false, division: "main",
   movePick: null,
   lang: safeLocal("pb_lang") === "sw" ? "sw" : "en",
@@ -1656,6 +1687,27 @@ const SW_EXACT = {
   "Planned start (drives the wait estimates players see; the event turns itself on 5 minutes before this time)":
     "Muda wa kuanza uliopangwa (huendesha makadirio ya kusubiri wanayoona wachezaji; shindano hujiwasha dakika 5 kabla ya muda huu)",
   "Save schedule": "Hifadhi ratiba", "Pause event": "Sitisha shindano", "Start event": "Anzisha shindano",
+  "Hide from players": "Ficha kwa wachezaji", "Show to players again": "Onyesha tena kwa wachezaji",
+  "Delete event": "Futa shindano", "Hidden from players": "Imefichwa kwa wachezaji",
+  "Visible to players again": "Inaonekana tena kwa wachezaji",
+  "That name does not match, nothing was deleted.": "Jina halilingani, hakuna kilichofutwa.",
+  "Hidden: players cannot see this event anywhere, but everything in it is kept and it still shows here.":
+    "Imefichwa: wachezaji hawawezi kuliona shindano hili popote, lakini kila kitu ndani yake kimehifadhiwa na bado linaonekana hapa.",
+  "Hiding takes a test or abandoned event off every player screen without losing anything, and can be undone. Deleting is permanent and asks you to type the name.":
+    "Kuficha huondoa shindano la majaribio au lililoachwa kwenye skrini za wachezaji bila kupoteza chochote, na unaweza kurudisha. Kufuta ni kwa kudumu na utaulizwa uandike jina.",
+  "Entrants are": "Washiriki ni", "Doubles teams": "Timu za wawili", "Single players": "Wachezaji peke yao",
+  "Player 1": "Mchezaji 1", "Player 2": "Mchezaji 2", "Name": "Jina", "DUPR": "DUPR", "DUPR ID": "Kitambulisho cha DUPR",
+  "Clear this row": "Futa mstari huu",
+  "How to split them up": "Jinsi ya kuwagawanya",
+  "Snake by DUPR (strongest spread evenly)": "Nyoka kwa DUPR (wenye nguvu wasambazwe sawa)",
+  "Random draw": "Droo ya bahati nasibu", "Keep the order above": "Baki na mpangilio wa juu",
+  "Fill the rows from a CSV": "Jaza mistari kutoka CSV",
+  "Fill in the boxes above, or load a CSV.": "Jaza visanduku hapo juu, au pakia CSV.",
+  "Fill in at least 4 entrants first.": "Jaza angalau washiriki 4 kwanza.",
+  "One row per entrant. Fill in what you have: the DUPR rating drives the seeding, the DUPR ID is only stored for submitting results later, and blank rows are ignored.":
+    "Mstari mmoja kwa kila mshiriki. Jaza ulicho nacho: kiwango cha DUPR ndicho kinachopanga mbegu, kitambulisho cha DUPR kinahifadhiwa tu kwa kutuma matokeo baadaye, na mistari mitupu haizingatiwi.",
+  "The group size sits with the draw below, because drawing saves it for you.":
+    "Ukubwa wa kundi upo pamoja na droo hapa chini, kwa sababu kuchora kunauhifadhi kwa ajili yako.",
   "Courts are shared automatically: every free court takes the next match in line across all running events, alternating between them. Start a second event and they mix in; pause an event and its matches leave the courts and queue.":
     "Viwanja hushirikiwa kiotomatiki: kila uwanja ulio wazi huchukua mechi inayofuata kwenye foleni kati ya mashindano yote yanayoendelea, kwa kupokezana. Anzisha shindano la pili nazo zitachanganyika; sitisha shindano na mechi zake zitaondoka viwanjani na kwenye foleni.",
   "Finish group stage": "Maliza hatua ya makundi",
@@ -1753,6 +1805,17 @@ const SW_EXACT = {
 };
 const SW_PATTERNS = [
   [/^Court (\d+)$/, "Uwanja $1"],
+  [/^Add (\d+) more rows$/, "Ongeza mistari $1 zaidi"],
+  [/^(\d+) of the 4 entrants a draw needs so far\.$/, "Washiriki $1 kati ya 4 wanaohitajika kwa droo hadi sasa."],
+  [/^(\d+) row has only one player; they will enter on their own\.$/, "Mstari $1 una mchezaji mmoja tu; ataingia peke yake."],
+  [/^(\d+) rows have only one player; they will enter on their own\.$/, "Mistari $1 ina mchezaji mmoja tu; wataingia peke yao."],
+  [/^(\d+) entrants loaded\. Check the rows, then draw\.$/, "Washiriki $1 wamepakiwa. Kagua mistari, kisha chora."],
+  [/^Replace the (\d+) entrants already entered with the (\d+) rows from the file\?$/,
+   "Badilisha washiriki $1 walioingizwa tayari na mistari $2 kutoka kwenye faili?"],
+  [/^Group stage finished\. Bracket drawn for ([^·]+)\.$/, "Hatua ya makundi imekamilika. Mchoro umechorwa kwa $1."],
+  [/^Hide ([^·]+) from players\? It is still running, so its matches stay on court but nobody can see them\.$/,
+   "Ficha $1 kwa wachezaji? Bado linaendelea, hivyo mechi zake zitabaki uwanjani lakini hakuna atakayeziona."],
+  [/^([^·]+) deleted$/, "$1 limefutwa"],
   [/^Court (\d+) now: (.+)$/, "Uwanja $1 sasa: $2"],
   [/^vs (.+)$/, "dhidi ya $1"],
   [/^Round (\d+)$/, "Raundi $1"],
@@ -1950,7 +2013,12 @@ function toast(msg){
 const entrantById = id => data.entrants.find(e => e.id === id);
 const entrantName = id => { const e = entrantById(id); return e ? e.name : null; };
 const eventById = id => data.events.find(e => e.id === id);
-const activeEvents = () => data.events.filter(e => e.active).sort((a, b) => a.sort_order - b.sort_order);
+/* Hidden events stay in the database with all their results, they just drop
+   out of every player-facing list. It is the safe way to clear a test event
+   off the board mid-tournament; the admin event switcher still shows them. */
+const isHidden = ev => !!(ev && ev.settings && ev.settings.hidden);
+const publicEvents = () => data.events.filter(e => !isHidden(e));
+const activeEvents = () => data.events.filter(e => e.active && !isHidden(e)).sort((a, b) => a.sort_order - b.sort_order);
 const courtsCount = () => (data.tournament && data.tournament.settings && data.tournament.settings.courts) || 4;
 const evSetting = (ev, key, dflt) => (ev && ev.settings && ev.settings[key] != null) ? ev.settings[key] : dflt;
 const matchPts = m => {
@@ -2313,9 +2381,10 @@ function render(){
   /* Club badge, top left: the Nairobi Pickleball Club logo, cropped square,
      round-masked, and embedded as a data URI so the page stays self-contained
      (source file: npc_logo.png in the repo). */
-  html += '<div class="masthead"><div class="mast-left">' +
+  /* The badge and wordmark go home, the way a masthead is expected to. */
+  html += '<div class="masthead"><button class="mast-left" onclick="goHome()" title="Back to the courts">' +
     '<img class="clublogo" alt="Nairobi Pickleball Club" src="data:image/png;base64,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">' +
-    '<div class="wordmark">' + esc(data.tournament.name) + '</div></div>' +
+    '<div class="wordmark">' + esc(data.tournament.name) + '</div></button>' +
     '<button class="langbtn" onclick="toggleLang()" aria-label="Badilisha lugha">' +
     (state.lang === "sw" ? "EN" : "SW") + '</button></div>';
   html += '<nav class="tabs">' + tabs.map(([id, label]) =>
@@ -2391,7 +2460,7 @@ function eventLabel(ev){
 }
 function renderEventTabs(){
   const cur = currentEvent();
-  let evs = data.events.slice().sort((a, b) => a.sort_order - b.sort_order);
+  let evs = publicEvents().slice().sort((a, b) => a.sort_order - b.sort_order);
   /* Americano has no knockout, it is decided on total points, so it never
      appears as an option under the Bracket tab. */
   if (state.view === "bracket") evs = evs.filter(e => !isAmericano(e));
@@ -2502,7 +2571,7 @@ function renderDivisionTabs(){
    afternoon event never previews alongside the morning one it waits behind. */
 function upcomingSoon(){
   const now = Date.now();
-  const withStart = data.events.filter(e => eventStartDate(e));
+  const withStart = publicEvents().filter(e => eventStartDate(e));
   if (!withStart.length) return [];
   const minStart = Math.min.apply(null, withStart.map(e => eventStartDate(e).getTime()));
   const eligible = withStart.filter(e => {
@@ -2577,7 +2646,7 @@ function renderBoard(){
       h += renderCourtsPreview(soon);
     } else {
       h += '<div class="empty">Nothing is running right now.';
-      const upcoming = data.events.filter(e => !e.active && evSetting(e, "schedule_note", ""));
+      const upcoming = publicEvents().filter(e => !e.active && evSetting(e, "schedule_note", ""));
       if (upcoming.length){
         h += '<br><br>' + upcoming.slice(0, 8).map(e => esc(e.name) + ' · ' + esc(evSetting(e, "schedule_note", ""))).join('<br>');
       }
@@ -2814,7 +2883,7 @@ function renderStandings(){
 /* Single-sided bracket geometry. Round r (0-based) match j sits at a fixed
    vertical centre; the spacing doubles each round so a pair's elbow always
    meets at the next round's slot. Mirrors design 4 from the mockups. */
-const BK_P = 114, BK_MH = 76, BK_HALF = 38, BK_COLW = 152;
+const BK_P = 130, BK_MH = 92, BK_HALF = 46, BK_COLW = 178;
 function bkCenter(r, j){ return BK_HALF + BK_P * (Math.pow(2, r) - 1) / 2 + j * BK_P * Math.pow(2, r); }
 function bkBodyH(totalRounds){ return BK_MH + (Math.pow(2, totalRounds - 1) - 1) * BK_P; }
 function bkTeamRow(name, cls, score, extra){
@@ -2840,7 +2909,7 @@ function bkChampCol(champHtml, totalRounds, bodyH){
   return '<div class="bkconn"><div class="bkhead">&nbsp;</div><div class="bkbody" style="height:' + bodyH + 'px">' +
       '<div class="bkarrow bkarrow-champ" style="top:' + cy + 'px"></div></div></div>' +
     '<div class="bkcol" style="width:' + BK_COLW + 'px"><div class="bkhead">Champion</div>' +
-      '<div class="bkbody" style="height:' + bodyH + 'px"><div class="bkchamp" style="top:' + (cy - 44) + 'px">' + champHtml + '</div></div></div>';
+      '<div class="bkbody" style="height:' + bodyH + 'px"><div class="bkchamp" style="top:' + (cy - 52) + 'px">' + champHtml + '</div></div></div>';
 }
 function bkSideCls(hasName, isWin, played){
   if (!hasName) return 'bkm-tbd';
@@ -2905,9 +2974,15 @@ function renderBracket(){
     const played = m.status === "played" && m.score1 != null;
     const bye = m.status === "played" && m.score1 == null;
     const w1 = played && m.score1 > m.score2, w2 = played && m.score2 > m.score1;
+    /* A best-of-three shows the points of each game, not the games-won tally:
+       "2" told nobody how close it was. Falls back to the single score for
+       matches stored as one game, and for walkovers, which have no games. */
+    const side = n => Array.isArray(m.games) && m.games.length && !m.walkover
+      ? m.games.map(g => g[n - 1]).join(' ')
+      : (n === 1 ? m.score1 : m.score2);
     const rows =
-      bkTeamRow(n1 ? esc(n1) : 'TBD', bkSideCls(!!n1, w1, played), played ? m.score1 : null, m.walkover && w1 ? wo : '') +
-      bkTeamRow(n2 ? esc(n2) : (bye ? 'BYE' : 'TBD'), bkSideCls(!!n2, w2, played), played ? m.score2 : null, m.walkover && w2 ? wo : '');
+      bkTeamRow(n1 ? esc(n1) : 'TBD', bkSideCls(!!n1, w1, played), played ? side(1) : null, m.walkover && w1 ? wo : '') +
+      bkTeamRow(n2 ? esc(n2) : (bye ? 'BYE' : 'TBD'), bkSideCls(!!n2, w2, played), played ? side(2) : null, m.walkover && w2 ? wo : '');
     const top = bkCenter(r, j) - BK_HALF;
     const clickable = !bye && m.entrant1_id && m.entrant2_id;
     const editable = !!(state.adminPin && m.status === "scheduled" && !bye);
@@ -3056,26 +3131,24 @@ function renderAdmin(){
       '</div><p class="note" style="margin:2px 0 0">Leave all ticked to share every court (weighted by how many matches each event still has). Tick only some to keep this event on just those courts.</p></div>' +
       '<div class="field"><label>How long this will take</label>' +
       '<p class="note" id="adm-estimate" style="margin:2px 0 0">' + estimateText(ev) + '</p></div>' +
+      '<p class="note" style="margin-top:8px">Nothing above takes effect until you press Save settings; saved changes then apply right away, even mid-event. "Auto" knockout size takes the top ' + evSetting(ev, "advance_per_group", 2) + ' per group and fills to a full bracket with best next-placed teams; a fixed size does the same math for that exact number. The group size sits with the draw below, because drawing saves it for you.</p>' +
       '<button id="adm-save" class="btn small secondary" onclick="saveEventSettings()">Save settings</button>' +
-      '<span id="adm-dirty" class="note" style="display:none;margin-left:10px;font-weight:700;color:var(--accent)">Not saved yet</span>' +
-      '<p class="note" style="margin-top:8px">Nothing above takes effect until you press Save settings; saved changes then apply right away, even mid-event. "Auto" knockout size takes the top ' + evSetting(ev, "advance_per_group", 2) + ' per group and fills to a full bracket with best next-placed teams; a fixed size does the same math for that exact number.</p>';
+      '<span id="adm-dirty" class="note" style="display:none;margin-left:10px;font-weight:700;color:var(--accent)">Not saved yet</span>';
 
     if (!hasMatches || state.showRedraw){
       h += '<div class="divider"></div><h4>' + (hasMatches ? 'Start over with a new list' : '2 · Draw groups') + '</h4>';
-      h += '<p class="note">Paste entrants one per line. For doubles use one line per team, e.g. "Maya &amp; Owen".</p>';
+      h += '<p class="note">One row per entrant. Fill in what you have: the DUPR rating drives the seeding, the DUPR ID is only stored for submitting results later, and blank rows are ignored.</p>';
       h += '<p class="note" style="margin-top:4px"><input id="adm-csv" type="file" accept=".csv,.txt,text/csv" style="display:none" onchange="entrantsCsvPicked(this)">' +
-        '<button class="btn small secondary" onclick="document.getElementById(\'adm-csv\').click()">Upload a CSV instead</button><br>' +
-        'One entrant per row; doubles put the two partner names in the first two columns and they come in joined as "Maya &amp; Owen". ' +
+        '<button class="btn small secondary" onclick="document.getElementById(\'adm-csv\').click()">Fill the rows from a CSV</button><br>' +
+        'One entrant per row. With a header row the columns are matched by name (player, DUPR, DUPR ID); without one, names come first and any number between 1 and 8 is read as a rating. ' +
         'Got an export in some other shape? Send Drew the file and the upload can be taught to read it.</p>';
-      h += '<p class="note" style="margin-top:4px">Add ratings after a | on each line ("Maya &amp; Owen | 4.1 3.8"); the CSV upload fills them in when the file has rating columns. Snake seeding deals the strongest teams evenly across groups; unrated teams go in last.</p>';
-      /* The list lives in state, not just in the DOM: any re-render replaces
-         the panel's HTML, and a preview or a score landing on another phone
-         would otherwise silently empty a list someone just uploaded. */
-      h += '<div class="field"><label for="adm-teams">Entrants (one per line)</label><textarea id="adm-teams" oninput="state.teamsText = this.value" placeholder="One team or player per line">' + esc(state.teamsText) + '</textarea></div>' +
-        '<div class="fieldrow"><div class="field"><label for="adm-gsize">Target group size</label><input id="adm-gsize" type="number" min="3" max="10" oninput="updateTimeEstimate()" value="' + esc(String(evSetting(ev, "group_size", 6))) + '"></div>' +
-        '<div class="field" style="display:flex;align-items:flex-end"><label style="display:flex;align-items:center;gap:6px;margin:0;padding-bottom:10px"><input type="checkbox" id="adm-seeddupr" checked> Seed groups by DUPR (snake)</label></div>' +
-        '<div class="field" style="display:flex;align-items:flex-end"><label style="display:flex;align-items:center;gap:6px;margin:0;padding-bottom:10px"><input type="checkbox" id="adm-shuffle" checked> Random draw</label></div></div>' +
-        '<button class="btn small secondary" onclick="previewSetup()">Preview</button> ' +
+      h += renderEntryGrid(ev);
+      h += '<div class="fieldrow" style="margin-top:12px"><div class="field"><label for="adm-gsize">Target group size</label><input id="adm-gsize" type="number" min="3" max="10" oninput="repriceEstimate();updateDrawSummary()" value="' + esc(String(evSetting(ev, "group_size", 6))) + '"></div>' +
+        '<div class="field"><label for="adm-seed">How to split them up</label><select id="adm-seed" onchange="updateDrawSummary()">' +
+        '<option value="dupr" selected>Snake by DUPR (strongest spread evenly)</option>' +
+        '<option value="random">Random draw</option>' +
+        '<option value="order">Keep the order above</option></select></div></div>' +
+        '<div class="esum" id="adm-summary">' + esc(drawSummaryText(ev)) + '</div>' +
         (hasMatches
           ? '<button class="btn small danger" onclick="applySetup()">Draw new groups (wipes this event)</button> <button class="btn small secondary" onclick="toggleRedraw()">Cancel</button>'
           : '<button class="btn small" onclick="applySetup()">Draw groups</button>') +
@@ -3132,6 +3205,12 @@ function renderAdmin(){
     h += ev.active
       ? '<button class="btn small secondary" onclick="setActive(false)">Pause event</button>'
       : '<button class="btn small" onclick="setActive(true)">Start event</button>';
+    h += ' <button class="btn small secondary" onclick="toggleHidden()">' +
+      (isHidden(ev) ? 'Show to players again' : 'Hide from players') + '</button>';
+    h += ' <button class="btn small danger" onclick="deleteEvent()">Delete event</button>';
+    h += '<p class="note" style="margin-top:6px">' + (isHidden(ev)
+      ? 'Hidden: players cannot see this event anywhere, but everything in it is kept and it still shows here.'
+      : 'Hiding takes a test or abandoned event off every player screen without losing anything, and can be undone. Deleting is permanent and asks you to type the name.') + '</p>';
     h += '<p class="note" style="margin-top:8px">Courts are shared automatically: every free court takes the next match in line across all running events, alternating between them. Start a second event and they mix in; pause an event and its matches leave the courts and queue.</p>';
 
     h += '<div class="divider"></div><h4>4 · Finish group stage</h4>';
@@ -3420,6 +3499,8 @@ function renderOffCourtModal(){
 }
 
 /* ---------- actions ---------- */
+/* Home is the courts board, whatever the reader was looking at. */
+function goHome(){ state.division = "main"; setView("board"); try{ window.scrollTo(0, 0); }catch(e){} }
 function setView(v){
   state.view = v; state.setupPreview = null;
   /* Americano is never an option under Bracket (it has none), so switching to
@@ -3437,7 +3518,7 @@ function setView(v){
 /* Persisted so a reload keeps you on the division you were watching. */
 function setDivision(d){ state.division = d; state.showAllQueue = false; safeSession("pb_division", d); render(); }
 function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.standingsFilter = "all"; render(); }
-function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; state.movePick = null; state.teamsText = ""; render(); }
+function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; state.movePick = null; clearEntry(); render(); }
 function setRoundFilter(r){ state.roundFilter = String(r); render(); }
 function setStandingsFilter(v){ state.standingsFilter = v; render(); }
 function dismissCallout(id){
@@ -3447,7 +3528,7 @@ function dismissCallout(id){
   render();
 }
 function toggleAllQueue(){ state.showAllQueue = !state.showAllQueue; render(); }
-function toggleRedraw(){ state.showRedraw = !state.showRedraw; state.setupPreview = null; state.teamsText = ""; render(); }
+function toggleRedraw(){ state.showRedraw = !state.showRedraw; state.setupPreview = null; clearEntry(); render(); }
 let searchT = null;
 function setSearch(v){ state.search = v; clearTimeout(searchT); searchT = setTimeout(render, 150); }
 function openMatch(id){
@@ -3533,7 +3614,13 @@ async function reload(background){
     state.loadError = msg;
   }
   render();
+  if (!autoBracketBusy){
+    autoBracketBusy = true;
+    try{ await maybeAutoBracket(); }catch(e){}
+    autoBracketBusy = false;
+  }
 }
+let autoBracketBusy = false;
 
 /* Every device quietly keeps an offline copy of the whole tournament in its
    own browser storage, refreshed each time another 25 matches are recorded.
@@ -3865,16 +3952,19 @@ function estimateText(ev, o){
       " minutes between matches and courts busy " + Math.round(COURT_BUSY * 100) +
       "% of the day.</span>");
 }
-/* Repriced live as the fields change, without a re-render that would steal
-   focus from the input being typed into. Every field that calls this is owned
-   by Save settings, so it doubles as the unsaved-changes marker: the estimate
-   updates live but nothing takes effect until saved, and organisers were
-   reading the live repricing as the settings already being applied. */
+/* Fields inside the Format panel are owned by Save settings, so touching one
+   marks it unsaved. The group size in the draw section is NOT: drawing writes
+   it along with everything else, so flagging Save there sent organisers
+   looking for a button they did not need to press. It calls repriceEstimate
+   directly instead, which updates the same figure without the marker. */
 function updateTimeEstimate(){
   const sb = document.getElementById("adm-save");
   if (sb) sb.classList.remove("secondary");
   const dirty = document.getElementById("adm-dirty");
   if (dirty) dirty.style.display = "";
+  repriceEstimate();
+}
+function repriceEstimate(){
   const el = document.getElementById("adm-estimate");
   const ev = eventById(state.adminEventId);
   if (!el || !ev) return;
@@ -3899,11 +3989,11 @@ async function saveEventSettings(){
   admShown.skip = true;
   toast("Settings saved"); await reload();
 }
-/* Fill the draw box from a CSV: one entrant per row, partner names in the
-   first one or two cells, joined with " & ". Handles Excel's quoted cells and
-   comma/semicolon/tab separators, and skips a first row that looks like a
-   header. The file only fills the textarea for review; drawing the groups is
-   still its own deliberate step. */
+/* Fill the entry rows from a CSV: one entrant per row. Handles Excel's quoted
+   cells and comma/semicolon/tab separators. With a header row the columns are
+   matched by name, which is the only way to tell a DUPR ID from anything else;
+   without one, names come first and 1-8 numbers are ratings. The file only
+   fills the boxes for review; drawing the groups is still its own step. */
 function entrantsCsvPicked(input){
   const f = input.files && input.files[0];
   input.value = "";
@@ -3928,29 +4018,47 @@ function entrantsCsvPicked(input){
       return out.map(c => c.trim()).filter(c => c);
     };
     let rows = String(reader.result).split(/\r\n|\r|\n/).map(cells).filter(cs => cs.length);
-    /* Skip a header row only when every cell IS a header phrase: one header
-       word, optionally followed by another header word or a number ("Player",
-       "Name 1", "Team Name", "DUPR 1"). A real team like "Team Rocket"
-       has a non-header second word, so it is never eaten. */
-    if (rows.length > 1 && rows[0].every(c =>
-      /^(name|player|partner|team|entrant|first|last|dupr|rating)s?\s*(name|id|no|number|[0-9]+)?$/i.test(c.trim()))) rows = rows.slice(1);
-    /* Any purely numeric cell in DUPR range (1.0-8.0) is a rating; whatever
-       is left is names. Ratings ride along after a "|" so the textarea stays
-       the single reviewable source of truth for the draw. */
+    /* Treat the first row as headers only when every cell IS a header phrase:
+       one header word, optionally followed by another header word or a number
+       ("Player", "Name 1", "Team Name", "DUPR ID 2"). A real team like "Team
+       Rocket" has a non-header second word, so it is never eaten. */
+    const HEAD = /^(name|player|partner|team|entrant|first|last|dupr|rating|id)s?\s*(name|id|no|number|[0-9]+)?\s*([0-9]+)?$/i;
+    const header = rows.length > 1 && rows[0].every(c => HEAD.test(c.trim())) ? rows.shift() : null;
     const isRating = c => /^[0-9]+(\.[0-9]+)?$/.test(c) && parseFloat(c) >= 1 && parseFloat(c) <= 8;
-    const names = rows.map(cs => {
-      const nm = cs.filter(c => !isRating(c));
-      const rt = cs.filter(isRating).slice(0, 2);
-      const base = nm.length > 1 ? nm[0] + " & " + nm[1] : (nm[0] || "");
-      return base + (rt.length ? " | " + rt.join(" ") : "");
-    }).filter(Boolean);
-    if (!names.length){ toast("No names found in that file."); return; }
-    const box = document.getElementById("adm-teams");
-    if (!box) return;
-    if (box.value.trim() && !confirm(swText("Replace what is in the entrants box with the " + names.length + " rows from the file?"))) return;
-    box.value = names.join("\n");
-    state.teamsText = box.value;
-    toast(names.length + " entrants loaded. Check the list, then draw.");
+    /* Column roles, when the file names them. "DUPR ID" must be tested before
+       "DUPR", or every ID column reads as a rating column. */
+    const roleOf = h => {
+      const t = h.toLowerCase();
+      if (/\bid\b|duprid/.test(t)) return "id";
+      if (/dupr|rating/.test(t)) return "dupr";
+      return "name";
+    };
+    const out = [];
+    for(const cs of rows){
+      const r = blankEntryRow();
+      const names = [], duprs = [], ids = [];
+      if (header){
+        cs.forEach((c, i) => {
+          const role = i < header.length ? roleOf(header[i]) : "name";
+          (role === "id" ? ids : role === "dupr" ? duprs : names).push(c);
+        });
+      } else {
+        cs.forEach(c => (isRating(c) ? duprs : names).push(c));
+      }
+      if (!names.length) continue;
+      r.n1 = names[0] || ""; r.n2 = names[1] || "";
+      r.d1 = duprs[0] || "";  r.d2 = duprs[1] || "";
+      r.i1 = ids[0] || "";    r.i2 = ids[1] || "";
+      out.push(r);
+    }
+    if (!out.length){ toast("No names found in that file."); return; }
+    const filled = entryRows().filter(r => String(r.n1 || "").trim() || String(r.n2 || "").trim()).length;
+    if (filled && !confirm(swText("Replace the " + filled + " entrants already entered with the " + out.length + " rows from the file?"))) return;
+    /* Keep a few spare rows on the end so the next entrant can just be typed. */
+    state.entryRows = out.concat(Array.from({ length: ENTRY_CHUNK }, blankEntryRow));
+    if (out.some(r => r.n2)) state.entryDoubles = true;
+    render();
+    toast(out.length + " entrants loaded. Check the rows, then draw.");
   };
   reader.readAsText(f);
 }
@@ -3995,6 +4103,38 @@ async function setActive(active){
   toast(active ? "Event started" : "Event paused");
   await reload();
 }
+/* Hiding is a settings flag, so it rides the existing update path and nothing
+   in the database is touched beyond one key. */
+async function toggleHidden(){
+  const ev = eventById(state.adminEventId);
+  if (!ev) return;
+  const next = !isHidden(ev);
+  if (next && ev.active &&
+      !confirm(swText("Hide " + ev.name + " from players? It is still running, so its matches stay on court but nobody can see them."))) return;
+  const settings = Object.assign({}, ev.settings, { hidden: next });
+  const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, settings);
+  if (!r.ok){ toast(r.error); return; }
+  toast(next ? "Hidden from players" : "Visible to players again");
+  await reload();
+}
+/* Permanent, so it asks for the name in full rather than a yes/no anyone can
+   tap through. Hiding covers the mid-tournament case; this is for clearing
+   test events out afterwards. */
+async function deleteEvent(){
+  const ev = eventById(state.adminEventId);
+  if (!ev) return;
+  const played = data.matches.filter(m => m.event_id === ev.id && m.status === "played").length;
+  const typed = prompt(swText('Delete "' + ev.name + '" for good? Its ' +
+    data.entrants.filter(e => e.event_id === ev.id).length + ' entrants and ' + played +
+    ' played matches go with it and cannot be recovered. Type the event name to confirm.'));
+  if (typed == null) return;
+  if (typed.trim() !== ev.name){ toast("That name does not match, nothing was deleted."); return; }
+  const r = await store.adminDeleteEvent(state.adminPin, ev.id);
+  if (!r.ok){ toast(r.error); return; }
+  state.adminEventId = null;
+  toast(ev.name + " deleted");
+  await reload();
+}
 async function addEvent(){
   const name = prompt(swText("Name for the new event:"));
   if (!name || !name.trim()) return;
@@ -4004,7 +4144,7 @@ async function addEvent(){
   const r = await store.adminReplaceEvent(state.adminPin, null, meta, [], []);
   if (!r.ok){ toast(r.error); return; }
   if (r.eventId) state.adminEventId = r.eventId;
-  state.teamsText = "";
+  clearEntry();
   toast("Event created");
   await reload();
 }
@@ -4129,30 +4269,99 @@ async function addTeamToGroup(){
   toast(name + " added to Group " + group);
   await reload();
 }
-function parseTeamsInput(){
-  const box = document.getElementById("adm-teams");
-  if (box) state.teamsText = box.value;
-  return String(state.teamsText || "")
-    .split("\n").map(s => s.trim()).filter(Boolean);
+/* ---------- entrant entry grid ----------
+   Rows live in state, never only in the DOM: the admin panel re-renders
+   whenever anything changes anywhere, and typing into a box you cannot see
+   the bottom of is exactly when a score lands on another phone. */
+const ENTRY_CHUNK = 5;
+function blankEntryRow(){ return { n1: "", d1: "", i1: "", n2: "", d2: "", i2: "" }; }
+function clearEntry(){ state.entryRows = null; state.entryDoubles = null; }
+function entryRows(){
+  if (!Array.isArray(state.entryRows) || !state.entryRows.length)
+    state.entryRows = Array.from({ length: ENTRY_CHUNK }, blankEntryRow);
+  return state.entryRows;
 }
-/* One entry per line: "Maya & Owen | 4.1 3.8". Everything before the "|" is
-   the name; numbers after it are DUPR ratings (any of space/comma/slash
-   separated), averaged into the team's seeding value. No "|" = unrated. */
-function parseEntrantLines(){
-  return parseTeamsInput().map(line => {
-    const bar = line.indexOf("|");
-    const name = (bar === -1 ? line : line.slice(0, bar)).trim();
-    const duprs = bar === -1 ? [] : line.slice(bar + 1).trim().split(/[\s,;\/]+/)
-      .map(x => parseFloat(x)).filter(v => Number.isFinite(v) && v >= 1 && v <= 8);
+/* Doubles unless the event calls itself singles; the organiser can override
+   and that choice sticks for as long as the draw block is open. */
+function entryIsDoubles(ev){
+  if (state.entryDoubles != null) return state.entryDoubles;
+  return !(ev && /singles/i.test(ev.name));
+}
+function setEntryDoubles(v){ state.entryDoubles = !!v; render(); }
+function setEntryCell(i, key, val){
+  const rows = entryRows();
+  if (!rows[i]) return;
+  rows[i][key] = val;
+  updateDrawSummary();
+}
+function addEntryRows(){
+  entryRows().push(...Array.from({ length: ENTRY_CHUNK }, blankEntryRow));
+  render();
+}
+function clearEntryRow(i){
+  const rows = entryRows();
+  if (!rows[i]) return;
+  rows[i] = blankEntryRow();
+  render();
+}
+const cleanNum = s => { const v = parseFloat(String(s).trim()); return Number.isFinite(v) && v >= 1 && v <= 8 ? v : null; };
+/* One entry per filled row. A row counts as filled when it has any name at
+   all, so a half-typed doubles pair is still visible in the summary rather
+   than silently dropped; blank rows are simply ignored. */
+function parseEntryRows(ev){
+  const dbl = entryIsDoubles(ev);
+  return entryRows().map(r => {
+    const names = [String(r.n1 || "").trim(), dbl ? String(r.n2 || "").trim() : ""].filter(Boolean);
+    if (!names.length) return null;
+    const duprs = [cleanNum(r.d1), dbl ? cleanNum(r.d2) : null].filter(v => v != null);
+    const ids = [String(r.i1 || "").trim(), dbl ? String(r.i2 || "").trim() : ""].filter(Boolean);
     const dupr = duprs.length ? Math.round(duprs.reduce((a, b) => a + b, 0) / duprs.length * 100) / 100 : null;
-    return { name, duprs, dupr };
-  }).filter(e => e.name);
+    return { name: names.join(" & "), duprs, dupr, duprIds: ids, partial: dbl && names.length < 2 };
+  }).filter(Boolean);
 }
-const entrantMetaFor = e => (e && e.dupr != null) ? { dupr: e.dupr, duprs: e.duprs } : {};
-/* True when the draw should snake-seed: box ticked and at least one rating. */
-function seedByDuprWanted(entries){
-  const box = document.getElementById("adm-seeddupr");
-  return !!(box && box.checked && entries.some(e => e.dupr != null));
+function renderEntryGrid(ev){
+  const dbl = entryIsDoubles(ev);
+  const rows = entryRows();
+  const cell = (i, key, cls, ph, extra) =>
+    '<input class="' + cls + (rows[i][key] ? ' efilled' : '') + '" type="text" ' + (extra || "") +
+    ' placeholder="' + ph + '" value="' + esc(rows[i][key]) + '"' +
+    ' oninput="setEntryCell(' + i + ',\'' + key + '\',this.value)">';
+  let h = '<div class="fieldrow" style="align-items:flex-end">' +
+    '<div class="field" style="flex:0 0 auto"><label for="adm-format">Entrants are</label>' +
+    '<select id="adm-format" onchange="setEntryDoubles(this.value===\'d\')">' +
+    '<option value="d"' + (dbl ? ' selected' : '') + '>Doubles teams</option>' +
+    '<option value="s"' + (dbl ? '' : ' selected') + '>Single players</option></select></div></div>';
+  h += '<div class="egrid">';
+  rows.forEach((r, i) => {
+    h += '<div class="erow' + (dbl ? ' dbl' : '') + '"><span class="enum">' + (i + 1) + '</span><div class="ecells">' +
+      cell(i, "n1", "ename", dbl ? "Player 1" : "Name") +
+      cell(i, "d1", "edupr", "DUPR", 'inputmode="decimal"') +
+      cell(i, "i1", "eid", "DUPR ID", 'inputmode="numeric"');
+    if (dbl) h += cell(i, "n2", "ename", "Player 2") +
+      cell(i, "d2", "edupr", "DUPR", 'inputmode="decimal"') +
+      cell(i, "i2", "eid", "DUPR ID", 'inputmode="numeric"');
+    h += '</div><button class="eclear" title="Clear this row" onclick="clearEntryRow(' + i + ')">&times;</button></div>';
+  });
+  h += '</div>';
+  h += '<button class="btn small secondary" onclick="addEntryRows()">Add ' + ENTRY_CHUNK + ' more rows</button>';
+  return h;
+}
+function entrantMetaFor(e){
+  if (!e) return {};
+  const meta = {};
+  if (e.dupr != null){ meta.dupr = e.dupr; meta.duprs = e.duprs; }
+  if (e.duprIds && e.duprIds.length) meta.duprIds = e.duprIds;
+  return meta;
+}
+/* One choice instead of two checkboxes that quietly fought each other: the
+   old pair let "seed by DUPR" and "random draw" both be ticked, and DUPR won
+   silently whenever any rating existed. */
+function seedMode(){
+  const sel = document.getElementById("adm-seed");
+  return sel ? sel.value : "dupr";
+}
+function seedByDuprWanted(entries, mode){
+  return (mode || seedMode()) === "dupr" && entries.some(e => e.dupr != null);
 }
 function setupSummary(entries, s, useDupr){
   const names = entries.map(e => e.name);
@@ -4178,21 +4387,32 @@ function setupSummary(entries, s, useDupr){
   }
   return lines;
 }
-function previewSetup(){
-  const ev = eventById(state.adminEventId);
-  if (!ev) return;
-  const entries = parseEntrantLines();
-  if (entries.length < 4){ state.setupPreview = "Paste at least 4 entrants first."; render(); return; }
+/* The old Preview button was a separate dry run that people read as having
+   done something. The same numbers now reprice themselves as the boxes are
+   filled in, written straight into the node so typing is never interrupted. */
+function drawSummaryText(ev){
+  const entries = parseEntryRows(ev);
+  if (!entries.length) return "Fill in the boxes above, or load a CSV.";
   const s = readEventSettings(ev);
-  state.setupPreview = s.error || setupSummary(entries, s, seedByDuprWanted(entries));
-  render();
+  if (s.error) return s.error;
+  const half = entries.filter(e => e.partial).length;
+  let out = entries.length < 4
+    ? entries.length + " of the 4 entrants a draw needs so far."
+    : setupSummary(entries, s, seedByDuprWanted(entries));
+  if (half) out += "\n" + half + (half === 1 ? " row has" : " rows have") + " only one player; they will enter on their own.";
+  return out;
+}
+function updateDrawSummary(){
+  const el = document.getElementById("adm-summary");
+  const ev = eventById(state.adminEventId);
+  if (el && ev) el.textContent = swText(drawSummaryText(ev));
 }
 async function applySetup(){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
-  const entries = parseEntrantLines();
+  const entries = parseEntryRows(ev);
   const names = entries.map(e => e.name);
-  if (names.length < 4){ state.setupPreview = "Paste at least 4 entrants first."; render(); return; }
+  if (names.length < 4){ state.setupPreview = "Fill in at least 4 entrants first."; render(); return; }
   const dupes = names.filter((n, i) => names.indexOf(n) !== i);
   if (dupes.length){ state.setupPreview = "Duplicate entries: " + [...new Set(dupes)].join(", "); render(); return; }
   const check = readEventSettings(ev);
@@ -4204,9 +4424,9 @@ async function applySetup(){
   if (!confirm(swText(msg))) return;
   /* This one replaces the whole event, so it does carry the untouched keys. */
   const settings = Object.assign({}, ev.settings, check);
-  const useDupr = seedByDuprWanted(entries);
-  const shuffle = document.getElementById("adm-shuffle").checked;
-  const rand = shuffle ? mulberry32(Math.floor(performance.now() * 1000) % 2147483647 + 1) : null;
+  const mode = seedMode();
+  const useDupr = seedByDuprWanted(entries, mode);
+  const rand = mode === "random" ? mulberry32(Math.floor(performance.now() * 1000) % 2147483647 + 1) : null;
   const groups = useDupr ? makeSeededGroups(entries, settings.group_size)
                          : makeGroups(names, settings.group_size, rand);
   const byName = new Map(entries.map(e => [e.name, e]));
@@ -4220,7 +4440,8 @@ async function applySetup(){
   if (!r.ok){ toast(r.error); return; }
   state.setupPreview = null;
   state.showRedraw = false;
-  state.teamsText = "";
+  state.entryRows = null;
+  state.entryDoubles = null;
   toast("Groups drawn. Pick courts and start when ready.");
   await reload();
 }
@@ -4248,10 +4469,45 @@ async function confirmGroupStage(){
   state.view = "bracket"; state.eventId = ev.id;
   await reload();
 }
+/* The bracket used to wait for someone to press "Finish group stage", which
+   meant the last group result sat there doing nothing while players asked who
+   they had drawn. Once every group match of an event is played and no bracket
+   exists yet, the desk seeds it by itself.
+   Only an unlocked admin device does this, and it re-reads before writing, so
+   a second desk phone finding the bracket already there simply stops. Each
+   event is attempted once per session: a failure must not become a loop. */
+const autoBracketTried = new Set();
+async function maybeAutoBracket(){
+  if (!state.adminPin) return;
+  for(const ev of data.events){
+    if (autoBracketTried.has(ev.id) || isAmericano(ev)) continue;
+    const ms = data.matches.filter(m => m.event_id === ev.id);
+    const group = ms.filter(m => m.stage === "group");
+    if (!group.length || ms.some(m => m.stage === "knockout")) continue;
+    if (group.some(m => m.status !== "played")) continue;
+    if (!groupsOfEvent(ev).length) continue;
+    autoBracketTried.add(ev.id);
+    const field = seedFieldFor(ev);
+    if (field.seeds.length < 2) continue;
+    await reload();
+    /* Re-check against the fresh pull: another desk phone may have just
+       seeded it, and a correction may have reopened a group match. */
+    const fresh = data.matches.filter(m => m.event_id === ev.id);
+    if (fresh.some(m => m.stage === "knockout")) continue;
+    if (fresh.filter(m => m.stage === "group").some(m => m.status !== "played")) continue;
+    const maxOrder = Math.max(0, ...fresh.map(m => m.play_order || 0));
+    const r = await store.adminGenerateBracket(state.adminPin, ev.id, buildBracket(ev.id, seedFieldFor(ev).seeds, maxOrder));
+    if (!r.ok) continue;
+    toast("Group stage finished. Bracket drawn for " + ev.name + ".");
+    await reload();
+  }
+}
 async function resetBracket(){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
   if (!confirm(swText("Remove the knockout bracket and its scores for this event?"))) return;
+  /* Deliberate removal, so the auto-draw must not put it straight back. */
+  autoBracketTried.add(ev.id);
   const r = await store.adminResetBracket(state.adminPin, ev.id);
   if (!r.ok){ toast(r.error); return; }
   toast("Back to group stage");

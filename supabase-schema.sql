@@ -132,7 +132,6 @@ exception when others then null; end $$;
 
 drop function if exists nairobi_assign_courts(uuid);      -- replaced by the shared-pool nairobi_assign_courts()
 drop function if exists nairobi_courts_conflict(uuid, jsonb);  -- per-event court allocation removed
-drop function if exists nairobi_admin_delete_event(text, uuid); -- deleting whole events is intentionally not possible
 
 -- ---------- helpers ----------
 
@@ -944,6 +943,27 @@ begin
 end;
 $$;
 
+-- Deleting a whole event was deliberately impossible for a long time, on the
+-- grounds that nothing in a live tournament should be one tap from gone. It
+-- exists now for clearing out test events, and the client asks the organiser
+-- to type the event name first; hiding (settings.hidden) is the reversible
+-- option for anything mid-tournament. Matches go before entrants because a
+-- match references both.
+create or replace function nairobi_admin_delete_event(p_pin text, p_event_id uuid)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  if not exists (select 1 from nairobi_events where id = p_event_id) then return 'Event not found.'; end if;
+  delete from nairobi_matches where event_id = p_event_id;
+  delete from nairobi_entrants where event_id = p_event_id;
+  delete from nairobi_events where id = p_event_id;
+  perform nairobi_assign_courts();
+  return 'OK';
+end;
+$$;
+
 -- Events with an admin-set start time turn themselves on 5 minutes early, so
 -- the desk does not have to be watching the clock. Any phone's refresh calls
 -- this (anon-safe: it only enacts the stored schedule). Fires once per set
@@ -1235,6 +1255,7 @@ grant execute on function nairobi_admin_ack_called(text, uuid) to anon, authenti
 grant execute on function nairobi_admin_move_entrant(text, uuid, text, jsonb) to anon, authenticated;
 grant execute on function nairobi_admin_update_event(text, uuid, text, jsonb) to anon, authenticated;
 grant execute on function nairobi_admin_set_active(text, uuid, boolean) to anon, authenticated;
+grant execute on function nairobi_admin_delete_event(text, uuid) to anon, authenticated;
 grant execute on function nairobi_admin_replace_event(text, uuid, text, int, jsonb, jsonb, jsonb) to anon, authenticated;
 grant execute on function nairobi_admin_rename_entrant(text, uuid, text) to anon, authenticated;
 grant execute on function nairobi_admin_remove_entrant(text, uuid) to anon, authenticated;

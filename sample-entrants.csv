@@ -1,17 +1,17 @@
-Player 1,Player 2,DUPR 1,DUPR 2
-Brian Kimani,Victor Otieno,4.62,4.41
-Samuel Njoroge,Dennis Mwangi,4.55,4.28
-Hassan Abdi,Yusuf Farah,4.31,4.44
-Peter Wanjiru,Collins Ochieng,4.20,4.05
-Alykhan Somji,Feroz Karim,3.98,4.12
-Tom Kariuki,Eric Muriuki,3.90,3.86
-Daniel Kiptoo,Elias Rotich,3.84,3.71
-George Mutiso,Kevin Omondi,3.66,3.79
-Ali Rashid,Bilal Noor,3.61,3.52
-Martin Gitau,Simon Ndegwa,3.48,3.55
-Joseph Barasa,Patrick Wekesa,3.40,3.33
-Ian Mbugua,Charles Kamau,3.27,3.44
-Raj Patel,Nikhil Shah,3.19,3.30
-Steve Onyango,Michael Odhiambo,3.12,3.05
-Anthony Mureithi,Paul Githinji,2.94,3.08
-Frank Amolo,Duncan Cheruiyot,2.85,2.72
+Player 1,DUPR 1,DUPR ID 1,Player 2,DUPR 2,DUPR ID 2
+Brian Kimani,4.62,4183220,Victor Otieno,4.41,5027118
+Samuel Njoroge,4.55,3910447,Dennis Mwangi,4.28,6114903
+Hassan Abdi,4.31,7220561,Yusuf Farah,4.44,4488210
+Peter Wanjiru,4.20,5561074,Collins Ochieng,4.05,3305992
+Alykhan Somji,3.98,6640318,Feroz Karim,4.12,7719405
+Tom Kariuki,3.90,4072663,Eric Muriuki,3.86,5183740
+Daniel Kiptoo,3.84,6209551,Elias Rotich,3.71,3874026
+George Mutiso,3.66,7451183,Kevin Omondi,3.79,4930277
+Ali Rashid,3.61,5318806,Bilal Noor,3.52,6602194
+Martin Gitau,3.48,3729015,Simon Ndegwa,3.55,7085463
+Joseph Barasa,3.40,4611972,Patrick Wekesa,3.33,5940338
+Ian Mbugua,3.27,6873201,Charles Kamau,3.44,3418657
+Raj Patel,3.19,5206449,Nikhil Shah,3.30,7362085
+Steve Onyango,3.12,4155730,Michael Odhiambo,3.05,6027918
+Anthony Mureithi,2.94,7604382,Paul Githinji,3.08,3591246
+Frank Amolo,2.85,5843017,Duncan Cheruiyot,2.72,4276590
