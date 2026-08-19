@@ -33,7 +33,7 @@ set search_path = public, extensions;
 
 create table if not exists nairobi_tournaments (
   id uuid primary key default gen_random_uuid(),
-  name text not null default 'Nairobi Open',
+  name text not null default 'Nairobi Open 2026',
   settings jsonb not null default '{"courts": 4}'::jsonb,
   admin_pin_hash text,
   created_at timestamptz not null default now()
@@ -81,6 +81,10 @@ create table if not exists nairobi_matches (
   status text not null default 'scheduled',   -- 'scheduled' or 'played'
   play_order numeric,
   postponed boolean not null default false,
+  -- Held: taken off court and kept out of the queue until the desk puts it
+  -- back. Postponing only moves a match down the order, so with nothing else
+  -- waiting the assigner called the same match straight back on.
+  held boolean not null default false,
   court int,                                  -- assigned court while waiting/playing
   walkover boolean not null default false,    -- won by default (no-show)
   called_at timestamptz,                      -- when the match was called to a court
@@ -129,6 +133,8 @@ exception when others then null; end $$;
 
 -- ---------- migrations from earlier versions of this file ----------
 -- (safe no-ops on a fresh install)
+
+alter table nairobi_matches add column if not exists held boolean not null default false;
 
 drop function if exists nairobi_assign_courts(uuid);      -- replaced by the shared-pool nairobi_assign_courts()
 drop function if exists nairobi_courts_conflict(uuid, jsonb);  -- per-event court allocation removed
@@ -291,7 +297,7 @@ begin
                / count(*) over (partition by m2.event_id) as frac
       from nairobi_matches m2
       join nairobi_events e on e.id = m2.event_id and e.active
-      where m2.status = 'scheduled' and m2.court is null
+      where m2.status = 'scheduled' and m2.court is null and not m2.held
         and m2.entrant1_id is not null and m2.entrant2_id is not null
         and coalesce(e.settings ->> 'format', '') <> 'americano'
     ) q
@@ -340,13 +346,13 @@ begin
       from nairobi_matches m2
       join nairobi_entrants ea on ea.id = m2.entrant1_id
       join nairobi_entrants eb on eb.id = m2.entrant2_id
-      where m2.event_id = ae.id and m2.status = 'scheduled' and m2.court is null
+      where m2.event_id = ae.id and m2.status = 'scheduled' and m2.court is null and not m2.held
         and m2.entrant1_id is not null and m2.entrant2_id is not null
         and not exists (
           select 1 from nairobi_matches g
           join nairobi_entrants ga on ga.id = g.entrant1_id
           join nairobi_entrants gb on gb.id = g.entrant2_id
-          where g.event_id = ae.id and g.status = 'scheduled' and g.id <> m2.id
+          where g.event_id = ae.id and g.status = 'scheduled' and g.id <> m2.id and not g.held
             and (g.court is not null or g.play_order < m2.play_order)
             and (string_to_array(ga.name, ' & ') || string_to_array(gb.name, ' & '))
                 && (string_to_array(ea.name, ' & ') || string_to_array(eb.name, ' & ')))
@@ -451,7 +457,7 @@ begin
   end if;
 
   -- moving a match is a re-queue: it is no longer "postponed"
-  update nairobi_matches set play_order = target, postponed = false, updated_at = now() where id = m.id;
+  update nairobi_matches set play_order = target, postponed = false, held = false, updated_at = now() where id = m.id;
   perform nairobi_assign_courts();
   return 'OK';
 end;
@@ -718,6 +724,50 @@ begin
 end;
 $$;
 
+-- Records a drawn lot (or any other entrant metadata) without touching names.
+-- Used when the whole USA Pickleball tiebreak chain leaves teams level and the
+-- desk has to draw for the last qualifying place.
+create or replace function nairobi_admin_set_entrant_meta(p_pin text, p_entrant_id uuid, p_meta jsonb)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  if not exists (select 1 from nairobi_entrants where id = p_entrant_id) then return 'Team not found.'; end if;
+  update nairobi_entrants set meta = coalesce(p_meta, '{}'::jsonb) where id = p_entrant_id;
+  return 'OK';
+end;
+$$;
+
+-- Takes a match off its court and holds it out of the queue until the desk
+-- puts it back, for the case where one team is ready and the other is not.
+-- Postponing only moves a match down the order, so with nothing else waiting
+-- the assigner called the same match straight back on.
+-- Lock order, as everywhere else: the match row first, then the advisory lock.
+create or replace function nairobi_admin_hold(p_pin text, p_match_id uuid, p_held boolean)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  m nairobi_matches%rowtype;
+begin
+  if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  select * into m from nairobi_matches where id = p_match_id for update;
+  if not found then return 'Match not found.'; end if;
+  if m.status = 'played' then return 'That match already has a score.'; end if;
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
+  update nairobi_matches
+  set held = p_held,
+      court = case when p_held then null else court end,
+      called_at = case when p_held then null else called_at end,
+      called_ack = case when p_held then false else called_ack end,
+      updated_at = now()
+  where id = p_match_id;
+  perform nairobi_assign_courts();
+  return 'OK';
+end;
+$$;
+
 -- Move a postponed (or any unplayed) match to the front of its event's queue.
 create or replace function nairobi_admin_play_next(p_pin text, p_match_id uuid)
 returns text
@@ -738,7 +788,7 @@ begin
   perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select coalesce(min(play_order), m.play_order) - 1 into front
   from nairobi_matches where event_id = m.event_id and status = 'scheduled' and id <> m.id;
-  update nairobi_matches set play_order = front, postponed = false, updated_at = now() where id = p_match_id;
+  update nairobi_matches set play_order = front, postponed = false, held = false, updated_at = now() where id = p_match_id;
   perform nairobi_assign_courts();
   return 'OK';
 end;
@@ -1286,6 +1336,8 @@ grant execute on function nairobi_admin_update_event(text, uuid, text, jsonb) to
 grant execute on function nairobi_admin_set_active(text, uuid, boolean) to anon, authenticated;
 grant execute on function nairobi_admin_delete_event(text, uuid) to anon, authenticated;
 grant execute on function nairobi_admin_set_active_many(text, uuid[], boolean) to anon, authenticated;
+grant execute on function nairobi_admin_set_entrant_meta(text, uuid, jsonb) to anon, authenticated;
+grant execute on function nairobi_admin_hold(text, uuid, boolean) to anon, authenticated;
 grant execute on function nairobi_admin_replace_event(text, uuid, text, int, jsonb, jsonb, jsonb) to anon, authenticated;
 grant execute on function nairobi_admin_rename_entrant(text, uuid, text) to anon, authenticated;
 grant execute on function nairobi_admin_remove_entrant(text, uuid) to anon, authenticated;
@@ -1358,7 +1410,7 @@ revoke execute on function nairobi_seed_pin() from public, anon, authenticated;
 select set_config('nairobi.seed_pin', '', false);
 
 insert into nairobi_tournaments (name, admin_pin_hash)
-select 'Nairobi Open', crypt(nairobi_seed_pin(), gen_salt('bf'))
+select 'Nairobi Open 2026', crypt(nairobi_seed_pin(), gen_salt('bf'))
 where not exists (select 1 from nairobi_tournaments);
 
 -- All category events, ready to fill with entrants from the Admin tab.
