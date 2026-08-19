@@ -277,9 +277,24 @@ select.mv{padding:4px 6px; border-radius:6px; border:1px solid var(--line); back
 .eclear:hover,.eclear:focus-visible{color:var(--danger); background:var(--danger-soft)}
 .esum{background:var(--court-soft); border:1px solid var(--line); border-radius:8px; padding:9px 11px; font-size:13px; margin:10px 0; white-space:pre-line}
 .gboard{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; margin-top:4px}
-.gcol{background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:8px}
+.gcol{background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:8px; min-height:70px}
 .gcol.target{outline:2px dashed var(--accent); outline-offset:2px; cursor:pointer}
+.gcol.dragover{outline:2px solid var(--accent); outline-offset:2px; background:var(--accent-soft)}
+.gcol.unalloc{border-style:dashed; border-color:var(--warn); background:var(--warn-soft)}
+.gcol.locked{opacity:.92}
 .gcol h5{margin:0 0 4px; font-size:13px; display:flex; justify-content:space-between; gap:8px; align-items:baseline}
+.gcol h5 button{font:inherit; font-weight:800; color:inherit; text-decoration:underline dotted; text-underline-offset:3px}
+.gchip.dragging{opacity:.4}
+.gchip .gact{display:flex; gap:4px; flex:none}
+.gchip .gact span{font-size:11px; font-weight:700; color:var(--muted); padding:2px 4px; border-radius:4px}
+.gchip .gact span:hover{color:var(--accent); background:var(--accent-soft)}
+.gchip .gact span.rm:hover{color:var(--danger); background:var(--danger-soft)}
+.gaddrow{display:flex; gap:6px; margin-top:6px}
+.gaddrow input{flex:1; min-width:0; padding:6px 8px; border-radius:7px; border:1px solid var(--line); background:var(--card); font-size:13px}
+.gwarn{background:var(--warn-soft); color:var(--warn); border-radius:8px; padding:8px 10px; font-size:13px; font-weight:600; margin:8px 0}
+.runbar{display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:10px 0 4px; padding:10px 12px; background:var(--court-soft); border:1px solid var(--line); border-radius:10px}
+.runbar .note{flex:1; min-width:180px}
+.runbtn{padding:11px 20px; font-size:15px}
 .gcol .gavg{color:var(--muted); font-weight:600; font-size:11px; text-align:right}
 .gchip{display:flex; justify-content:space-between; align-items:center; gap:8px; width:100%; text-align:left; font:inherit; color:inherit; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px 8px; margin-top:5px; cursor:pointer}
 .gchip.sel{border-color:var(--accent); background:var(--accent-soft); box-shadow:0 0 0 1px var(--accent)}
@@ -1263,6 +1278,19 @@ function demoStore(){
       assignCourtsGlobal(db);
       notify(); return ok();
     },
+    async adminSetActiveMany(pin, eventIds, active){
+      if (!checkPin(pin)) return fail("Wrong PIN.");
+      const evs = db.events.filter(e => eventIds.indexOf(e.id) !== -1);
+      if (!evs.length) return fail("Event not found.");
+      if (active && evs.some(e => !db.matches.some(m => m.event_id === e.id)))
+        return fail("Draw groups first, then start the event.");
+      evs.forEach(e => {
+        e.active = active;
+        e.settings = Object.assign({}, e.settings, { autostarted: true });
+      });
+      assignCourtsGlobal(db);
+      notify(); return ok();
+    },
     async adminDeleteEvent(pin, eventId){
       if (!checkPin(pin)) return fail("Wrong PIN.");
       const ev = db.events.find(e => e.id === eventId);
@@ -1471,6 +1499,7 @@ function liveStore(){
     adminUpdateEvent: (pin, eventId, name, settings) => rpc("nairobi_admin_update_event", { p_pin: pin, p_event_id: eventId, p_name: name, p_settings: settings }),
     adminSetActive: (pin, eventId, active) => rpc("nairobi_admin_set_active", { p_pin: pin, p_event_id: eventId, p_active: !!active }),
     adminDeleteEvent: (pin, eventId) => rpc("nairobi_admin_delete_event", { p_pin: pin, p_event_id: eventId }),
+    adminSetActiveMany: (pin, ids, active) => rpc("nairobi_admin_set_active_many", { p_pin: pin, p_event_ids: ids, p_active: !!active }),
     autostartDue: () => rpc("nairobi_autostart_due", {}),
     adminReplaceEvent: async (pin, eventId, meta, entrants, matches) => {
       const r = await rpc("nairobi_admin_replace_event", {
@@ -1506,7 +1535,7 @@ const state = {
   standingsFilter: "all",
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null, assignCourt: null, offCourtId: null,
   setupPreview: null, adminEventId: null, loadError: null,
-  entryRows: null, entryDoubles: null, unallocated: null,
+  entryRows: null, entryDoubles: null, gedit: null, dragId: null,
   showAllQueue: false, showRedraw: false, pendingRender: false, division: "main",
   movePick: null,
   lang: safeLocal("pb_lang") === "sw" ? "sw" : "en",
@@ -1579,6 +1608,8 @@ const SW_EXACT = {
   "All rounds played": "Raundi zote zimechezwa",
   "Next match starts once its players are off court": "Mechi inayofuata itaanza wachezaji wakitoka uwanjani",
   "Waiting lower in the queue": "Inasubiri chini kwenye foleni",
+  "You are next. Stay by the courts.": "Wewe ndiye unayefuata. Baki karibu na viwanja.",
+  "You are next. Stay by the courts.": "Wewe ndiye unayefuata. Baki karibu na viwanja.",
   "Up any moment now.": "Inaingia wakati wowote sasa.",
   "Total points won": "Jumla ya pointi", "Player": "Mchezaji", "Winner": "Mshindi",
   "done": "imekamilika", "on court": "uwanjani", "running": "linaendelea",
@@ -3023,46 +3054,209 @@ function renderBracket(){
 }
 
 /* ---------- admin ---------- */
-/* Groups board: every group as a column of team chips with DUPR (team average
-   large, individual ratings under it) and a group-average header, so balance
-   is visible at a glance. Tap a chip to pick it up, tap another group to move
-   it: before anything is played the whole schedule is redrawn cleanly, after
-   that it falls through to the usual catch-up-matches flow. */
+/* Groups board. Everything here edits a working copy, not the database: teams
+   are dragged (or tapped, which is what actually works on a phone) between
+   groups, dropped into Unallocated, renamed, removed or added, and nothing
+   happens to the event until Save groups rebuilds it.
+   Groups lock the moment a match has a score. Rebuilding schedules under a
+   played result meant deleting that result or bolting catch-up matches onto
+   the end of the queue, and both were worse than saying no. */
 function avgDuprOf(members){
   const vals = members.map(e => e.meta && e.meta.dupr).filter(v => v != null);
   return vals.length ? vals.reduce((a, b) => a + +b, 0) / vals.length : null;
 }
-function renderGroupsBoard(ev, groups, evEntrants){
-  if (groups.length < 2) return '';
-  const sel = state.movePick ? entrantById(state.movePick) : null;
+function groupsLocked(ev){
+  return data.matches.some(m => m.event_id === ev.id &&
+    (m.status === "played" || m.stage === "knockout" || m.court != null));
+}
+function gedit(ev){
+  if (!state.gedit || state.gedit.evId !== ev.id){
+    const evE = data.entrants.filter(e => e.event_id === ev.id);
+    state.gedit = {
+      evId: ev.id, dirty: false, unallocated: [],
+      groups: groupsOfEvent(ev).map(n => ({
+        name: n,
+        members: evE.filter(e => e.group_name === n)
+          .sort((a, b) => (a.seed || 0) - (b.seed || 0))
+          .map(e => ({ id: e.id, name: e.name, meta: e.meta || {} }))
+      }))
+    };
+  }
+  return state.gedit;
+}
+function gClear(){ state.gedit = null; state.movePick = null; state.dragId = null; }
+function gFind(ge, id){
+  for(const g of ge.groups){ const i = g.members.findIndex(m => m.id === id); if (i >= 0) return { list: g.members, i }; }
+  const j = ge.unallocated.findIndex(m => m.id === id);
+  return j >= 0 ? { list: ge.unallocated, i: j } : null;
+}
+/* dest is a group index, or -1 for the Unallocated tray. */
+function gMove(id, dest){
+  const ev = eventById(state.adminEventId);
+  if (!ev || groupsLocked(ev)) return;
+  const ge = gedit(ev);
+  const at = gFind(ge, id);
+  if (!at) return;
+  const [row] = at.list.splice(at.i, 1);
+  (dest < 0 ? ge.unallocated : ge.groups[dest].members).push(row);
+  ge.dirty = true;
+  state.movePick = null; state.dragId = null;
+  render();
+}
+function gPick(id){ state.movePick = state.movePick === id ? null : id; render(); }
+function gDragStart(id){ state.dragId = id; }
+function gDragEnd(){ state.dragId = null; render(); }
+function gDrop(dest){ if (state.dragId) gMove(state.dragId, dest); }
+function gAddGroup(){
+  const ev = eventById(state.adminEventId);
+  if (!ev || groupsLocked(ev)) return;
+  const ge = gedit(ev);
+  ge.groups.push({ name: groupLetter(ge.groups.length), members: [] });
+  ge.dirty = true; render();
+}
+/* Dissolving empties a group into Unallocated rather than guessing where its
+   teams should go, and the letters close up so there is never a gap. */
+function gDissolve(i){
+  const ev = eventById(state.adminEventId);
+  if (!ev || groupsLocked(ev)) return;
+  const ge = gedit(ev);
+  const g = ge.groups[i];
+  if (!g) return;
+  if (g.members.length && !confirm(swText('Dissolve group ' + g.name + '? Its ' + g.members.length +
+    ' teams move to Unallocated and you place them again.'))) return;
+  ge.unallocated.push(...g.members);
+  ge.groups.splice(i, 1);
+  ge.groups.forEach((x, n) => { x.name = groupLetter(n); });
+  ge.dirty = true; render();
+}
+function gRename(id){
+  const ev = eventById(state.adminEventId);
+  if (!ev) return;
+  const ge = gedit(ev);
+  const at = gFind(ge, id);
+  if (!at) return;
+  const row = at.list[at.i];
+  const next = (prompt(swText("New name:"), row.name) || "").trim();
+  if (!next || next === row.name) return;
+  row.name = next; ge.dirty = true; render();
+}
+function gRemove(id){
+  const ev = eventById(state.adminEventId);
+  if (!ev || groupsLocked(ev)) return;
+  const ge = gedit(ev);
+  const at = gFind(ge, id);
+  if (!at) return;
+  if (!confirm(swText('Remove "' + at.list[at.i].name + '" from this event?'))) return;
+  at.list.splice(at.i, 1);
+  ge.dirty = true; render();
+}
+function gAddTo(i){
+  const ev = eventById(state.adminEventId);
+  if (!ev || groupsLocked(ev)) return;
+  const box = document.getElementById("gadd-" + i);
+  const name = box ? box.value.trim() : "";
+  if (!name) return;
+  const ge = gedit(ev);
+  ge.groups[i].members.push({ id: uid(), name, meta: {} });
+  ge.dirty = true; render();
+}
+function gReset(){ gClear(); render(); }
+async function gSave(){
+  const ev = eventById(state.adminEventId);
+  if (!ev) return;
+  const ge = gedit(ev);
+  if (ge.unallocated.length){ toast("Place the unallocated teams first."); return; }
+  const kept = ge.groups.filter(g => g.members.length);
+  if (!kept.length){ toast("Every group is empty."); return; }
+  const names = kept.flatMap(g => g.members.map(m => m.name));
+  const dupes = names.filter((n, i) => names.indexOf(n) !== i);
+  if (dupes.length){ toast("Duplicate entries: " + [...new Set(dupes)].join(", ")); return; }
+  if (!confirm(swText("Save these groups for " + ev.name + "? The schedule is redrawn from them."))) return;
+  const entrants = [];
+  kept.forEach((g, gi) => g.members.forEach((m, i) =>
+    entrants.push({ id: m.id, event_id: ev.id, name: m.name, group_name: groupLetter(gi),
+                    seed: i + 1, meta: m.meta || {} })));
+  const byGroup = g => entrants.filter(e => e.group_name === g).map(e => e.id);
+  const matches = buildEventMatches(ev.id,
+    kept.map((g, gi) => ({ name: groupLetter(gi), entrantIds: byGroup(groupLetter(gi)) })), 0);
+  const r = await store.adminReplaceEvent(state.adminPin, ev.id,
+    { name: ev.name, sort_order: ev.sort_order, settings: ev.settings }, entrants, matches);
+  if (!r.ok){ toast(r.error); return; }
+  gClear();
+  toast("Groups saved and the schedule redrawn.");
+  await reload();
+}
+function gChip(m, locked){
+  const d = m.meta && m.meta.dupr != null ? m.meta : null;
+  const sel = state.movePick === m.id;
+  return '<div class="gchip' + (sel ? ' sel' : '') + (state.dragId === m.id ? ' dragging' : '') + '"' +
+    (locked ? '' : ' draggable="true" ondragstart="gDragStart(\'' + m.id + '\')" ondragend="gDragEnd()"' +
+      ' onclick="event.stopPropagation();gPick(\'' + m.id + '\')"') + '>' +
+    '<span class="nm">' + esc(m.name) + '</span>' +
+    (d ? '<span class="dupr">' + (+d.dupr).toFixed(2) +
+         (Array.isArray(d.duprs) && d.duprs.length > 1
+           ? '<small>' + d.duprs.map(x => (+x).toFixed(1)).join(' / ') + '</small>' : '') + '</span>'
+       : '<span class="dupr unrated">&ndash;</span>') +
+    (locked ? '' : '<span class="gact">' +
+      '<span role="button" tabindex="0" title="Rename" onclick="event.stopPropagation();gRename(\'' + m.id + '\')">Edit</span>' +
+      '<span role="button" tabindex="0" class="rm" title="Remove" onclick="event.stopPropagation();gRemove(\'' + m.id + '\')">&times;</span>' +
+      '</span>') +
+    '</div>';
+}
+function renderGroupsBoard(ev){
+  const locked = groupsLocked(ev);
+  const ge = gedit(ev);
+  const sel = state.movePick;
   let h = '<div class="field" style="margin-top:10px;margin-bottom:0"><label>Groups board</label></div>';
-  h += sel
-    ? '<p class="note" style="margin:0 0 6px;font-weight:700">Moving ' + esc(sel.name) + ' · tap a destination group, or tap the team again to cancel.</p>'
-    : '<p class="note" style="margin:0 0 6px">Tap a team, then tap another group to move it.</p>';
+  h += locked
+    ? '<p class="note" style="margin:0 0 6px">Groups are locked: this event has results, matches on court, or a bracket. ' +
+      'Pause it and clear those to rearrange, or add a late entrant from the team list below.</p>'
+    : '<p class="note" style="margin:0 0 6px">Drag a team to another group, or tap it and then tap the group. ' +
+      'Groups can be any size. Nothing changes until you press Save groups.</p>';
   h += '<div class="gboard">';
-  for(const g of groups){
-    const members = evEntrants.filter(e => e.group_name === g).sort((a, b) => (a.seed || 0) - (b.seed || 0));
-    const avg = avgDuprOf(members);
-    const target = sel && sel.group_name !== g;
-    h += '<div class="gcol' + (target ? ' target' : '') + '"' +
-      (target ? ' onclick="movePickTo(\'' + jsAttr(g) + '\')"' : '') + '>';
-    h += '<h5><span>Group ' + esc(g) + '</span><span class="gavg">' + members.length + ' teams' +
-      (avg != null ? ' · DUPR ' + avg.toFixed(2) : '') + '</span></h5>';
-    members.forEach(e => {
-      const d = e.meta && e.meta.dupr != null ? e.meta : null;
-      h += '<button class="gchip' + (sel && sel.id === e.id ? ' sel' : '') + '" ' +
-        'onclick="event.stopPropagation();pickForMove(\'' + e.id + '\')">' +
-        '<span class="nm">' + esc(e.name) + '</span>' +
-        (d ? '<span class="dupr">' + (+d.dupr).toFixed(2) +
-             (Array.isArray(d.duprs) && d.duprs.length > 1
-               ? '<small>' + d.duprs.map(x => (+x).toFixed(1)).join(' / ') + '</small>' : '') +
-             '</span>'
-           : '<span class="dupr unrated">–</span>') +
-        '</button>';
-    });
+  ge.groups.forEach((g, i) => {
+    const avg = avgDuprOf(g.members);
+    const target = !locked && sel;
+    h += '<div class="gcol' + (locked ? ' locked' : '') + (target ? ' target' : '') + '"' +
+      (locked ? '' :
+        ' ondragover="event.preventDefault();this.classList.add(\'dragover\')"' +
+        ' ondragleave="this.classList.remove(\'dragover\')"' +
+        ' ondrop="event.preventDefault();this.classList.remove(\'dragover\');gDrop(' + i + ')"' +
+        (target ? ' onclick="gMove(\'' + jsAttr(sel) + '\',' + i + ')"' : '')) + '>';
+    h += '<h5>' + (locked
+        ? '<span>Group ' + esc(g.name) + '</span>'
+        : '<button title="Dissolve this group" onclick="event.stopPropagation();gDissolve(' + i + ')">Group ' + esc(g.name) + '</button>') +
+      '<span class="gavg">' + g.members.length + ' team' + (g.members.length === 1 ? '' : 's') +
+      (avg != null ? ' &middot; DUPR ' + avg.toFixed(2) : '') + '</span></h5>';
+    g.members.forEach(m => { h += gChip(m, locked); });
+    if (!locked) h += '<div class="gaddrow"><input id="gadd-' + i + '" type="text" placeholder="Add a team" ' +
+      'onkeydown="if(event.key===\'Enter\'){event.preventDefault();gAddTo(' + i + ')}">' +
+      '<button class="btn small secondary" onclick="event.stopPropagation();gAddTo(' + i + ')">Add</button></div>';
+    h += '</div>';
+  });
+  if (!locked){
+    const target = !!sel;
+    h += '<div class="gcol unalloc' + (target ? ' target' : '') + '"' +
+      ' ondragover="event.preventDefault();this.classList.add(\'dragover\')"' +
+      ' ondragleave="this.classList.remove(\'dragover\')"' +
+      ' ondrop="event.preventDefault();this.classList.remove(\'dragover\');gDrop(-1)"' +
+      (target ? ' onclick="gMove(\'' + jsAttr(sel) + '\',-1)"' : '') + '>';
+    h += '<h5><span>Unallocated</span><span class="gavg">' + ge.unallocated.length + ' waiting</span></h5>';
+    ge.unallocated.forEach(m => { h += gChip(m, false); });
+    if (!ge.unallocated.length) h += '<p class="note" style="margin:2px 0 0">Drop a team here to take it out of the groups for now.</p>';
     h += '</div>';
   }
   h += '</div>';
+  if (locked) return h;
+  h += '<div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;align-items:center">' +
+    '<button class="btn small secondary" onclick="gAddGroup()">Add a group</button>' +
+    '<button class="btn small" onclick="gSave()"' + (ge.unallocated.length ? ' disabled' : '') + '>Save groups</button>' +
+    (ge.dirty ? '<button class="btn small secondary" onclick="gReset()">Discard changes</button>' +
+      '<span class="note" style="font-weight:700;color:var(--accent)">Not saved yet</span>' : '') +
+    '</div>';
+  if (ge.unallocated.length)
+    h += '<div class="gwarn">' + ge.unallocated.length + ' team' + (ge.unallocated.length === 1 ? ' is' : 's are') +
+      ' unallocated. Put them in a group before saving, or remove them.</div>';
   return h;
 }
 function renderAdmin(){
@@ -3169,28 +3363,29 @@ function renderAdmin(){
     } else if (evEntrants.length){
       const nextLetter = groupLetter(groups.length);
       h += '<div class="divider"></div><h4>' + (hasMatches ? '2 · Teams and groups' : 'Teams') + '</h4>';
-      h += renderGroupsBoard(ev, groups, evEntrants);
-      h += '<details class="teamlist"><summary>Team list (' + evEntrants.length + ' in ' + groups.length + ' groups) · rename, move, remove, add</summary>';
-      const byGroup = {};
-      evEntrants.forEach(e => { (byGroup[e.group_name] = byGroup[e.group_name] || []).push(e); });
-      Object.keys(byGroup).sort().forEach(g => {
-        byGroup[g].forEach(e => {
-          h += '<div class="queue-row"><span class="qnames">' + esc(e.name) + '</span>' +
-            (e.meta && e.meta.dupr != null ? '<span class="qtag">' + (+e.meta.dupr).toFixed(2) + '</span>' : '') +
-            '<span class="qtag">Group ' + esc(g) + '</span>' +
-            '<span class="queue-actions">' +
-            '<select class="mv" onchange="moveEntrant(\'' + e.id + '\', this.value); this.value=\'\'">' +
-            '<option value="">Move…</option>' +
-            groups.filter(x => x !== g).map(x => '<option value="' + esc(x) + '">To ' + esc(x) + '</option>').join("") +
-            '<option value="__new">New group ' + nextLetter + '</option></select>' +
-            '<button class="btn small secondary" onclick="renameEntrant(\'' + e.id + '\')">Rename</button>' +
-            '<button class="btn small danger" onclick="removeEntrant(\'' + e.id + '\')">Remove</button></span></div>';
+      h += renderGroupsBoard(ev);
+      /* Once the board is locked the only edit that still makes sense is
+         letting a late entrant in, which is a real thing that happens at the
+         desk and does need catch-up matches. Everything else lives on the
+         board above. */
+      if (groupsLocked(ev)){
+        h += '<details class="teamlist"><summary>Team list (' + evEntrants.length + ' in ' + groups.length + ' groups) &middot; rename, add a late entrant</summary>';
+        const byGroup = {};
+        evEntrants.forEach(e => { (byGroup[e.group_name] = byGroup[e.group_name] || []).push(e); });
+        Object.keys(byGroup).sort().forEach(g => {
+          byGroup[g].forEach(e => {
+            h += '<div class="queue-row"><span class="qnames">' + esc(e.name) + '</span>' +
+              (e.meta && e.meta.dupr != null ? '<span class="qtag">' + (+e.meta.dupr).toFixed(2) + '</span>' : '') +
+              '<span class="qtag">Group ' + esc(g) + '</span>' +
+              '<span class="queue-actions">' +
+              '<button class="btn small secondary" onclick="renameEntrant(\'' + e.id + '\')">Rename</button></span></div>';
+          });
         });
-      });
-      h += '<div class="addteam"><input id="add-team-name" type="text" placeholder="New team or player">' +
-        '<select id="add-team-group">' + groups.map(g => '<option value="' + esc(g) + '">Group ' + esc(g) + '</option>').join("") + '</select>' +
-        '<button class="btn small secondary" onclick="addTeamToGroup()">Add</button></div>' +
-        '<p class="note" style="margin-top:6px">Moving or removing a team also removes its matches (and results). New or moved teams get catch-up matches at the end of the queue.</p></details>';
+        h += '<div class="addteam"><input id="add-team-name" type="text" placeholder="New team or player">' +
+          '<select id="add-team-group">' + groups.map(g => '<option value="' + esc(g) + '">Group ' + esc(g) + '</option>').join("") + '</select>' +
+          '<button class="btn small secondary" onclick="addTeamToGroup()">Add</button></div>' +
+          '<p class="note" style="margin-top:6px">A team added now plays catch-up matches against its group at the end of the queue.</p></details>';
+      }
       if (hasMatches && !state.showRedraw){
         h += '<p class="note"><button class="btn small secondary" onclick="toggleRedraw()">Start over with a new list</button></p>';
       }
@@ -3201,10 +3396,30 @@ function renderAdmin(){
       '<input id="adm-note" type="text" value="' + esc(evSetting(ev, "schedule_note", "")) + '"></div>';
     h += '<div class="field" style="margin-top:6px"><label for="adm-start">Planned start (drives the wait estimates players see; the event turns itself on 5 minutes before this time)</label>' +
       '<input id="adm-start" type="datetime-local" value="' + esc(evSetting(ev, "start_time", "")) + '"></div>';
-    h += '<button class="btn small secondary" onclick="saveNote()">Save schedule</button> ';
-    h += ev.active
-      ? '<button class="btn small secondary" onclick="setActive(false)">Pause event</button>'
-      : '<button class="btn small" onclick="setActive(true)">Start event</button>';
+    h += '<button class="btn small secondary" onclick="saveNote()">Save schedule</button>';
+    /* Start and pause is the control the desk reaches for most and it used to
+       sit in a row of same-sized secondary buttons, so nobody could find it.
+       An event with results behind it resumes rather than starts. */
+    const started = data.matches.some(m => m.event_id === ev.id && (m.status === "played" || m.court != null));
+    h += '<div class="runbar">' + (ev.active
+      ? '<button class="btn runbtn" onclick="setActive(false)">Pause event</button>' +
+        '<span class="note">Running now. Pausing takes its matches off the courts and out of the queue; results are kept.</span>'
+      : '<button class="btn runbtn" onclick="setActive(true)">' + (started ? 'Resume event' : 'Start event') + '</button>' +
+        '<span class="note">' + (started
+          ? 'Paused part-way through. Resuming puts its remaining matches back in the queue.'
+          : 'Not started. Starting puts its matches into the court queue.') + '</span>') +
+      '</div>';
+    /* Starting events one at a time means the first one takes every court and
+       the second waits for them to free. Starting them together lets the one
+       court assignment split the courts by how much each has left to play. */
+    const alsoStartable = data.events.filter(x => x.id !== ev.id && !x.active && !isHidden(x) &&
+      data.matches.some(m => m.event_id === x.id && m.status === "scheduled"));
+    if (!ev.active && alsoStartable.length){
+      h += '<div class="field" style="margin-top:8px"><label>Start another event at the same time</label><div style="padding:2px 0 0">' +
+        alsoStartable.map(x => '<label style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 6px 0;font-weight:600">' +
+          '<input type="checkbox" class="adm-alsostart" value="' + jsAttr(x.id) + '"> ' + esc(x.name) + '</label>').join("") +
+        '</div><p class="note" style="margin:2px 0 0">Tick these and the courts are split between all of them at once, by how many matches each has left. Start them one after the other instead and the first one fills every court.</p></div>';
+    }
     h += ' <button class="btn small secondary" onclick="toggleHidden()">' +
       (isHidden(ev) ? 'Show to players again' : 'Hide from players') + '</button>';
     h += ' <button class="btn small danger" onclick="deleteEvent()">Delete event</button>';
@@ -3319,7 +3534,13 @@ function renderScoreModal(){
       let est = '';
       if (ev.active){
         const w = estimatedWaitMinutes(m);
-        if (w != null) est = w <= 2 ? 'Up any moment now.' : 'Estimated wait: ' + fmtWaitMin(w) + '.';
+        /* A team near the front should hear "stay put", not a countdown. The
+           estimate prices a full game on every court, so a fresh round reads
+           as twenty minutes to whoever is next on, and people wander off. The
+           number only helps the teams far enough back to have time to use it. */
+        const nextUp = pendingQueue().findIndex(x => x.id === m.id);
+        if (nextUp === 0 || (w != null && w <= 12)) est = 'You are next. Stay by the courts.';
+        else if (w != null) est = w <= 2 ? 'Up any moment now.' : 'Estimated wait: ' + fmtWaitMin(w) + '.';
       } else {
         const t = estimatedStartTime(m, ev);
         if (t) est = 'Estimated play time: around ' +
@@ -3518,7 +3739,7 @@ function setView(v){
 /* Persisted so a reload keeps you on the division you were watching. */
 function setDivision(d){ state.division = d; state.showAllQueue = false; safeSession("pb_division", d); render(); }
 function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.standingsFilter = "all"; render(); }
-function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; state.movePick = null; clearEntry(); render(); }
+function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; clearEntry(); gClear(); render(); }
 function setRoundFilter(r){ state.roundFilter = String(r); render(); }
 function setStandingsFilter(v){ state.standingsFilter = v; render(); }
 function dismissCallout(id){
@@ -4098,9 +4319,16 @@ async function setActive(active){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
   if (!active && !confirm(swText("Pause " + ev.name + "? Its matches leave the courts and queue until it starts again."))) return;
-  const r = await store.adminSetActive(state.adminPin, ev.id, active);
+  const also = active
+    ? Array.from(document.querySelectorAll(".adm-alsostart")).filter(b => b.checked).map(b => b.value)
+    : [];
+  const r = also.length
+    ? await store.adminSetActiveMany(state.adminPin, [ev.id].concat(also), true)
+    : await store.adminSetActive(state.adminPin, ev.id, active);
   if (!r.ok){ toast(r.error); return; }
-  toast(active ? "Event started" : "Event paused");
+  toast(!active ? "Event paused"
+    : also.length ? (also.length + 1) + " events started, courts split between them"
+    : "Event started");
   await reload();
 }
 /* Hiding is a settings flag, so it rides the existing update path and nothing
@@ -4164,66 +4392,6 @@ async function removeEntrant(id){
   const r = await store.adminRemoveEntrant(state.adminPin, id);
   if (!r.ok){ toast(r.error); return; }
   toast("Removed"); await reload();
-}
-/* Groups-board tap flow. Picking the same chip again cancels. */
-function pickForMove(id){
-  state.movePick = state.movePick === id ? null : id;
-  render();
-}
-async function movePickTo(group){
-  const id = state.movePick;
-  if (!id) return;
-  const e = entrantById(id);
-  state.movePick = null;
-  if (!e || e.group_name === group){ render(); return; }
-  const ev = eventById(e.event_id);
-  const evMs = data.matches.filter(m => m.event_id === e.event_id);
-  /* Before anything has been played (event paused, no scores, no knockout),
-     a move can rebuild both groups' round robins cleanly instead of bolting
-     catch-up matches onto the end of the queue. */
-  const pristine = ev && !ev.active &&
-    !evMs.some(m => m.status === "played") &&
-    !evMs.some(m => m.stage === "knockout");
-  if (pristine){
-    if (!confirm(swText('Move "' + e.name + '" to group ' + group + '? Nothing has been played, so both groups\' schedules are redrawn cleanly.'))){ render(); return; }
-    await redrawWithMove(ev, e, group);
-  } else {
-    await moveEntrant(id, group);
-  }
-}
-async function redrawWithMove(ev, ent, group){
-  const entrants = data.entrants.filter(x => x.event_id === ev.id).map(x => ({
-    id: x.id, event_id: ev.id, name: x.name,
-    group_name: x.id === ent.id ? group : x.group_name,
-    seed: x.seed, meta: x.meta || {}
-  }));
-  const byG = {};
-  entrants.forEach(x => { (byG[x.group_name] = byG[x.group_name] || []).push(x); });
-  Object.values(byG).forEach(list => list.forEach((x, i) => { x.seed = i + 1; }));
-  const groupsArr = Object.keys(byG).sort().map(g => ({ name: g, entrantIds: byG[g].map(x => x.id) }));
-  const matches = buildEventMatches(ev.id, groupsArr, 0);
-  const r = await store.adminReplaceEvent(state.adminPin, ev.id,
-    { name: ev.name, sort_order: ev.sort_order, settings: ev.settings }, entrants, matches);
-  if (!r.ok){ toast(r.error); return; }
-  toast(ent.name + " moved to group " + group);
-  await reload();
-}
-async function moveEntrant(id, target){
-  if (!target) return;
-  const e = entrantById(id);
-  if (!e) return;
-  const ev = eventById(e.event_id);
-  const group = target === "__new" ? groupLetter(groupsOfEvent(ev).length) : target;
-  if (!confirm(swText('Move "' + e.name + '" to group ' + group + '? Their existing matches and results are replaced with catch-up matches.'))) { render(); return; }
-  const members = data.entrants.filter(x => x.event_id === e.event_id && x.group_name === group && x.id !== id);
-  const groupMs = data.matches.filter(m => m.event_id === e.event_id && m.stage === "group" && m.group_name === group);
-  const startRound = Math.max(0, ...groupMs.map(m => m.round || 0)) + 1;
-  const maxOrder = Math.max(0, ...data.matches.filter(m => m.event_id === e.event_id).map(m => m.play_order || 0));
-  const matches = buildCatchupMatches(e.event_id, group, id, members.map(x => x.id), startRound, maxOrder);
-  const r = await store.adminMoveEntrant(state.adminPin, id, group, matches);
-  if (!r.ok){ toast(r.error); return; }
-  toast(e.name + " moved to group " + group);
-  await reload();
 }
 function normalizePhone(s){
   s = s.trim().replace(/[\s()-]/g, "");
@@ -4440,8 +4608,8 @@ async function applySetup(){
   if (!r.ok){ toast(r.error); return; }
   state.setupPreview = null;
   state.showRedraw = false;
-  state.entryRows = null;
-  state.entryDoubles = null;
+  clearEntry();
+  gClear();
   toast("Groups drawn. Pick courts and start when ready.");
   await reload();
 }

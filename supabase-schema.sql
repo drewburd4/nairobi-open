@@ -964,6 +964,35 @@ begin
 end;
 $$;
 
+-- Starting events one at a time means the first takes every free court and the
+-- second waits for them to come back. This flips them all first and assigns
+-- once, so nairobi_assign_courts splits the courts between them by weight.
+create or replace function nairobi_admin_set_active_many(p_pin text, p_event_ids uuid[], p_active boolean)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  n int;
+begin
+  if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  if p_event_ids is null or array_length(p_event_ids, 1) is null then return 'No events given.'; end if;
+  if p_active and exists (
+    select 1 from unnest(p_event_ids) id
+    where not exists (select 1 from nairobi_matches where event_id = id)
+  ) then
+    return 'Draw groups first, then start the event.';
+  end if;
+  update nairobi_events
+  set active = p_active,
+      settings = coalesce(settings, '{}'::jsonb) || '{"autostarted": true}'::jsonb
+  where id = any(p_event_ids);
+  get diagnostics n = row_count;
+  if n = 0 then return 'Event not found.'; end if;
+  perform nairobi_assign_courts();
+  return 'OK';
+end;
+$$;
+
 -- Events with an admin-set start time turn themselves on 5 minutes early, so
 -- the desk does not have to be watching the clock. Any phone's refresh calls
 -- this (anon-safe: it only enacts the stored schedule). Fires once per set
@@ -1256,6 +1285,7 @@ grant execute on function nairobi_admin_move_entrant(text, uuid, text, jsonb) to
 grant execute on function nairobi_admin_update_event(text, uuid, text, jsonb) to anon, authenticated;
 grant execute on function nairobi_admin_set_active(text, uuid, boolean) to anon, authenticated;
 grant execute on function nairobi_admin_delete_event(text, uuid) to anon, authenticated;
+grant execute on function nairobi_admin_set_active_many(text, uuid[], boolean) to anon, authenticated;
 grant execute on function nairobi_admin_replace_event(text, uuid, text, int, jsonb, jsonb, jsonb) to anon, authenticated;
 grant execute on function nairobi_admin_rename_entrant(text, uuid, text) to anon, authenticated;
 grant execute on function nairobi_admin_remove_entrant(text, uuid) to anon, authenticated;
