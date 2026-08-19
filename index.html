@@ -2241,6 +2241,45 @@ function commitHtml(app, html){
   applyLanguage(app);
   return true;
 }
+/* A re-render replaces the admin panel's HTML wholesale, so anything typed
+   but not yet saved reverted without a word: a group size snapped back to the
+   saved one between Preview and Draw, an uploaded entrant list emptied when a
+   score landed on another phone. Unsaved field values are carried across,
+   keyed by which panel is on screen so changing event or tab starts clean. */
+let admShown = { key: null, vals: null, courts: null, dirty: false, skip: false };
+function admKey(){
+  return state.view !== "admin" ? null : "e:" + state.adminEventId + "|r:" + (state.showRedraw ? 1 : 0);
+}
+function admCapture(app){
+  /* skip: the panel was just saved, so the next render must show the event's
+     own values and drop the "Not saved yet" marker. */
+  if (admShown.key == null || admShown.skip){ admShown.vals = null; admShown.skip = false; return; }
+  const vals = {};
+  app.querySelectorAll('input[id^="adm-"],select[id^="adm-"],textarea[id^="adm-"]')
+    .forEach(el => { vals[el.id] = el.type === "checkbox" ? el.checked : el.value; });
+  admShown.vals = vals;
+  admShown.courts = Array.from(app.querySelectorAll("input.adm-court")).map(el => el.checked);
+  const d = document.getElementById("adm-dirty");
+  admShown.dirty = !!(d && d.style.display !== "none");
+}
+function admRestore(app){
+  if (!admShown.vals || admKey() !== admShown.key) return;
+  for(const id in admShown.vals){
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (el.type === "checkbox") el.checked = admShown.vals[id];
+    else el.value = admShown.vals[id];
+  }
+  const boxes = app.querySelectorAll("input.adm-court");
+  if (admShown.courts && admShown.courts.length === boxes.length)
+    boxes.forEach((el, i) => { el.checked = admShown.courts[i]; });
+  if (admShown.dirty){
+    const d = document.getElementById("adm-dirty");
+    if (d) d.style.display = "";
+    const sb = document.getElementById("adm-save");
+    if (sb) sb.classList.remove("secondary");
+  }
+}
 function render(){
   const app = document.getElementById("app");
   const ae = document.activeElement;
@@ -2251,6 +2290,7 @@ function render(){
   }
   const restoreId = ae && ae.id;
   const restoreVal = restoreId && ae.value;
+  admCapture(app);
 
   /* Only take over the screen when there is nothing to show. A refresh that
      fails on patchy venue wifi must not throw away a board that is already on
@@ -2302,6 +2342,8 @@ function render(){
   html += renderCourtAssignModal();
   html += renderOffCourtModal();
   if (!commitHtml(app, html)) return;
+  admRestore(app);
+  admShown.key = admKey();
 
   if (restoreId){
     const el = document.getElementById(restoreId);
@@ -3854,6 +3896,7 @@ async function saveEventSettings(){
   if (settings.error){ toast(settings.error); return; }
   const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, settings);
   if (!r.ok){ toast(r.error); return; }
+  admShown.skip = true;
   toast("Settings saved"); await reload();
 }
 /* Fill the draw box from a CSV: one entrant per row, partner names in the
