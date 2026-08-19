@@ -567,7 +567,13 @@ function computeStandings(entrants, matches){
         .forEach(k => { const g = buckets.get(k); out.push(...(g.length > 1 ? rank(g) : g)); });
       return out;
     }
-    return tied.slice().sort((a, b) => a.name.localeCompare(b.name));
+    /* Nothing in the official chain separated them. Falling back to alphabetical
+       order is deterministic but arbitrary, and with the bracket now seeding
+       itself that would quietly decide who advances, so say so: the rulebook
+       ends a tie like this with a draw, and the desk has to make it. */
+    const still = tied.slice().sort((a, b) => a.name.localeCompare(b.name));
+    if (still.length > 1) still.forEach(r => { r.unresolvedTie = still.length; });
+    return still;
   }
 
   rows.sort((x, y) => y.w - x.w || x.name.localeCompare(y.name));
@@ -1788,6 +1794,7 @@ const SW_EXACT = {
   "Only one waiting": "Ni mmoja tu anayesubiri",
   "Where do they go back to?": "Warudi wapi?", "Front of their queue": "Mbele ya foleni yao",
   "Off court, but could not place it in the queue.": "Wameondoka uwanjani, lakini hawakuweza kupangwa kwenye foleni.",
+  "tied": "sare",
   "Take off court": "Ondoa uwanjani", "Postpone": "Ahirisha", "Clear score": "Futa matokeo",
   "Save (admin)": "Hifadhi (msimamizi)", "Edit": "Badilisha",
   "No-show? Record a walkover win:": "Hawajafika? Rekodi ushindi wa walkover:",
@@ -2904,14 +2911,23 @@ function renderStandings(){
     h += '<div class="group-card"><h3><span>Group ' + esc(g) + '</span>' + (left ? '<span class="tag plain">' + left + ' left</span>' : '<span class="tag plain">Complete</span>') + '</h3>';
     h += '<table class="standings"><thead><tr><th></th><th class="tname">Team</th><th>P</th><th>W</th><th>L</th><th>+/-</th></tr></thead><tbody>';
     rows.forEach((r, i) => {
-      h += '<tr onclick="openTeam(\'' + r.id + '\')"><td class="pos">' + (i + 1) + '</td><td class="tname">' + esc(r.name) + '</td>' +
+      h += '<tr onclick="openTeam(\'' + r.id + '\')"><td class="pos">' + (i + 1) + '</td><td class="tname">' + esc(r.name) +
+        (r.unresolvedTie ? ' <span class="tag warn">tied</span>' : '') + '</td>' +
         '<td>' + r.p + '</td><td>' + r.w + '</td><td>' + r.l + '</td><td>' + (r.diff > 0 ? '+' : '') + r.diff + '</td></tr>';
     });
-    h += '</tbody></table></div>';
+    h += '</tbody></table>';
+    /* Alphabetical order is what actually decides these, which is no way to
+       send someone home, so it is said out loud rather than left to look
+       like a ranking. */
+    const stuck = rows.filter(r => r.unresolvedTie).length;
+    if (stuck) h += '<p class="note" style="color:var(--warn);font-weight:700;margin:6px 0 0">' +
+      stuck + ' teams are level on every tiebreaker. The order shown is alphabetical, not earned. ' +
+      'Draw lots at the desk and enter the result as a correction if it decides who goes through.</p>';
+    h += '</div>';
   }
   h += '<p class="note">Tiebreakers follow the USA Pickleball order: wins, then head to head between the tied teams, ' +
     'then point difference, then head to head point difference. Teams still level after that are split on points scored. ' +
-    'A walkover counts as a win but adds no points either way.</p>';
+    'A walkover counts as a win but adds no points either way. Teams level on all of it are flagged: nothing has separated them and the desk must draw lots.</p>';
   return h;
 }
 
