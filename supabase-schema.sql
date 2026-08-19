@@ -247,7 +247,7 @@ declare
   ae record;
   a_courts int[];
   a_free int[];
-  busy uuid[];
+  busy_names text[];
 begin
   -- numeric-guarded: a malformed value fails open to 4 rather than aborting
   -- every mutating RPC that runs through here
@@ -271,32 +271,38 @@ begin
     where m.status = 'scheduled' and m.court = c
       and coalesce(e.settings ->> 'format', '') <> 'americano');
 
-  -- Teams currently holding a main-pool court. A team's next match must not be
-  -- called while they are mid-game on another court (happens at round
+  -- People currently holding a main-pool court. A team's next match must not
+  -- be called while they are mid-game on another court (happens at round
   -- boundaries and after postpones/moves), so the loop below skips it and
-  -- takes the next eligible match instead. Entrant-id level: cross-event
-  -- double entry has separate entrant rows and cannot be tracked here.
-  select coalesce(array_agg(eid), '{}') into busy
+  -- takes the next eligible match instead.
+  -- Matched on PLAYER NAME, not entrant id, the same way the Americano pool
+  -- does it: somebody entered in two events has a separate entrant row in each,
+  -- so an id-level test called them to two courts at once, which is exactly
+  -- what happens when two events of a 13-event tournament share a day.
+  select coalesce(array_agg(distinct p), '{}') into busy_names
   from (
-    select m.entrant1_id as eid from nairobi_matches m
+    select unnest(string_to_array(en.name, ' & ')) as p
+    from nairobi_matches m
     join nairobi_events e on e.id = m.event_id
+    join nairobi_entrants en on en.id in (m.entrant1_id, m.entrant2_id)
     where m.status = 'scheduled' and m.court is not null
       and coalesce(e.settings ->> 'format', '') <> 'americano'
-    union
-    select m.entrant2_id from nairobi_matches m
-    join nairobi_events e on e.id = m.event_id
-    where m.status = 'scheduled' and m.court is not null
-      and coalesce(e.settings ->> 'format', '') <> 'americano'
-  ) s where eid is not null;
+  ) s where p is not null and btrim(p) <> '';
 
   for rec in
-    select q.id, q.entrant1_id, q.entrant2_id, ev.settings as evsettings
+    select q.id, q.entrant1_id, q.entrant2_id, q.pnames, ev.settings as evsettings
     from (
       select m2.id, m2.event_id, m2.play_order, m2.entrant1_id, m2.entrant2_id,
+             (select array_agg(btrim(p)) from (
+                select unnest(string_to_array(e1.name, ' & ')) as p
+                union all
+                select unnest(string_to_array(e2.name, ' & '))) z) as pnames,
              ((row_number() over (partition by m2.event_id order by m2.play_order, m2.id) - 1) + 0.5)
                / count(*) over (partition by m2.event_id) as frac
       from nairobi_matches m2
       join nairobi_events e on e.id = m2.event_id and e.active
+      join nairobi_entrants e1 on e1.id = m2.entrant1_id
+      join nairobi_entrants e2 on e2.id = m2.entrant2_id
       where m2.status = 'scheduled' and m2.court is null and not m2.held
         and m2.entrant1_id is not null and m2.entrant2_id is not null
         and coalesce(e.settings ->> 'format', '') <> 'americano'
@@ -305,7 +311,7 @@ begin
     order by q.frac, ev.sort_order, q.play_order, q.id
   loop
     exit when array_length(free_courts, 1) is null;
-    if rec.entrant1_id = any(busy) or rec.entrant2_id = any(busy) then continue; end if;
+    if rec.pnames && busy_names then continue; end if;
     if rec.evsettings ? 'courts' and jsonb_typeof(rec.evsettings -> 'courts') = 'array'
        and jsonb_array_length(rec.evsettings -> 'courts') > 0 then
       select array_agg((value)::int) into allowed
@@ -313,10 +319,10 @@ begin
     else allowed := null; end if;
     select c into chosen from unnest(free_courts) c where allowed is null or c = any(allowed) order by c limit 1;
     if chosen is not null then
-      update nairobi_matches set court = chosen, postponed = false, called_at = now(), called_ack = false, updated_at = now()
+      update nairobi_matches set court = chosen, postponed = false, held = false, called_at = now(), called_ack = false, updated_at = now()
       where id = rec.id;
       free_courts := array_remove(free_courts, chosen);
-      busy := busy || rec.entrant1_id || rec.entrant2_id;
+      busy_names := busy_names || rec.pnames;
     end if;
   end loop;
 
@@ -360,7 +366,7 @@ begin
     loop
       exit when array_length(a_free, 1) is null;
       chosen := a_free[1];
-      update nairobi_matches set court = chosen, postponed = false, called_at = now(), called_ack = false, updated_at = now()
+      update nairobi_matches set court = chosen, postponed = false, held = false, called_at = now(), called_ack = false, updated_at = now()
       where id = rec.id;
       a_free := a_free[2:];
     end loop;
@@ -384,9 +390,16 @@ begin
   select case when coalesce(settings ->> 'courts', '') ~ '^[0-9]+$'
               then (settings ->> 'courts')::int else 4 end
   into total from nairobi_tournaments limit 1;
+  -- Advisory lock BEFORE any row lock. nairobi_assign_courts takes this lock
+  -- and then updates match rows, so a mutator that grabbed a row first and
+  -- reached for the advisory lock second could cross with it: one holds the
+  -- advisory lock and wants a row, the other holds that row and wants the
+  -- advisory lock. Advisory first everywhere is the only total order.
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.status <> 'scheduled' or m.court is not null then return 'That match is not waiting for a court.'; end if;
+  if m.held then return 'That match is held. Put it back in the queue first.'; end if;
   if m.entrant1_id is null or m.entrant2_id is null then return 'This match''s teams are not set yet.'; end if;
   if p_court < 1 or p_court > total then return 'No such court.'; end if;
   -- never call a team that is mid-game on another court
@@ -396,12 +409,17 @@ begin
                  or oc.entrant2_id in (m.entrant1_id, m.entrant2_id))) then
     return 'That team is already mid-game on another court.';
   end if;
-  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
-  if exists (select 1 from nairobi_matches where status = 'scheduled' and court = p_court) then
+  -- Same pool rule as nairobi_assign_courts: an Americano match holding court 1
+  -- does not make the main draw's court 1 busy, and without this test the desk
+  -- was told a genuinely free court had just been filled, with no way through.
+  if exists (select 1 from nairobi_matches mm
+             join nairobi_events me on me.id = mm.event_id
+             where mm.status = 'scheduled' and mm.court = p_court
+               and coalesce(me.settings ->> 'format', '') <> 'americano') then
     return 'Court ' || p_court || ' was just filled. Pick another.';
   end if;
   update nairobi_matches
-  set court = p_court, postponed = false, called_at = now(), called_ack = false, updated_at = now()
+  set court = p_court, postponed = false, held = false, called_at = now(), called_ack = false, updated_at = now()
   where id = p_match_id;
   perform nairobi_assign_courts();
   return 'OK';
@@ -430,12 +448,15 @@ declare
   target numeric;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- Advisory lock BEFORE any row lock. nairobi_assign_courts takes this lock
+  -- and then updates match rows, so a mutator that grabbed a row first and
+  -- reached for the advisory lock second could cross with it: one holds the
+  -- advisory lock and wants a row, the other holds that row and wants the
+  -- advisory lock. Advisory first everywhere is the only total order.
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.status <> 'scheduled' or m.court is not null then return 'That match is not waiting in the queue.'; end if;
-  -- row lock first, advisory second: same order as the score/swap paths, so
-  -- two admins acting on the same match cannot deadlock
-  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
 
   -- Span every scheduled match of the event, including ones already on a court.
   -- Those still hold play_order values, so ignoring them lets the new position
@@ -479,12 +500,19 @@ declare
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
   if p_off_match = p_on_match then return 'Pick a different match.'; end if;
+  -- Advisory lock BEFORE any row lock. nairobi_assign_courts takes this lock
+  -- and then updates match rows, so a mutator that grabbed a row first and
+  -- reached for the advisory lock second could cross with it: one holds the
+  -- advisory lock and wants a row, the other holds that row and wants the
+  -- advisory lock. Advisory first everywhere is the only total order.
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into offm from nairobi_matches where id = p_off_match for update;
   if not found then return 'Match not found.'; end if;
   if offm.status <> 'scheduled' or offm.court is null then return 'That match is not on a court.'; end if;
   select * into onm from nairobi_matches where id = p_on_match for update;
   if not found then return 'The match to bring on was not found.'; end if;
   if onm.status <> 'scheduled' or onm.court is not null then return 'That match is not waiting for a court.'; end if;
+  if onm.held then return 'That match is held. Put it back in the queue first.'; end if;
   if onm.entrant1_id is null or onm.entrant2_id is null then return 'That match''s teams are not set yet.'; end if;
   -- Americano matches live in their own court pool; swapping one off (or on)
   -- would cross the pools and double-book a court number.
@@ -500,10 +528,9 @@ begin
                  or oc.entrant2_id in (onm.entrant1_id, onm.entrant2_id))) then
     return 'That team is already mid-game on another court.';
   end if;
-  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   c := offm.court;
   update nairobi_matches
-  set court = c, postponed = false, called_at = now(), called_ack = false, updated_at = now()
+  set court = c, postponed = false, held = false, called_at = now(), called_ack = false, updated_at = now()
   where id = onm.id;
   select coalesce(min(play_order), offm.play_order) - 1 into front
   from nairobi_matches
@@ -623,6 +650,10 @@ declare
   m nairobi_matches;
   chk record;
 begin
+  -- Advisory lock BEFORE any row lock: this function locks match rows and
+  -- then reaches the same advisory lock inside nairobi_assign_courts, so
+  -- taking it up front is what keeps the order total across every mutator.
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.status = 'played' then return 'A score is already in. Ask the desk to change it.'; end if;
@@ -634,7 +665,7 @@ begin
 
   update nairobi_matches
   set score1 = chk.o_score1, score2 = chk.o_score2, games = chk.o_games,
-      status = 'played', postponed = false, court = null, walkover = false, updated_at = now()
+      status = 'played', postponed = false, held = false, court = null, walkover = false, updated_at = now()
   where id = p_match_id;
 
   perform nairobi_advance_winner(p_match_id);
@@ -663,6 +694,10 @@ declare
   v_games jsonb;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- Advisory lock BEFORE any row lock: this function locks match rows and
+  -- then reaches the same advisory lock inside nairobi_assign_courts, so
+  -- taking it up front is what keeps the order total across every mutator.
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.entrant1_id is null or m.entrant2_id is null then return 'Teams for this match are not decided yet.'; end if;
@@ -752,10 +787,15 @@ declare
   m nairobi_matches%rowtype;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- Advisory lock BEFORE any row lock. nairobi_assign_courts takes this lock
+  -- and then updates match rows, so a mutator that grabbed a row first and
+  -- reached for the advisory lock second could cross with it: one holds the
+  -- advisory lock and wants a row, the other holds that row and wants the
+  -- advisory lock. Advisory first everywhere is the only total order.
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.status = 'played' then return 'That match already has a score.'; end if;
-  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   update nairobi_matches
   set held = p_held,
       court = case when p_held then null else court end,
@@ -778,14 +818,15 @@ declare
   front numeric;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- Advisory lock BEFORE any row lock. nairobi_assign_courts takes this lock
+  -- and then updates match rows, so a mutator that grabbed a row first and
+  -- reached for the advisory lock second could cross with it: one holds the
+  -- advisory lock and wants a row, the other holds that row and wants the
+  -- advisory lock. Advisory first everywhere is the only total order.
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.status <> 'scheduled' then return 'That match already has a score.'; end if;
-  -- Same advisory lock every other queue-mutating function takes, and in the
-  -- same ORDER: match row first, advisory second. Taking the advisory lock
-  -- before the row lock deadlocks against the score/swap paths, which lock
-  -- the row first and reach the advisory lock inside nairobi_assign_courts.
-  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select coalesce(min(play_order), m.play_order) - 1 into front
   from nairobi_matches where event_id = m.event_id and status = 'scheduled' and id <> m.id;
   update nairobi_matches set play_order = front, postponed = false, held = false, updated_at = now() where id = p_match_id;
@@ -806,6 +847,12 @@ declare
   front numeric;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- Advisory lock BEFORE any row lock. nairobi_assign_courts takes this lock
+  -- and then updates match rows, so a mutator that grabbed a row first and
+  -- reached for the advisory lock second could cross with it: one holds the
+  -- advisory lock and wants a row, the other holds that row and wants the
+  -- advisory lock. Advisory first everywhere is the only total order.
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.status <> 'scheduled' or m.court is null then return 'That match is not on a court.'; end if;
@@ -815,7 +862,6 @@ begin
              and coalesce(e.settings ->> 'format', '') = 'americano') then
     return 'Americano rounds rotate on their own; enter the score or pause the event instead.';
   end if;
-  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
 
   -- Pick the replacement with the same weighting nairobi_assign_courts uses, so
   -- "bring on the next in line" brings on the match the Up next board is
@@ -828,7 +874,7 @@ begin
              / count(*) over (partition by mm.event_id) as frac
     from nairobi_matches mm
     join nairobi_events e on e.id = mm.event_id and e.active
-    where mm.status = 'scheduled' and mm.court is null
+    where mm.status = 'scheduled' and mm.court is null and not mm.held
       and mm.entrant1_id is not null and mm.entrant2_id is not null
       and mm.id <> p_match_id
       -- Never an Americano match: that pool is physically separate, and its
@@ -855,7 +901,7 @@ begin
   if repl is null then return 'No other match is waiting, so it stays on court.'; end if;
 
   update nairobi_matches
-  set court = m.court, postponed = false, called_at = now(), called_ack = false, updated_at = now()
+  set court = m.court, postponed = false, held = false, called_at = now(), called_ack = false, updated_at = now()
   where id = repl;
 
   select coalesce(min(play_order), m.play_order) - 1 into front
@@ -878,6 +924,10 @@ declare
   nm nairobi_matches;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- Advisory lock BEFORE any row lock: this function locks match rows and
+  -- then reaches the same advisory lock inside nairobi_assign_courts, so
+  -- taking it up front is what keeps the order total across every mutator.
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
 
@@ -905,7 +955,7 @@ begin
 
   update nairobi_matches
   set score1 = null, score2 = null, games = null, walkover = false,
-      status = 'scheduled', court = null, updated_at = now()
+      status = 'scheduled', court = null, held = false, updated_at = now()
   where id = p_match_id;
   perform nairobi_assign_courts();
   return 'OK';
@@ -921,12 +971,15 @@ declare
   anchor numeric;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- Advisory lock BEFORE any row lock. nairobi_assign_courts takes this lock
+  -- and then updates match rows, so a mutator that grabbed a row first and
+  -- reached for the advisory lock second could cross with it: one holds the
+  -- advisory lock and wants a row, the other holds that row and wants the
+  -- advisory lock. Advisory first everywhere is the only total order.
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.status <> 'scheduled' then return 'That match already has a score.'; end if;
-  -- row lock first, advisory second: same order as the score/swap paths, so
-  -- two admins acting on the same match cannot deadlock
-  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
 
   if p_to_end then
     select coalesce(max(play_order), m.play_order) + 10 into anchor
@@ -1026,9 +1079,13 @@ declare
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
   if p_event_ids is null or array_length(p_event_ids, 1) is null then return 'No events given.'; end if;
+  -- Alias the unnest column: a bare `id` here binds to nairobi_matches.id, so
+  -- the test read `event_id = nairobi_matches.id`, was never true, and every
+  -- attempt to start events together was refused with a message that sent the
+  -- desk to "Draw new groups", which wipes a roster.
   if p_active and exists (
-    select 1 from unnest(p_event_ids) id
-    where not exists (select 1 from nairobi_matches where event_id = id)
+    select 1 from unnest(p_event_ids) as x(id)
+    where not exists (select 1 from nairobi_matches m where m.event_id = x.id)
   ) then
     return 'Draw groups first, then start the event.';
   end if;
@@ -1063,14 +1120,24 @@ begin
       settings = coalesce(e.settings, '{}'::jsonb) || '{"autostarted": true}'::jsonb
   where not e.active
     and coalesce(e.settings ->> 'autostarted', '') <> 'true'
+    and coalesce(e.settings ->> 'hidden', '') <> 'true'
     and coalesce(e.settings ->> 'start_time', '') <> ''
     and exists (select 1 from nairobi_matches m where m.event_id = e.id)
     and case
       when e.settings ->> 'start_time' ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}' then
         ((e.settings ->> 'start_time')::timestamp at time zone 'Africa/Nairobi')
-          between now() - interval '12 hours' and now() + interval '5 minutes'
+          between now() - interval '45 minutes' and now() + interval '5 minutes'
       else false
-    end;
+    end
+    -- Never start on top of play already in progress. A rain delay or an
+    -- overrunning morning event used to be interrupted by the afternoon one
+    -- turning itself on and taking half the courts.
+    and not exists (
+      select 1 from nairobi_events other
+      where other.active
+        and coalesce(other.settings ->> 'format', '') <> 'americano'
+        and exists (select 1 from nairobi_matches om
+                    where om.event_id = other.id and om.status = 'scheduled'));
   get diagnostics n = row_count;
   if n > 0 then perform nairobi_assign_courts(); end if;
 exception when others then
@@ -1251,6 +1318,10 @@ declare
   m nairobi_matches;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- Advisory lock BEFORE any row lock: this function locks match rows and
+  -- then reaches the same advisory lock inside nairobi_assign_courts, so
+  -- taking it up front is what keeps the order total across every mutator.
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
   if m.stage <> 'knockout' then return 'Only knockout matches can be edited here.'; end if;

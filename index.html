@@ -12,7 +12,7 @@
   --bg:#f7f5f0; --card:#fffefb; --ink:#26251f; --muted:#6f6a5e; --line:#e2ddd1;
   --accent:#9a4526; --accent-ink:#ffffff; --accent-soft:#f4e7e0;
   --good:#46704f; --good-soft:#e9efe7;
-  --warn:#a8730a; --warn-soft:#f6ecd9;
+  --warn:#8a5d00; --warn-soft:#f6ecd9;
   --danger:#a33d2a; --danger-soft:#f6e4de; --danger-ink:#ffffff;
   --bkline:#cfc8b8;
   --court:#2f6f6e; --court-soft:#e7f0ef; --ball:#c99a1f;
@@ -120,13 +120,13 @@ button.mast-left:hover,button.mast-left:focus-visible{background:var(--accent-so
 .courtcard .vs{color:var(--muted); font-weight:400; font-size:13px; padding:1px 0}
 .courtcard .cta{margin-top:8px; font-size:12.5px; font-weight:700; color:var(--accent)}
 .courtcard.idle .team{color:var(--muted); font-weight:500}
-.queue-row{display:flex; align-items:center; gap:10px; padding:9px 4px; border-bottom:1px solid var(--line); font-size:14.5px; width:100%}
+.queue-row{display:flex; align-items:center; gap:10px; padding:9px 4px; border-bottom:1px solid var(--line); font-size:14.5px; width:100%; flex-wrap:wrap}
 .queue-row:last-child{border-bottom:none}
 .queue-row.click{cursor:pointer}
 .queue-row .qpos{font-size:12px; font-weight:800; color:var(--muted); min-width:20px}
 .queue-row .qnames{flex:1; min-width:0; font-weight:600; overflow-wrap:anywhere}
 .queue-row .qv{color:var(--muted); font-weight:400}
-.queue-row .qtag{font-size:11.5px; color:var(--muted); white-space:nowrap}
+.queue-row .qtag{font-size:11.5px; color:var(--muted); white-space:nowrap; min-width:0; overflow:hidden; text-overflow:ellipsis}
 .queue-actions{display:flex; gap:8px; align-items:center}
 .boardnotes{margin-top:16px}
 .boardnotes .note{display:block; padding:2px 0}
@@ -181,7 +181,7 @@ details.roundblock .hint{font-weight:600; letter-spacing:0; text-transform:none}
   border-radius:12px; box-shadow:var(--shadow); overflow:hidden; display:block; text-align:left}
 button.bkmatch,.bkmatch .bkmain{cursor:pointer}
 .bkmatch .bkmain{display:block; width:100%; text-align:left}
-.bkmatch.editable .bkteam:first-child{padding-right:46px}
+.bkmatch.editable .bkteam:first-child{padding-right:76px}
 .bkteam{height:46px; display:flex; align-items:center; gap:6px; padding:0 9px; min-width:0}
 .bkteam + .bkteam{border-top:1px solid var(--line)}
 .bkseed{flex:0 0 auto; font-size:10px; font-weight:800; letter-spacing:.02em; padding:2px 5px; border-radius:5px;
@@ -259,7 +259,7 @@ button.bkmatch,.bkmatch .bkmain{cursor:pointer}
 details.teamlist{margin:10px 0}
 details.teamlist summary{cursor:pointer; font-weight:700; font-size:13.5px; padding:4px 0}
 select.mv{padding:4px 6px; border-radius:6px; border:1px solid var(--line); background:var(--bg); font-size:12px; max-width:96px}
-select.qplace{max-width:150px}
+select.qplace{max-width:170px}
 .addteam{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px}
 /* Admin groups board: tap a team, tap a destination group. */
 /* Entrant entry grid. One row per entrant; for doubles the second player's
@@ -287,9 +287,10 @@ select.qplace{max-width:150px}
 .gcol h5 button{font:inherit; font-weight:800; color:inherit; text-decoration:underline dotted; text-underline-offset:3px}
 .gchip.dragging{opacity:.4}
 .gchip .gact{display:flex; gap:4px; flex:none}
-.gchip .gact span{font-size:11px; font-weight:700; color:var(--muted); padding:2px 4px; border-radius:4px}
-.gchip .gact span:hover{color:var(--accent); background:var(--accent-soft)}
-.gchip .gact span.rm:hover{color:var(--danger); background:var(--danger-soft)}
+.gchip .gact{gap:8px}
+.gchip .gact button{font:inherit; font-size:11px; font-weight:700; color:var(--muted); padding:8px 9px; border-radius:6px; cursor:pointer}
+.gchip .gact button:hover,.gchip .gact button:focus-visible{color:var(--accent); background:var(--accent-soft)}
+.gchip .gact button.rm:hover,.gchip .gact button.rm:focus-visible{color:var(--danger); background:var(--danger-soft)}
 .gaddrow{display:flex; gap:6px; margin-top:6px}
 .gaddrow input{flex:1; min-width:0; padding:6px 8px; border-radius:7px; border:1px solid var(--line); background:var(--card); font-size:13px}
 .gwarn{background:var(--warn-soft); color:var(--warn); border-radius:8px; padding:8px 10px; font-size:13px; font-weight:600; margin:8px 0}
@@ -297,7 +298,7 @@ select.qplace{max-width:150px}
 .runbar .note{flex:1; min-width:180px}
 .runbtn{padding:11px 20px; font-size:15px}
 .gcol .gavg{color:var(--muted); font-weight:600; font-size:11px; text-align:right}
-.gchip{display:flex; justify-content:space-between; align-items:center; gap:8px; width:100%; text-align:left; font:inherit; color:inherit; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px 8px; margin-top:5px; cursor:pointer}
+.gchip{display:flex; cursor:pointer; justify-content:space-between; align-items:center; gap:8px; width:100%; text-align:left; font:inherit; color:inherit; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px 8px; margin-top:5px; cursor:pointer}
 .gchip.sel{border-color:var(--accent); background:var(--accent-soft); box-shadow:0 0 0 1px var(--accent)}
 .gchip .nm{font-weight:650; min-width:0; overflow-wrap:anywhere; font-size:13px}
 .gchip .dupr{flex:none; font-variant-numeric:tabular-nums; font-weight:800; font-size:12px; background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:1px 6px}
@@ -510,7 +511,8 @@ function matchPoints(m){
    so the order is always deterministic. */
 function computeStandings(entrants, matches){
   const rows = entrants.map(e => ({ id: e.id, name: e.name, p: 0, w: 0, l: 0, pf: 0, pa: 0, diff: 0,
-    lot: (e.meta && e.meta.lot != null) ? +e.meta.lot : null }));
+    lot: (e.meta && e.meta.lot != null) ? +e.meta.lot : null,
+    lotFor: (e.meta && e.meta.lotFor) || null }));
   const byId = {};
   rows.forEach(r => byId[r.id] = r);
   const played = matches.filter(m => m.status === "played" && m.score1 != null && m.score2 != null);
@@ -547,8 +549,15 @@ function computeStandings(entrants, matches){
     return r => t[r.id];
   };
   /* A drawn lot is a real result, so it ranks ahead of the alphabetical
-     fallback and stops the tie being flagged. Lower lot wins. */
-  const lotOf = () => r => (r.lot == null ? 0 : -r.lot);
+     fallback and stops the tie being flagged. Lower lot wins.
+     It only counts when EVERY team in the block was drawn for, and drawn for
+     THIS block: scoring an undrawn team as 0 put it above every drawn one, so
+     a half-finished draw or a lot left over from an earlier tie decided who
+     went through, silently and usually wrongly. */
+  const lotOf = tied => {
+    const key = tied.map(r => r.id).slice().sort().join(",");
+    return tied.every(r => r.lot != null && r.lotFor === key) ? (r => -r.lot) : (() => 0);
+  };
   const steps = [h2hWins, () => r => r.diff, h2hDiff, () => r => r.pf, lotOf];
 
   /* Rank one block of teams level on wins. The first step that tells anyone
@@ -576,7 +585,13 @@ function computeStandings(entrants, matches){
        itself that would quietly decide who advances, so say so: the rulebook
        ends a tie like this with a draw, and the desk has to make it. */
     const still = tied.slice().sort((a, b) => a.name.localeCompare(b.name));
-    if (still.length > 1) still.forEach(r => { r.unresolvedTie = still.length; });
+    if (still.length > 1){
+      /* Identify the block by who is in it, not by its size and win count:
+         two separate blocks that matched on those merged into one, and the
+         desk was asked to draw lots between teams already separated. */
+      const key = still.map(r => r.id).slice().sort().join(",");
+      still.forEach(r => { r.unresolvedTie = still.length; r.tieKey = key; });
+    }
     return still;
   }
 
@@ -666,12 +681,17 @@ function bracketPairs(seeds){
   const pairs = [];
   for(let i = 0; i < order.length; i += 2) pairs.push([slot(order[i]), slot(order[i + 1])]);
   const clash = p => p[0] && p[1] && p[0].group === p[1].group;
+  /* Search partners from the BOTTOM of the bracket up. Starting at pairs[0]
+     always raided the top seed's match first, so one intra-group clash
+     anywhere turned the number one seed's opponent from the weakest qualifier
+     into a mid-table one. Damage should land on the lowest-stakes match. */
   for(let pass = 0; pass < 3; pass++){
     let fixed = true;
     for(const p of pairs){
       if (!clash(p)) continue;
       fixed = false;
-      for(const q of pairs){
+      for(let k = pairs.length - 1; k >= 0; k--){
+        const q = pairs[k];
         if (q === p || !q[1]) continue;
         const t = p[1]; p[1] = q[1]; q[1] = t;
         if (!clash(p) && !clash(q)) break;
@@ -1165,7 +1185,7 @@ function demoStore(){
       if (m.status !== "scheduled") return fail("That match already has a score.");
       const pending = db.matches.filter(x => x.event_id === m.event_id && x.status === "scheduled" && x.id !== m.id);
       m.play_order = (pending.length ? Math.min(...pending.map(x => x.play_order)) : m.play_order) - 1;
-      m.postponed = false;
+      m.postponed = false; m.held = false;
       assignCourtsGlobal(db);
       notify(); return ok();
     },
@@ -1183,9 +1203,17 @@ function demoStore(){
           busyNow.add(x.entrant1_id); busyNow.add(x.entrant2_id);
         }
       });
-      const repl = weavePending(db).find(x => !busyNow.has(x.entrant1_id) && !busyNow.has(x.entrant2_id));
+      /* Also honour the replacement event's court restriction, the way the SQL
+         does: without it the demo brought a court-3-only event onto court 1. */
+      const allowedFor = x => {
+        const e = eventOf(x);
+        const a = e && e.settings && Array.isArray(e.settings.courts) ? e.settings.courts : [];
+        return !a.length || a.indexOf(m.court) !== -1;
+      };
+      const repl = weavePending(db).find(x =>
+        !busyNow.has(x.entrant1_id) && !busyNow.has(x.entrant2_id) && allowedFor(x));
       if (!repl) return fail("No other match is waiting, so it stays on court.");
-      repl.court = m.court; repl.postponed = false;
+      repl.court = m.court; repl.postponed = false; repl.held = false;
       repl.called_at = new Date().toISOString(); repl.called_ack = false;
       const pending = db.matches.filter(x => x.event_id === m.event_id && x.status === "scheduled" && x.court == null && x.id !== m.id);
       m.court = null; m.called_at = null; m.called_ack = false; m.postponed = false;
@@ -1242,7 +1270,7 @@ function demoStore(){
         m.play_order = prev ? (prev.play_order + t.play_order) / 2 : t.play_order - 10;
       }
       /* moving a match is a re-queue: it is no longer "postponed" */
-      m.postponed = false;
+      m.postponed = false; m.held = false;
       assignCourtsGlobal(db);
       notify(); return ok();
     },
@@ -1639,7 +1667,6 @@ const SW_EXACT = {
   "Next match starts once its players are off court": "Mechi inayofuata itaanza wachezaji wakitoka uwanjani",
   "Waiting lower in the queue": "Inasubiri chini kwenye foleni",
   "You are next. Stay by the courts.": "Wewe ndiye unayefuata. Baki karibu na viwanja.",
-  "You are next. Stay by the courts.": "Wewe ndiye unayefuata. Baki karibu na viwanja.",
   "Up any moment now.": "Inaingia wakati wowote sasa.",
   "Total points won": "Jumla ya pointi", "Player": "Mchezaji", "Winner": "Mshindi",
   "done": "imekamilika", "on court": "uwanjani", "running": "linaendelea",
@@ -1675,7 +1702,7 @@ const SW_EXACT = {
     "Washindi ndio huweka matokeo. Mara moja tu kwa kila mechi: baada ya hapo, marekebisho hupitia dawati.",
   "Matches run in this order, group A first, so everyone plays round 1 before round 2 starts. Played matches show their scores; tap a match for details. A score can be entered while the match is on a court, and corrections go through the desk.":
     "Mechi huchezwa kwa mpangilio huu, kundi A kwanza, ili kila mtu acheze raundi 1 kabla raundi 2 haijaanza. Mechi zilizochezwa huonyesha matokeo yake; gusa mechi kuona maelezo. Matokeo yanaweza kuwekwa mechi ikiwa uwanjani, na marekebisho hupitia dawati.",
-  "Tiebreakers follow the USA Pickleball order: wins, then head to head between the tied teams, then point difference, then head to head point difference. Teams still level after that are split on points scored. A walkover counts as a win but adds no points either way.":
+  "Tiebreakers follow the USA Pickleball order: wins, then head to head between the tied teams, then point difference, then head to head point difference. Teams still level after that are split on points scored. A walkover counts as a win but adds no points either way. Teams level on all of it are flagged: nothing has separated them and the desk must draw lots.":
     "Kuvunja sare hufuata mpangilio wa USA Pickleball: ushindi, kisha mechi za ana kwa ana kati ya timu zilizofungana, kisha tofauti ya pointi, kisha tofauti ya pointi ana kwa ana. Timu zikibaki sawa hutenganishwa kwa pointi zilizofungwa. Walkover huhesabiwa kama ushindi lakini haiongezi pointi upande wowote.",
   "Winners move to the right, round by round, toward the champion. Tap a match to see or enter its result.":
     "Washindi husonga kulia, raundi kwa raundi, kuelekea ubingwa. Gusa mechi kuona au kuweka matokeo yake.",
@@ -1825,6 +1852,60 @@ const SW_EXACT = {
   "Could not take it off.": "Haikuweza kuondolewa.", "Could not put it back.": "Haikuweza kurudishwa.",
   "Draw lots": "Piga kura", "Nothing left to draw for in group": "Hakuna kilichobaki cha kupigia kura katika kundi",
   "Could not record the draw.": "Haikuweza kurekodi kura.",
+  "Unallocated": "Hazijapangwa", "Save groups": "Hifadhi makundi",
+  "Discard changes": "Tupa mabadiliko", "Add a group": "Ongeza kundi", "Add a team": "Ongeza timu",
+  "Dissolve this group": "Vunja kundi hili", "Groups board": "Ubao wa makundi",
+  "Drop a team here to take it out of the groups for now.": "Dondosha timu hapa ili kuitoa kwenye makundi kwa sasa.",
+  "Drag a team to another group, or tap it and then tap the group. Groups can be any size. Nothing changes until you press Save groups.":
+    "Buruta timu kwenda kundi jingine, au igusa kisha gusa kundi. Makundi yanaweza kuwa ya ukubwa wowote. Hakuna kinachobadilika hadi ubonyeze Hifadhi makundi.",
+  "Groups are locked: this event has results, matches on court, or a bracket. Pause it and clear those to rearrange, or add a late entrant from the team list below.":
+    "Makundi yamefungwa: shindano hili lina matokeo, mechi zilizo uwanjani, au mchujo. Lisitishe na uondoe hayo ili kupanga upya, au ongeza mshiriki wa dakika za mwisho kutoka orodha ya timu hapa chini.",
+  "Place the unallocated teams first.": "Kwanza panga timu zisizo na kundi.",
+  "Every group is empty.": "Kila kundi ni tupu.",
+  "Groups saved and the schedule redrawn.": "Makundi yamehifadhiwa na ratiba imechorwa upya.",
+  "Groups saved, schedule redrawn, event running again.": "Makundi yamehifadhiwa, ratiba imechorwa upya, shindano linaendelea tena.",
+  "This event has results now. Groups can no longer be rebuilt.": "Shindano hili sasa lina matokeo. Makundi hayawezi kujengwa upya.",
+  "A result came in while this was open, so the groups are locked. Nothing was changed.":
+    "Matokeo yaliingia wakati hii ikiwa wazi, hivyo makundi yamefungwa. Hakuna kilichobadilishwa.",
+  "This event locked while the board was open, so the unsaved changes were dropped.":
+    "Shindano lilifungwa wakati ubao ukiwa wazi, hivyo mabadiliko yasiyohifadhiwa yameondolewa.",
+  "That event is gone.": "Shindano hilo halipo tena.",
+  "rename, add a late entrant": "badilisha jina, ongeza mshiriki wa dakika za mwisho",
+  "A team added now plays catch-up matches against its group at the end of the queue.":
+    "Timu inayoongezwa sasa hucheza mechi za kufidia dhidi ya kundi lake mwishoni mwa foleni.",
+  "Resume event": "Endeleza shindano",
+  "Running now. Pausing takes its matches off the courts and out of the queue; results are kept.":
+    "Linaendelea sasa. Kulisitisha huondoa mechi zake viwanjani na kwenye foleni; matokeo huhifadhiwa.",
+  "Paused part-way through. Resuming puts its remaining matches back in the queue.":
+    "Limesitishwa katikati. Kuliendeleza hurudisha mechi zake zilizobaki kwenye foleni.",
+  "Not started. Starting puts its matches into the court queue.":
+    "Halijaanza. Kulianzisha huweka mechi zake kwenye foleni ya viwanja.",
+  "Start another event at the same time": "Anzisha shindano jingine kwa wakati mmoja",
+  "Tick these and the courts are split between all of them at once, by how many matches each has left. Start them one after the other instead and the first one fills every court.":
+    "Weka alama hapa nayo viwanja yatagawanywa kati ya yote kwa mpigo, kulingana na mechi zilizobaki za kila moja. Ukianzisha moja baada ya jingine badala yake, la kwanza litajaza kila uwanja.",
+  "Nothing else is waiting for this court. You can still take them off, for instance when one team is here and the other is not: the court goes free and the match waits until you put it back.":
+    "Hakuna kingine kinachosubiri uwanja huu. Bado unaweza kuwaondoa, kwa mfano timu moja ikiwa imefika na nyingine haijafika: uwanja utakuwa wazi na mechi itasubiri hadi uirudishe.",
+  "Back to the courts": "Rudi kwenye viwanja",
+  "Next match starts once its players are off court": "Mechi ijayo huanza wachezaji wake wakitoka uwanjani",
+  "Every waiting match still has a player on another court. One will free up shortly.":
+    "Kila mechi inayosubiri bado ina mchezaji kwenye uwanja mwingine. Mmoja atamaliza hivi karibuni.",
+  "This match waits until both teams are off court.": "Mechi hii inasubiri hadi timu zote mbili zitoke uwanjani.",
+  "Held at the desk. This match is out of the queue until the desk puts it back.":
+    "Imeshikiliwa dawatini. Mechi hii iko nje ya foleni hadi meza itakaporudisha.",
+  "The standings have changed since this bracket was drawn, so it no longer matches who qualified. Rebuild it from the current standings.":
+    "Msimamo umebadilika tangu mchoro huu uchorwe, hivyo haulingani tena na waliofuzu. Uujenge upya kutoka msimamo wa sasa.",
+  "The standings have changed since this bracket was drawn, so it no longer matches who qualified. Knockout matches have already been played, so check before rebuilding.":
+    "Msimamo umebadilika tangu mchoro huu uchorwe, hivyo haulingani tena na waliofuzu. Mechi za mtoano tayari zimechezwa, hivyo kagua kabla ya kujenga upya.",
+  "A team cannot play itself.": "Timu haiwezi kucheza na yenyewe.",
+  "Draw groups first, then start the event.": "Chora makundi kwanza, kisha anzisha shindano.",
+  "Event not found.": "Shindano halijapatikana.", "Team not found.": "Timu haijapatikana.",
+  "Name cannot be empty.": "Jina haliwezi kuwa tupu.", "No events given.": "Hakuna mashindano yaliyotolewa.",
+  "No other match is waiting, so it stays on court.": "Hakuna mechi nyingine inayosubiri, hivyo itabaki uwanjani.",
+  "Only knockout matches can be edited here.": "Ni mechi za mtoano tu zinazoweza kuhaririwa hapa.",
+  "Pick teams from this event.": "Chagua timu kutoka shindano hili.",
+  "That match already has a score.": "Mechi hiyo tayari ina matokeo.",
+  "This match already has a score. Clear it first.": "Mechi hii tayari ina matokeo. Yafute kwanza.",
+  "That match is held. Put it back in the queue first.": "Mechi hiyo imeshikiliwa. Irudishe kwenye foleni kwanza.",
   "Take off court": "Ondoa uwanjani", "Postpone": "Ahirisha", "Clear score": "Futa matokeo",
   "Save (admin)": "Hifadhi (msimamizi)", "Edit": "Badilisha",
   "No-show? Record a walkover win:": "Hawajafika? Rekodi ushindi wa walkover:",
@@ -1878,6 +1959,26 @@ const SW_EXACT = {
 };
 const SW_PATTERNS = [
   [/^Court (\d+)$/, "Uwanja $1"],
+  [/^(\d+) waiting$/, "$1 zinasubiri"],
+  [/^(\d+) team$/, "timu $1"],
+  [/^(\d+) team is unallocated\. Put them in a group before saving, or remove them\.$/,
+   "Timu $1 haijapangwa. Iweke kwenye kundi kabla ya kuhifadhi, au iondoe."],
+  [/^(\d+) teams are unallocated\. Put them in a group before saving, or remove them\.$/,
+   "Timu $1 hazijapangwa. Ziweke kwenye makundi kabla ya kuhifadhi, au ziondoe."],
+  [/^Dissolve group (\S+)\? Its (\d+) teams move to Unallocated and you place them again\.$/,
+   "Uvunje kundi $1? Timu zake $2 zitahamia Hazijapangwa nawe utazipanga upya."],
+  [/^Remove "(.+)" from this event\?$/, "Uondoe \"$1\" kwenye shindano hili?"],
+  [/^"(.+)" is already on the board\.$/, "\"$1\" tayari yupo kwenye ubao."],
+  [/^Draw lots for group (\S+)$/, "Piga kura kwa kundi $1"],
+  [/^Nothing left to draw for in group (\S+)\.$/, "Hakuna kilichobaki cha kupigia kura katika kundi $1."],
+  [/^Draw lots between (.+)\? This decides who goes through and is recorded on the standings\.$/,
+   "Mpige kura kati ya $1? Hii itaamua nani anafuzu na itarekodiwa kwenye msimamo."],
+  [/^Lots drawn: (.+)$/, "Kura zimepigwa: $1"],
+  [/^Who comes on Court (\d+)\?$/, "Nani aingie Uwanja $1?"],
+  [/^(\d+)\. before ([^·]+)$/, "$1. kabla ya $2"],
+  [/^(\d+)\. the very front$/, "$1. mbele kabisa"],
+  [/^(\d+) events started, courts split between them$/, "Mashindano $1 yameanza, viwanja yamegawanywa kati yao"],
+  [/^Add (\d+) more rows$/, "Ongeza mistari $1 zaidi"],
   [/^Add (\d+) more rows$/, "Ongeza mistari $1 zaidi"],
   [/^(\d+) of the 4 entrants a draw needs so far\.$/, "Washiriki $1 kati ya 4 wanaohitajika kwa droo hadi sasa."],
   [/^(\d+) row has only one player; they will enter on their own\.$/, "Mstari $1 una mchezaji mmoja tu; ataingia peke yake."],
@@ -2111,7 +2212,9 @@ const matchSumTo = m => isAmericano(eventById(m.event_id)) ? matchPts(m) : null;
 function currentEvent(){
   if (state.eventId && eventById(state.eventId)) return eventById(state.eventId);
   const act = activeEvents();
-  return act[0] || data.events[0] || null;
+  /* publicEvents before data.events: the raw fallback showed a hidden event's
+     name, groups and schedule to anyone who opened the page before play. */
+  return act[0] || publicEvents()[0] || data.events[0] || null;
 }
 /* ---------- americano ---------- */
 /* An Americano division is scored per player, not per team: partners rotate
@@ -2170,7 +2273,7 @@ function unresolvedTiesAtCut(ev){
   for(const g of groupsOfEvent(ev)){
     const rows = standingsFor(ev, g);
     const blocks = {};
-    rows.forEach(r => { if (r.unresolvedTie) (blocks[r.unresolvedTie + "|" + r.w] = blocks[r.unresolvedTie + "|" + r.w] || []).push(r); });
+    rows.forEach(r => { if (r.tieKey) (blocks[r.tieKey] = blocks[r.tieKey] || []).push(r); });
     for(const key of Object.keys(blocks)){
       const block = blocks[key];
       if (block.length < 2) continue;
@@ -2196,12 +2299,22 @@ async function drawLots(gname){
     const j = Math.floor(Math.random() * (i + 1));
     [order[i], order[j]] = [order[j], order[i]];
   }
+  /* Stamp which block the draw settles. A lot with no block, or with another
+     block's, is ignored by the standings, so a draw that only half lands
+     leaves the tie flagged rather than half-applied. */
+  const lotFor = tie.ids.slice().sort().join(",");
+  const failed = [];
   for(let i = 0; i < order.length; i++){
     const e = entrantById(order[i]);
     if (!e) continue;
-    const meta = Object.assign({}, e.meta || {}, { lot: i + 1 });
+    const meta = Object.assign({}, e.meta || {}, { lot: i + 1, lotFor });
     const r = await store.adminSetEntrantMeta(state.adminPin, e.id, meta);
-    if (!r.ok){ toast(r.error || "Could not record the draw."); return; }
+    if (!r.ok) failed.push(e.name);
+  }
+  if (failed.length){
+    toast("Could not record the draw for " + failed.join(", ") + ". Nothing was applied; draw again.");
+    await reload();
+    return;
   }
   toast("Lots drawn: " + order.map(id => (entrantById(id) || {}).name).join(", then "));
   await reload();
@@ -2226,7 +2339,10 @@ function gamesStr(m){
 function onCourtMatches(){
   return data.matches
     .filter(m => m.status === "scheduled" && m.court != null && m.entrant1_id && m.entrant2_id)
-    .filter(m => { const ev = eventById(m.event_id); return ev && ev.active; })
+    /* Hidden events are invisible to players, so their matches must not be
+       announced either: the "go to court" banner was calling people to a match
+       they could not open, on courts the board was drawing as free. */
+    .filter(m => { const ev = eventById(m.event_id); return ev && ev.active && !isHidden(ev); })
     .sort((a, b) => a.court - b.court);
 }
 /* The main-draw queue. Americano is a self-managing separate pool (its board
@@ -2239,9 +2355,13 @@ function pendingQueue(){
   return weaveQueues(lists);
 }
 /* Matches the desk pulled off court and is holding until both teams turn up. */
+/* Deliberately NOT filtered on the event being active: a held match whose
+   event is then paused for rain used to vanish from every screen with no way
+   to release it, and it is still out of the queue when play resumes. */
 function heldMatches(){
   return data.matches.filter(m => m.status === "scheduled" && m.held &&
-    (eventById(m.event_id) || {}).active).sort((a, b) => a.play_order - b.play_order);
+    eventById(m.event_id) && !isHidden(eventById(m.event_id)))
+    .sort((a, b) => a.play_order - b.play_order);
 }
 
 /* ---------- wait estimates ---------- */
@@ -2310,6 +2430,20 @@ const WAIT_TURNOVER_MIN = 5;
    occupied court is priced by how long its match has actually been on
    (called_at), so the number tightens as courts run long or finish early.
    Main pool only: americano matches hold americano courts, never these. */
+/* Players on a main-pool court right now, by name, mirroring the assigner. */
+function busyPlayerNames(){
+  const set = new Set();
+  onCourtMatches().filter(x => !isAmericano(eventById(x.event_id))).forEach(x => {
+    splitPair(entrantName(x.entrant1_id)).concat(splitPair(entrantName(x.entrant2_id)))
+      .forEach(n => { if (n) set.add(n); });
+  });
+  return set;
+}
+/* A match nobody can be called to yet, because one of its players is mid-game. */
+function blockedByCourt(m, busy){
+  const P = splitPair(entrantName(m.entrant1_id)).concat(splitPair(entrantName(m.entrant2_id)));
+  return P.some(n => busy.has(n));
+}
 function estimatedWaitMinutes(m){
   const q = pendingQueue();
   const ahead = q.findIndex(x => x.id === m.id);
@@ -2584,12 +2718,6 @@ function renderCallouts(){
   return h;
 }
 
-function eventLabel(ev){
-  let l = ev.name;
-  if (ev.active) l += " · running";
-  else if (evSetting(ev, "schedule_note", "")) l += " · " + evSetting(ev, "schedule_note", "");
-  return l;
-}
 function renderEventTabs(){
   const cur = currentEvent();
   let evs = publicEvents().slice().sort((a, b) => a.sort_order - b.sort_order);
@@ -2807,10 +2935,16 @@ function renderBoard(){
         '<div class="team">' + esc(entrantName(m.entrant2_id)) + '</div>' +
         '<div class="cta">Tap to enter the score</div></button>';
     } else {
-      const canPlace = state.adminPin && q.length > 0;
-      const reason = q.length > 0
+      /* A queue that is not empty but entirely blocked by teams still on court
+         used to read "Tap to place a match", then answer "No match is waiting
+         right now" when tapped, with the header shouting 24 waiting. Say the
+         real reason instead. */
+      const busyNow = busyPlayerNames();
+      const callable = q.filter(x => !blockedByCourt(x, busyNow));
+      const canPlace = state.adminPin && callable.length > 0;
+      const reason = callable.length > 0
         ? (state.adminPin ? 'Tap to place a match' : 'Waiting for a free court')
-        : 'No match ready yet';
+        : (q.length > 0 ? 'Next match starts once its players are off court' : 'No match ready yet');
       if (canPlace){
         h += '<button class="courtcard idle" onclick="openCourtAssign(' + c + ')">' +
           '<div class="chead"><span class="cnum">Court ' + c + '</span></div>' +
@@ -3196,9 +3330,16 @@ function avgDuprOf(members){
 }
 function groupsLocked(ev){
   return data.matches.some(m => m.event_id === ev.id &&
-    (m.status === "played" || m.stage === "knockout" || m.court != null));
+    (m.status === "played" || m.stage === "knockout" || m.court != null || m.held));
 }
 function gedit(ev){
+  /* An unsaved arrangement is meaningless once the event locks: showing it as
+     the final groups put the desk's draft on screen while the players were in
+     the real ones. */
+  if (state.gedit && state.gedit.evId === ev.id && state.gedit.dirty && groupsLocked(ev)){
+    state.gedit = null;
+    toast("This event locked while the board was open, so the unsaved changes were dropped.");
+  }
   if (!state.gedit || state.gedit.evId !== ev.id){
     const evE = data.entrants.filter(e => e.event_id === ev.id);
     state.gedit = {
@@ -3286,10 +3427,10 @@ function gAddTo(i){
   const ev = eventById(state.adminEventId);
   if (!ev || groupsLocked(ev)) return;
   const val = id => { const b = document.getElementById(id); return b ? b.value.trim() : ""; };
-  const name = val("gadd-" + i);
+  const name = val("adm-gadd-" + i);
   if (!name) return;
-  const duprs = val("gdupr-" + i).split(/[\s,;\/]+/).map(cleanNum).filter(v => v != null);
-  const ids = val("gid-" + i).split(/[\s,;\/]+/).filter(Boolean);
+  const duprs = val("adm-gdupr-" + i).split(/[\s,;\/]+/).map(cleanNum).filter(v => v != null);
+  const ids = val("adm-gid-" + i).split(/[\s,;\/]+/).filter(Boolean);
   const meta = {};
   if (duprs.length){
     meta.duprs = duprs;
@@ -3297,21 +3438,40 @@ function gAddTo(i){
   }
   if (ids.length) meta.duprIds = ids;
   const ge = gedit(ev);
+  const taken = ge.groups.flatMap(g => g.members).concat(ge.unallocated).some(m => m.name === name);
+  if (taken){ toast('"' + name + '" is already on the board.'); return; }
   ge.groups[i].members.push({ id: uid(), name, meta });
-  ge.dirty = true; render();
+  ge.dirty = true;
+  ["adm-gadd-", "adm-gdupr-", "adm-gid-"].forEach(pre => { const b = document.getElementById(pre + i); if (b) b.value = ""; });
+  blurThenRender();
 }
 function gReset(){ gClear(); render(); }
 async function gSave(){
-  const ev = eventById(state.adminEventId);
+  let ev = eventById(state.adminEventId);
   if (!ev) return;
   const ge = gedit(ev);
   if (ge.unallocated.length){ toast("Place the unallocated teams first."); return; }
+  if (groupsLocked(ev)){ toast("This event has results now. Groups can no longer be rebuilt."); gClear(); render(); return; }
   const kept = ge.groups.filter(g => g.members.length);
   if (!kept.length){ toast("Every group is empty."); return; }
+  const lonely = kept.filter(g => g.members.length < 2).map(g => g.name);
+  if (lonely.length && !confirm(swText("Group " + lonely.join(", ") +
+    (lonely.length === 1 ? " has" : " have") + " only one team, so nobody there plays a group match. Save anyway?"))) return;
   const names = kept.flatMap(g => g.members.map(m => m.name));
   const dupes = names.filter((n, i) => names.indexOf(n) !== i);
   if (dupes.length){ toast("Duplicate entries: " + [...new Set(dupes)].join(", ")); return; }
-  if (!confirm(swText("Save these groups for " + ev.name + "? The schedule is redrawn from them."))) return;
+  if (!confirm(swText("Save these groups for " + ev.name + "? The whole schedule is redrawn from them, and the event is paused so you can start it when you are ready."))) return;
+  /* Re-read before writing: a score landing on another phone while this board
+     was open must not be deleted by a rebuild. render() defers while a box has
+     focus, so the on-screen board can be minutes out of date. */
+  const wasActive = ev.active;
+  await reload();
+  ev = eventById(state.adminEventId);
+  if (!ev){ toast("That event is gone."); gClear(); render(); return; }
+  if (groupsLocked(ev)){
+    toast("A result came in while this was open, so the groups are locked. Nothing was changed.");
+    gClear(); render(); return;
+  }
   const entrants = [];
   kept.forEach((g, gi) => g.members.forEach((m, i) =>
     entrants.push({ id: m.id, event_id: ev.id, name: m.name, group_name: groupLetter(gi),
@@ -3323,14 +3483,29 @@ async function gSave(){
     { name: ev.name, sort_order: ev.sort_order, settings: ev.settings }, entrants, matches);
   if (!r.ok){ toast(r.error); return; }
   gClear();
-  toast("Groups saved and the schedule redrawn.");
+  /* replace_event always pauses, which is right for a redraw but surprising
+     when the event was already running: put it back rather than leaving it
+     silently out of the queue. */
+  if (wasActive){
+    const ra = await store.adminSetActive(state.adminPin, ev.id, true);
+    toast(ra.ok ? "Groups saved, schedule redrawn, event running again."
+                : "Groups saved and the schedule redrawn. Press Start to put the event back in the queue.");
+  } else {
+    toast("Groups saved and the schedule redrawn.");
+  }
   await reload();
 }
 function gChip(m, locked){
   const d = m.meta && m.meta.dupr != null ? m.meta : null;
   const sel = state.movePick === m.id;
-  return '<div class="gchip' + (sel ? ' sel' : '') + (state.dragId === m.id ? ' dragging' : '') + '"' +
-    (locked ? '' : ' draggable="true" ondragstart="gDragStart(\'' + m.id + '\')" ondragend="gDragEnd()"' +
+  /* A div with role=button rather than a real <button>: the chip contains the
+     Edit and remove buttons, and the parser closes a button as soon as it
+     meets a nested one, which silently dropped both controls. */
+  return '<div class="gchip' + (sel ? ' sel' : '') +
+    (state.dragId === m.id ? ' dragging' : '') + '"' +
+    (locked ? '' : ' draggable="true" role="button" tabindex="0"' +
+      ' ondragstart="gDragStart(\'' + m.id + '\')" ondragend="gDragEnd()"' +
+      ' onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();gPick(\'' + m.id + '\')}"' +
       ' onclick="event.stopPropagation();gPick(\'' + m.id + '\')"') + '>' +
     '<span class="nm">' + esc(m.name) + '</span>' +
     (d ? '<span class="dupr">' + (+d.dupr).toFixed(2) +
@@ -3338,8 +3513,8 @@ function gChip(m, locked){
            ? '<small>' + d.duprs.map(x => (+x).toFixed(1)).join(' / ') + '</small>' : '') + '</span>'
        : '<span class="dupr unrated">&ndash;</span>') +
     (locked ? '' : '<span class="gact">' +
-      '<span role="button" tabindex="0" title="Rename" onclick="event.stopPropagation();gRename(\'' + m.id + '\')">Edit</span>' +
-      '<span role="button" tabindex="0" class="rm" title="Remove" onclick="event.stopPropagation();gRemove(\'' + m.id + '\')">&times;</span>' +
+      '<button type="button" title="Rename" onclick="event.stopPropagation();gRename(\'' + m.id + '\')">Edit</button>' +
+      '<button type="button" class="rm" title="Remove" onclick="event.stopPropagation();gRemove(\'' + m.id + '\')">&times;</button>' +
       '</span>') +
     '</div>';
 }
@@ -3371,9 +3546,15 @@ function renderGroupsBoard(ev){
     g.members.forEach(m => { h += gChip(m, locked); });
     if (!locked){
       const key = 'onkeydown="if(event.key===\'Enter\'){event.preventDefault();gAddTo(' + i + ')}"';
-      h += '<div class="gaddrow"><input id="gadd-' + i + '" type="text" placeholder="Add a team" ' + key + '></div>' +
-        '<div class="gaddrow"><input id="gdupr-' + i + '" type="text" inputmode="decimal" placeholder="DUPR" ' + key + '>' +
-        '<input id="gid-' + i + '" type="text" inputmode="numeric" placeholder="DUPR ID" ' + key + '>' +
+      /* stopPropagation on every box, not just the button: without it the first
+         tap while a chip is selected drops that chip into this group and
+         re-renders the input out from under the finger.
+         The ids start with adm- so the unsaved-field carry-over preserves what
+         has been typed when a score lands on another phone mid-entry. */
+      const stop = ' onclick="event.stopPropagation()"';
+      h += '<div class="gaddrow"><input id="adm-gadd-' + i + '" type="text" placeholder="Add a team"' + stop + ' ' + key + '></div>' +
+        '<div class="gaddrow"><input id="adm-gdupr-' + i + '" type="text" inputmode="decimal" placeholder="DUPR"' + stop + ' ' + key + '>' +
+        '<input id="adm-gid-' + i + '" type="text" inputmode="numeric" placeholder="DUPR ID"' + stop + ' ' + key + '>' +
         '<button class="btn small secondary" onclick="event.stopPropagation();gAddTo(' + i + ')">Add</button></div>';
     }
     h += '</div>';
@@ -3585,6 +3766,18 @@ function renderAdmin(){
         'Draw lots for group ' + esc(t.group) + '</button></div></div>';
     });
     if (koCount){
+      /* Auto-seeding is one-shot, so a group score corrected afterwards changes
+         the standings while the bracket keeps the old qualifiers. Nothing used
+         to say so, and the desk has no reason to suspect it. */
+      const should = seedFieldFor(ev).seeds.map(x => x.entrantId).sort().join(",");
+      const inBracket = data.matches
+        .filter(m => m.event_id === ev.id && m.stage === "knockout" && m.bracket_round === 1)
+        .flatMap(m => [m.entrant1_id, m.entrant2_id]).filter(Boolean).sort().join(",");
+      const koPlayed = data.matches.some(m => m.event_id === ev.id && m.stage === "knockout" && m.status === "played");
+      if (should && inBracket && should !== inBracket)
+        h += '<div class="gwarn">The standings have changed since this bracket was drawn, so it no longer matches who qualified. ' +
+          (koPlayed ? 'Knockout matches have already been played, so check before rebuilding.'
+                    : 'Rebuild it from the current standings.') + '</div>';
       h += '<p class="note">Knockout bracket is live (' + koCount + ' matches).</p>' +
         '<button class="btn small secondary" onclick="confirmGroupStage()">Redo bracket from standings</button> ' +
         '<button class="btn small secondary" onclick="resetBracket()">Back to group stage</button>';
@@ -3692,14 +3885,24 @@ function renderScoreModal(){
            estimate prices a full game on every court, so a fresh round reads
            as twenty minutes to whoever is next on, and people wander off. The
            number only helps the teams far enough back to have time to use it. */
-        const nextUp = pendingQueue().findIndex(x => x.id === m.id);
-        if (nextUp === 0 || (w != null && w <= 12)) est = 'You are next. Stay by the courts.';
-        else if (w != null) est = w <= 2 ? 'Up any moment now.' : 'Estimated wait: ' + fmtWaitMin(w) + '.';
+        const busy = busyPlayerNames();
+        if (blockedByCourt(m, busy)){
+          est = 'This match waits until both teams are off court.';
+        } else {
+          /* "Next" means next among the matches that could actually be called:
+             at a round boundary the head of the queue is the teams still
+             playing, and they were the ones being told to stand by. */
+          const callable = pendingQueue().filter(x => !blockedByCourt(x, busy));
+          const nextUp = callable.findIndex(x => x.id === m.id);
+          if (nextUp === 0 || (w != null && w <= 12)) est = 'You are next. Stay by the courts.';
+          else if (w != null) est = w <= 2 ? 'Up any moment now.' : 'Estimated wait: ' + fmtWaitMin(w) + '.';
+        }
       } else {
         const t = estimatedStartTime(m, ev);
         if (t) est = 'Estimated play time: around ' +
           t.toLocaleString(state.lang === "sw" ? "sw" : [], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) + '.';
       }
+      if (m.held) est = 'Held at the desk. This match is out of the queue until the desk puts it back.';
       if (est) h += '<p class="note" style="font-weight:700">' + est +
         ' <span style="font-weight:400">(rough, updates as matches finish)</span></p>';
     }
@@ -3822,7 +4025,9 @@ function renderCourtAssignModal(){
   h += '<h3>Put a match on Court ' + c + '</h3>';
   h += '<div class="sub">Pick a waiting match to send to Court ' + c + ' now.</div>';
   if (!q.length){
-    h += '<p class="note">No match is waiting right now.</p>';
+    h += '<p class="note">' + (pendingQueue().length
+      ? 'Every waiting match still has a player on another court. One will free up shortly.'
+      : 'No match is waiting right now.') + '</p>';
   } else {
     h += '<div class="roundblock" style="padding-top:2px">';
     h += q.slice(0, 40).map((m, i) => {
@@ -3858,7 +4063,7 @@ function renderOffCourtModal(){
        which is rarely what the desk means when a team asks for a few minutes. */
     h += '<div class="field" style="margin:0 0 10px"><label for="off-place">Where do they go back to?</label>' +
       '<select id="off-place"><option value="front">Front of their queue</option>' +
-      q.map((x, i) => '<option value="' + i + '">' + (i + 1) + '. before ' +
+      q.slice(0, 40).map((x, i) => '<option value="' + jsAttr(x.id) + '">' + (i + 1) + '. before ' +
         esc(entrantName(x.entrant1_id)) + ' v ' + esc(entrantName(x.entrant2_id)) + '</option>').join("") +
       '<option value="end">Last in the queue</option></select></div>';
     h += '<p class="note" style="margin:0 0 10px">Who comes on Court ' + m.court + '?</p>';
@@ -3895,7 +4100,7 @@ function setView(v){
   if (v === "bracket"){
     const cur = currentEvent();
     if (cur && isAmericano(cur)){
-      const other = data.events.slice().sort((a, b) => a.sort_order - b.sort_order).find(e => !isAmericano(e));
+      const other = publicEvents().find(e => !isAmericano(e));
       if (other) state.eventId = other.id;
     }
   }
@@ -3904,7 +4109,19 @@ function setView(v){
 /* Persisted so a reload keeps you on the division you were watching. */
 function setDivision(d){ state.division = d; state.showAllQueue = false; safeSession("pb_division", d); render(); }
 function setEvent(id){ state.eventId = id; state.roundFilter = "all"; state.standingsFilter = "all"; render(); }
-function setAdminEvent(id){ state.adminEventId = id; state.setupPreview = null; state.showRedraw = false; clearEntry(); gClear(); render(); }
+function setAdminEvent(id){
+  if (id !== state.adminEventId){
+    /* Neither the entry rows nor the board are saved anywhere, and the event
+       tabs sit directly above them, so a stray tap used to cost a roster. */
+    const rows = (state.entryRows || []).filter(r => String(r.n1 || "").trim() || String(r.n2 || "").trim()).length;
+    const board = state.gedit && state.gedit.dirty;
+    if ((rows || board) && !confirm(swText(rows
+        ? "Leave this event? The " + rows + " entrants typed in but not yet drawn are lost."
+        : "Leave this event? The groups you arranged have not been saved."))) return;
+  }
+  state.adminEventId = id; state.setupPreview = null; state.showRedraw = false;
+  clearEntry(); gClear(); render();
+}
 function setRoundFilter(r){ state.roundFilter = String(r); render(); }
 function setStandingsFilter(v){ state.standingsFilter = v; render(); }
 function dismissCallout(id){
@@ -4112,16 +4329,6 @@ async function clearScore(matchId){
   toast("Score cleared");
   await reload();
 }
-async function postpone(matchId, toEnd, fromModal){
-  const m = data.matches.find(x => x.id === matchId);
-  if (m && m.court != null &&
-      !confirm(swText("This match is on Court " + m.court + ". Pull it off the court and postpone it?"))) return;
-  const r = await store.adminPostpone(state.adminPin, matchId, toEnd);
-  if (!r.ok){ toast(r.error || "Could not postpone."); return; }
-  if (fromModal) state.modalMatchId = null;
-  toast(toEnd ? "Moved to the end of the queue" : "Postponed");
-  await reload();
-}
 async function playNext(matchId){
   const r = await store.adminPlayNext(state.adminPin, matchId);
   if (!r.ok){ toast(r.error || "Could not move it."); return; }
@@ -4154,17 +4361,16 @@ function takeOffPlace(){
 }
 async function placeAfterSwap(matchId, choice){
   if (!choice || choice === "front") return;
-  const q = pendingQueue();
   const m = data.matches.find(x => x.id === matchId);
   if (!m) return;
-  const rest = q.filter(x => x.id !== matchId);
-  let from;
-  if (choice === "end") from = rest.length;
-  else {
-    const i = parseInt(choice, 10);
-    if (!Number.isFinite(i)) return;
-    const cur = q.findIndex(x => x.id === matchId);
-    from = (cur !== -1 && i > cur) ? i - 1 : i;
+  /* The choice is the id of the match to go in front of, taken from the queue
+     as it looked before the swap; resolving it against the queue as it looks
+     now needs no index arithmetic, which is where this used to slip a place. */
+  const rest = pendingQueue().filter(x => x.id !== matchId);
+  let from = rest.length;
+  if (choice !== "end"){
+    const at = rest.findIndex(x => x.id === choice);
+    from = at === -1 ? 0 : at;     /* it just went on court: take its place */
   }
   const anchor = rest.slice(from).find(x => x.event_id === m.event_id);
   const r = await store.adminMoveMatch(state.adminPin, matchId, anchor ? anchor.id : null);
@@ -4227,12 +4433,19 @@ function queuePlaceSelect(matchId){
   if (mine.length < 2)
     return '<span class="qtag">Only one waiting</span>';
   const label = x => entrantName(x.entrant1_id) + " v " + entrantName(x.entrant2_id);
+  /* Only the places around this row. Listing the whole queue meant every row
+     carried every other row: with one real event drawn and nothing played that
+     was tens of thousands of options and seconds of layout per render, on a
+     board that re-renders whenever any score lands. */
+  const SPAN = 12;
+  const lo = Math.max(0, cur - SPAN), hi = Math.min(q.length, cur + SPAN + 1);
   let h = '<select class="mv qplace" onchange="moveQueueTo(\'' + matchId + '\', this.value)">';
   h += '<option value="">Move to…</option>';
-  q.forEach((x, i) => {
-    if (i === cur) return;
-    h += '<option value="' + i + '">' + (i + 1) + '. before ' + esc(label(x)) + '</option>';
-  });
+  if (lo > 0) h += '<option value="0">1. the very front</option>';
+  for(let i = lo; i < hi; i++){
+    if (i === cur) continue;
+    h += '<option value="' + i + '">' + (i + 1) + '. before ' + esc(label(q[i])) + '</option>';
+  }
   h += '<option value="end">Last in the queue</option>';
   return h + '</select>';
 }
@@ -4448,6 +4661,8 @@ function entrantsCsvPicked(input){
   const f = input.files && input.files[0];
   input.value = "";
   if (!f) return;
+  const ev = eventById(state.adminEventId);
+  if (!ev) return;
   const reader = new FileReader();
   reader.onload = () => {
     const cells = line => {
@@ -4465,7 +4680,12 @@ function entrantsCsvPicked(input){
         else cur += ch;
       }
       out.push(cur);
-      return out.map(c => c.trim()).filter(c => c);
+      /* Keep empty cells: the header branch below assigns roles BY POSITION, so
+         dropping a blank "DUPR ID" cell slides every later value one column
+         left and a player's name ends up as somebody's rating. Only a row that
+         is entirely empty is discarded. */
+      const t = out.map(c => c.trim());
+      return t.some(c => c) ? t : [];
     };
     let rows = String(reader.result).split(/\r\n|\r|\n/).map(cells).filter(cs => cs.length);
     /* Treat the first row as headers only when every cell IS a header phrase:
@@ -4473,7 +4693,12 @@ function entrantsCsvPicked(input){
        ("Player", "Name 1", "Team Name", "DUPR ID 2"). A real team like "Team
        Rocket" has a non-header second word, so it is never eaten. */
     const HEAD = /^(name|player|partner|team|entrant|first|last|dupr|rating|id)s?\s*(name|id|no|number|[0-9]+)?\s*([0-9]+)?$/i;
-    const header = rows.length > 1 && rows[0].every(c => HEAD.test(c.trim())) ? rows.shift() : null;
+    const headerish = rows.length > 1 && rows[0].filter(c => c).length &&
+      rows[0].filter(c => c).filter(c => HEAD.test(c.trim())).length / rows[0].filter(c => c).length;
+    const header = headerish === 1 ? rows.shift() : null;
+    /* Half-recognised first rows ("Player Name, DUPR Rating") are the ones that
+       quietly enter as a team, so flag them rather than guessing. */
+    const maybeHeader = !header && headerish >= 0.5;
     const isRating = c => /^[0-9]+(\.[0-9]+)?$/.test(c) && parseFloat(c) >= 1 && parseFloat(c) <= 8;
     /* Column roles, when the file names them. "DUPR ID" must be tested before
        "DUPR", or every ID column reads as a rating column. */
@@ -4489,11 +4714,18 @@ function entrantsCsvPicked(input){
       const names = [], duprs = [], ids = [];
       if (header){
         cs.forEach((c, i) => {
+          if (!c) return;
           const role = i < header.length ? roleOf(header[i]) : "name";
           (role === "id" ? ids : role === "dupr" ? duprs : names).push(c);
         });
       } else {
-        cs.forEach(c => (isRating(c) ? duprs : names).push(c));
+        /* No header to go on. A rating is 1-8; a long run of digits with no
+           decimal point is a DUPR ID, not somebody called "9". */
+        cs.filter(c => c).forEach(c => {
+          if (isRating(c)) duprs.push(c);
+          else if (/^[0-9]{4,}$/.test(c)) ids.push(c);
+          else names.push(c);
+        });
       }
       if (!names.length) continue;
       r.n1 = names[0] || ""; r.n2 = names[1] || "";
@@ -4506,9 +4738,16 @@ function entrantsCsvPicked(input){
     if (filled && !confirm(swText("Replace the " + filled + " entrants already entered with the " + out.length + " rows from the file?"))) return;
     /* Keep a few spare rows on the end so the next entrant can just be typed. */
     state.entryRows = out.concat(Array.from({ length: ENTRY_CHUNK }, blankEntryRow));
-    if (out.some(r => r.n2)) state.entryDoubles = true;
+    /* Follow the file in both directions rather than only ever switching on.
+       A two-name file loaded into an event called "singles" is a real
+       possibility (a "First, Last" export), so say what was assumed. */
+    const looksDoubles = out.some(r => r.n2);
+    const wasSingles = !entryIsDoubles(ev);
+    state.entryDoubles = looksDoubles;
     render();
-    toast(out.length + " entrants loaded. Check the rows, then draw.");
+    toast(out.length + " entrants loaded. Check the rows, then draw." +
+      (looksDoubles && wasSingles ? " Two name columns, so these came in as doubles teams." : "") +
+      (maybeHeader ? " Row 1 looks like column headings; check it is not sitting in the list as a team." : ""));
   };
   reader.readAsText(f);
 }
@@ -4568,8 +4807,9 @@ async function toggleHidden(){
   const next = !isHidden(ev);
   if (next && ev.active &&
       !confirm(swText("Hide " + ev.name + " from players? It is still running, so its matches stay on court but nobody can see them."))) return;
-  const settings = Object.assign({}, ev.settings, { hidden: next });
-  const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, settings);
+  /* Only the key this control owns: adminUpdateEvent merges, and sending a
+     whole stale snapshot rolls back whatever another device just changed. */
+  const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, { hidden: next });
   if (!r.ok){ toast(r.error); return; }
   toast(next ? "Hidden from players" : "Visible to players again");
   await reload();
@@ -4684,7 +4924,15 @@ function entryIsDoubles(ev){
   if (state.entryDoubles != null) return state.entryDoubles;
   return !(ev && /singles/i.test(ev.name));
 }
-function setEntryDoubles(v){ state.entryDoubles = !!v; render(); }
+/* render() defers while focus sits in an admin field, and a <select> keeps
+   focus after its change event, so without the blur the grid went on showing
+   doubles boxes after Singles was chosen and the draw dropped every player 2. */
+function blurThenRender(){
+  const a = document.activeElement;
+  if (a && a.blur) try{ a.blur(); }catch(e){}
+  render();
+}
+function setEntryDoubles(v){ state.entryDoubles = !!v; blurThenRender(); }
 function setEntryCell(i, key, val){
   const rows = entryRows();
   if (!rows[i]) return;
@@ -4693,13 +4941,13 @@ function setEntryCell(i, key, val){
 }
 function addEntryRows(){
   entryRows().push(...Array.from({ length: ENTRY_CHUNK }, blankEntryRow));
-  render();
+  blurThenRender();
 }
 function clearEntryRow(i){
   const rows = entryRows();
   if (!rows[i]) return;
   rows[i] = blankEntryRow();
-  render();
+  blurThenRender();
 }
 const cleanNum = s => { const v = parseFloat(String(s).trim()); return Number.isFinite(v) && v >= 1 && v <= 8 ? v : null; };
 /* One entry per filled row. A row counts as filled when it has any name at
@@ -4870,6 +5118,9 @@ async function confirmGroupStage(){
   const rows = buildBracket(ev.id, field.seeds, maxOrder);
   const r = await store.adminGenerateBracket(state.adminPin, ev.id, rows);
   if (!r.ok){ toast(r.error); return; }
+  autoBracketTried.delete(ev.id);
+  if (evSetting(ev, "no_autobracket", false))
+    await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, { no_autobracket: false });
   toast("Bracket created");
   state.view = "bracket"; state.eventId = ev.id;
   await reload();
@@ -4886,24 +5137,32 @@ async function maybeAutoBracket(){
   if (!state.adminPin) return;
   for(const ev of data.events){
     if (autoBracketTried.has(ev.id) || isAmericano(ev)) continue;
+    if (evSetting(ev, "no_autobracket", false)) continue;   /* the desk sent it back to the group stage */
     const ms = data.matches.filter(m => m.event_id === ev.id);
     const group = ms.filter(m => m.stage === "group");
     if (!group.length || ms.some(m => m.stage === "knockout")) continue;
     if (group.some(m => m.status !== "played")) continue;
     if (!groupsOfEvent(ev).length) continue;
     if (unresolvedTiesAtCut(ev).length) continue;   /* wait for the desk to draw lots */
-    autoBracketTried.add(ev.id);
-    const field = seedFieldFor(ev);
-    if (field.seeds.length < 2) continue;
+    if (seedFieldFor(ev).seeds.length < 2) continue;
     await reload();
-    /* Re-check against the fresh pull: another desk phone may have just
-       seeded it, and a correction may have reopened a group match. */
-    const fresh = data.matches.filter(m => m.event_id === ev.id);
-    if (fresh.some(m => m.stage === "knockout")) continue;
-    if (fresh.filter(m => m.stage === "group").some(m => m.status !== "played")) continue;
-    const maxOrder = Math.max(0, ...fresh.map(m => m.play_order || 0));
-    const r = await store.adminGenerateBracket(state.adminPin, ev.id, buildBracket(ev.id, seedFieldFor(ev).seeds, maxOrder));
-    if (!r.ok) continue;
+    /* Re-check everything against the fresh pull, not just some of it: another
+       desk phone may have seeded it, a correction may have reopened a group
+       match, and a correction can also CREATE a tie that has to be drawn. */
+    const fresh = eventById(ev.id);
+    if (!fresh || evSetting(fresh, "no_autobracket", false)) continue;
+    const freshMs = data.matches.filter(m => m.event_id === ev.id);
+    if (freshMs.some(m => m.stage === "knockout")) continue;
+    if (freshMs.filter(m => m.stage === "group").some(m => m.status !== "played")) continue;
+    if (unresolvedTiesAtCut(fresh).length) continue;
+    const field = seedFieldFor(fresh);
+    if (field.seeds.length < 2) continue;
+    const maxOrder = Math.max(0, ...freshMs.map(m => m.play_order || 0));
+    const r = await store.adminGenerateBracket(state.adminPin, ev.id, buildBracket(ev.id, field.seeds, maxOrder));
+    /* Only now is it "tried": marking it before the write meant one dropped
+       request left the event with no bracket and no message, for good. */
+    if (!r.ok){ toast(r.error || "Could not draw the bracket for " + ev.name + "."); continue; }
+    autoBracketTried.add(ev.id);
     toast("Group stage finished. Bracket drawn for " + ev.name + ".");
     await reload();
   }
@@ -4912,10 +5171,13 @@ async function resetBracket(){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
   if (!confirm(swText("Remove the knockout bracket and its scores for this event?"))) return;
-  /* Deliberate removal, so the auto-draw must not put it straight back. */
+  /* Deliberate removal, so the auto-draw must not put it straight back. It has
+     to be recorded on the event, not in this page's memory: another desk phone
+     reloads within seconds and would re-seed it. */
   autoBracketTried.add(ev.id);
   const r = await store.adminResetBracket(state.adminPin, ev.id);
   if (!r.ok){ toast(r.error); return; }
+  await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, { no_autobracket: true });
   toast("Back to group stage");
   await reload();
 }
@@ -4942,7 +5204,12 @@ function downloadResults(allEvents){
   if (!played.length){ toast("No played matches to export yet."); return; }
   const maxGames = Math.max(1, ...played.map(([, m]) => Array.isArray(m.games) ? m.games.length : 1));
   const head = ["Event", "Stage", "Date", "Format",
-    "Team 1 Player A", "Team 1 Player B", "Team 2 Player A", "Team 2 Player B"];
+    "Team 1 Player A", "Team 1 Player B", "Team 2 Player A", "Team 2 Player B",
+    /* DUPR identifies people by ID, which is the whole reason the entry grid
+       collects one per player; without these columns they were collected and
+       never used. */
+    "Team 1 Player A DUPR ID", "Team 1 Player B DUPR ID",
+    "Team 2 Player A DUPR ID", "Team 2 Player B DUPR ID"];
   for(let g = 1; g <= maxGames; g++) head.push("Game " + g + " Team 1", "Game " + g + " Team 2");
   head.push("Winner", "Notes");
   const lines = [head.map(csvCell).join(",")];
@@ -4959,11 +5226,15 @@ function downloadResults(allEvents){
       return [parts[0] || "", parts.slice(1).join(" & ") || ""];
     };
     const [a1, a2] = split(m.entrant1_id), [b1, b2] = split(m.entrant2_id);
+    /* Ids sit in the same order the names were entered, so they line up with
+       the split above. */
+    const idsOf = id => { const e = entrantById(id); const v = (e && e.meta && e.meta.duprIds) || []; return [v[0] || "", v[1] || ""]; };
+    const [ia1, ia2] = idsOf(m.entrant1_id), [ib1, ib2] = idsOf(m.entrant2_id);
     const d = m.updated_at ? new Date(m.updated_at) : null;
     const pad = n => String(n).padStart(2, "0");
     const date = d && !isNaN(d) ? pad(d.getMonth() + 1) + "/" + pad(d.getDate()) + "/" + d.getFullYear() : "";
     const row = [ev.name, m.stage === "group" ? "Group " + (m.group_name || "") : koLabel(m), date,
-      a2 || b2 ? "Doubles" : "Singles", a1, a2, b1, b2];
+      a2 || b2 ? "Doubles" : "Singles", a1, a2, b1, b2, ia1, ia2, ib1, ib2];
     /* A walkover has no real games: score1/score2 are a placeholder, and in a
        best-of event they are games won, not points. Leave the columns empty so
        nothing imports as a played result. */
