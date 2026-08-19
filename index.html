@@ -259,6 +259,7 @@ button.bkmatch,.bkmatch .bkmain{cursor:pointer}
 details.teamlist{margin:10px 0}
 details.teamlist summary{cursor:pointer; font-weight:700; font-size:13.5px; padding:4px 0}
 select.mv{padding:4px 6px; border-radius:6px; border:1px solid var(--line); background:var(--bg); font-size:12px; max-width:96px}
+select.qplace{max-width:150px}
 .addteam{display:flex; gap:8px; flex-wrap:wrap; align-items:center; margin-top:10px}
 /* Admin groups board: tap a team, tap a destination group. */
 /* Entrant entry grid. One row per entrant; for doubles the second player's
@@ -1767,7 +1768,7 @@ const SW_EXACT = {
   "Every phone with the page open keeps its own copy, so a wiped database can be rebuilt from any of them.":
     "Kila simu iliyofungua ukurasa huweka nakala yake, hivyo hifadhidata iliyofutwa inaweza kujengwa upya kutoka yoyote kati yazo.",
   "Admin powers on the other tabs": "Uwezo wa msimamizi kwenye kurasa zingine",
-  "While unlocked: tap any match anywhere (Courts, Schedule, a team in Standings, or the Bracket) to fix or clear its score, enter a walkover, or postpone. Players can only enter a score while a match is on a court; admins can score anything from anywhere. An on-court match can be sent back with \"Take off court\": either the next match in line takes its court, or you pick the one to bring on. Pause the finished event: with nothing running, the Courts tab previews the next batch's courts (the tournament's opening events a day ahead, every later batch from 12 hours before its start). The Courts tab has Postpone on the queue and Play next on postponed matches, and each waiting row's Move button asks for the queue place it should take. On a \"go to court\" banner, ✓ On court dismisses it for everyone; a plain tap hides it only on that phone. On the Bracket tab, unplayed matches have an Edit teams link for manual fixes. Everything updates live on everyone's phone.":
+  "While unlocked: tap any match anywhere (Courts, Schedule, a team in Standings, or the Bracket) to fix or clear its score or enter a walkover. Players can only enter a score while a match is on a court; admins can score anything from anywhere. An on-court match can be sent back with \"Take off court\": either the next match in line takes its court, or you pick the one to bring on. Pause the finished event: with nothing running, the Courts tab previews the next batch's courts (the tournament's opening events a day ahead, every later batch from 12 hours before its start). The Courts tab has Postpone on the queue and Play next on postponed matches, and each waiting row's Move button asks for the queue place it should take. On a \"go to court\" banner, ✓ On court dismisses it for everyone; a plain tap hides it only on that phone. On the Bracket tab, unplayed matches have an Edit teams link for manual fixes. Everything updates live on everyone's phone.":
     "Ukiwa umefungua: gusa mechi yoyote popote (Viwanja, Ratiba, timu kwenye Msimamo, au Mchujo) kurekebisha au kufuta matokeo yake, kuweka walkover, au kuahirisha. Wachezaji wanaweza kuweka matokeo tu mechi ikiwa uwanjani; wasimamizi wanaweza kuweka matokeo ya chochote kutoka popote. Mechi iliyo uwanjani inaweza kurudishwa kwa \"Ondoa uwanjani\": ama mechi inayofuata kwenye foleni huchukua uwanja wake, au unachagua ya kuingiza. Sitisha shindano lililomalizika: bila kinachoendelea, ukurasa wa Viwanja huonyesha mapema viwanja vya fungu lijalo la mashindano (mashindano ya ufunguzi siku moja kabla, kila fungu la baadaye kuanzia masaa 12 kabla ya kuanza kwake). Ukurasa wa Viwanja una Ahirisha kwenye foleni na Iwe ijayo kwenye mechi zilizoahirishwa, na kitufe cha Hamisha cha kila mstari unaosubiri huuliza nafasi ya foleni inayotakiwa. Kwenye tangazo la \"nenda uwanjani\", ✓ Uwanjani huliondoa kwa kila mtu; kugusa kwa kawaida hulificha kwenye simu hiyo tu. Kwenye ukurasa wa Mchujo, mechi ambazo hazijachezwa zina kitufe cha Badilisha timu kwa marekebisho ya mkono. Kila kitu husasishwa moja kwa moja kwenye simu ya kila mtu.",
   "Change PIN": "Badilisha PIN", "Current PIN": "PIN ya sasa", "New PIN": "PIN mpya",
   "New PIN needs at least 4 characters.": "PIN mpya inahitaji angalau herufi 4.",
@@ -1783,6 +1784,10 @@ const SW_EXACT = {
   "Or bring on someone specific": "Au ingiza mechi maalum",
   "No other match is waiting, so this one would stay on court.":
     "Hakuna mechi nyingine inayosubiri, hivyo hii ingebaki uwanjani.",
+  "Move to…": "Hamisha kwenda…", "Last in the queue": "Wa mwisho kwenye foleni",
+  "Only one waiting": "Ni mmoja tu anayesubiri",
+  "Where do they go back to?": "Warudi wapi?", "Front of their queue": "Mbele ya foleni yao",
+  "Off court, but could not place it in the queue.": "Wameondoka uwanjani, lakini hawakuweza kupangwa kwenye foleni.",
   "Take off court": "Ondoa uwanjani", "Postpone": "Ahirisha", "Clear score": "Futa matokeo",
   "Save (admin)": "Hifadhi (msimamizi)", "Edit": "Badilisha",
   "No-show? Record a walkover win:": "Hawajafika? Rekodi ushindi wa walkover:",
@@ -2510,12 +2515,11 @@ function queueRow(m, opts){
   if (m.postponed && !opts.inPostponed) row += '<span class="qtag">Postponed</span>';
   if (opts.showEvent && ev) row += '<span class="qtag">' + esc(ev.name) + '</span>';
   if (state.adminPin && opts.action === "postpone")
-    row += '<span class="queue-actions">' +
-      '<button class="btn small secondary" title="Type the queue place this match should take"' +
-      ' onclick="event.stopPropagation();moveQueuePrompt(\'' + m.id + '\')">Move</button>' +
-      '<button class="btn small secondary" onclick="event.stopPropagation();postpone(\'' + m.id + '\', false)">Postpone</button></span>';
+    row += '<span class="queue-actions" onclick="event.stopPropagation()">' + queuePlaceSelect(m.id) + '</span>';
   if (state.adminPin && opts.action === "playnext")
-    row += '<span class="queue-actions"><button class="btn small secondary" onclick="event.stopPropagation();playNext(\'' + m.id + '\')">Play next</button></span>';
+    row += '<span class="queue-actions" onclick="event.stopPropagation()">' +
+      '<button class="btn small secondary" onclick="playNext(\'' + m.id + '\')">Play next</button>' +
+      queuePlaceSelect(m.id) + '</span>';
   row += '</div>';
   return row;
 }
@@ -3461,7 +3465,7 @@ function renderAdmin(){
     'Players can only enter a score while a match is on a court; admins can score anything from anywhere. ' +
     'An on-court match can be sent back with "Take off court": either the next match in line takes its court, or you pick the one to bring on. ' +
     'Pause the finished event: with nothing running, the Courts tab previews the next batch\'s courts (the tournament\'s opening events a day ahead, every later batch from 12 hours before its start). ' +
-    'The Courts tab has Postpone on the queue and Play next on postponed matches, and each waiting row\'s Move button asks for the queue place it should take. ' +
+    'Every waiting row has a "Move to…" picker: choose the match it should go in front of, or send it to the back. Postponed matches also keep Play next. ' +
     'On a "go to court" banner, ✓ On court dismisses it for everyone; a plain tap hides it only on that phone. ' +
     'On the Bracket tab, unplayed matches have an Edit teams link for manual fixes. ' +
     'Everything updates live on everyone\'s phone.</p></div>';
@@ -3506,7 +3510,6 @@ function renderScoreModal(){
          hand its court number to a main-draw replacement. */
       if (m.court != null && !isAmericano(eventById(m.event_id)))
         x += '<button class="btn small secondary" onclick="openOffCourt(\'' + m.id + '\')">Take off court</button>';
-      x += '<button class="btn small secondary" onclick="postpone(\'' + m.id + '\', false, true)">Postpone</button>';
     }
     if (isAdmin && played) x += '<button class="btn small danger" onclick="clearScore(\'' + m.id + '\')">Clear score</button>';
     return x;
@@ -3700,7 +3703,14 @@ function renderOffCourtModal(){
   h += '<h3>Take this match off Court ' + m.court + '</h3>';
   h += '<div class="sub">' + esc(entrantName(m.entrant1_id)) + ' <span class="qv">vs</span> ' + esc(entrantName(m.entrant2_id)) + '</div>';
   if (q.length){
-    h += '<p class="note" style="margin:0 0 10px">It goes to the front of its queue. Who comes on Court ' + m.court + '?</p>';
+    /* Sending a match back used to always put it at the front of its queue,
+       which is rarely what the desk means when a team asks for a few minutes. */
+    h += '<div class="field" style="margin:0 0 10px"><label for="off-place">Where do they go back to?</label>' +
+      '<select id="off-place"><option value="front">Front of their queue</option>' +
+      q.map((x, i) => '<option value="' + i + '">' + (i + 1) + '. before ' +
+        esc(entrantName(x.entrant1_id)) + ' v ' + esc(entrantName(x.entrant2_id)) + '</option>').join("") +
+      '<option value="end">Last in the queue</option></select></div>';
+    h += '<p class="note" style="margin:0 0 10px">Who comes on Court ' + m.court + '?</p>';
     h += '<button class="btn" style="width:100%" onclick="swapOut(\'' + m.id + '\')">Bring on the next in line</button>';
     h += '<div class="microlabel" style="margin:14px 0 4px">Or bring on someone specific</div>';
     h += '<div class="roundblock" style="padding-top:2px">';
@@ -3965,19 +3975,49 @@ async function playNext(matchId){
 }
 function openOffCourt(id){ state.offCourtId = id; state.modalMatchId = null; render(); }
 function closeOffCourt(){ state.offCourtId = null; render(); }
+/* Reads the "where do they go back to?" picker before the modal closes, and
+   moves the match there once it is off the court and back in the queue. */
+function takeOffPlace(){
+  const sel = document.getElementById("off-place");
+  return sel ? sel.value : "front";
+}
+async function placeAfterSwap(matchId, choice){
+  if (!choice || choice === "front") return;
+  const q = pendingQueue();
+  const m = data.matches.find(x => x.id === matchId);
+  if (!m) return;
+  const rest = q.filter(x => x.id !== matchId);
+  let from;
+  if (choice === "end") from = rest.length;
+  else {
+    const i = parseInt(choice, 10);
+    if (!Number.isFinite(i)) return;
+    const cur = q.findIndex(x => x.id === matchId);
+    from = (cur !== -1 && i > cur) ? i - 1 : i;
+  }
+  const anchor = rest.slice(from).find(x => x.event_id === m.event_id);
+  const r = await store.adminMoveMatch(state.adminPin, matchId, anchor ? anchor.id : null);
+  if (!r.ok) toast(r.error || "Off court, but could not place it in the queue.");
+}
 /* "Bring on the next in line": the pool's next match takes the court. */
 async function swapOut(matchId){
+  const place = takeOffPlace();
   const r = await store.adminSwapOut(state.adminPin, matchId);
   if (!r.ok){ toast(r.error || "Could not move it."); return; }
   state.offCourtId = null; state.modalMatchId = null;
+  await reload();
+  await placeAfterSwap(matchId, place);
   toast("Off court, next one on");
   await reload();
 }
 /* "Bring someone else on": a specific chosen match takes the court. */
 async function swapTo(offId, onId){
+  const place = takeOffPlace();
   const r = await store.adminSwapTo(state.adminPin, offId, onId);
   if (!r.ok){ toast(r.error || "Could not swap them."); return; }
   state.offCourtId = null; state.modalMatchId = null;
+  await reload();
+  await placeAfterSwap(offId, place);
   toast("Court updated");
   await reload();
 }
@@ -4003,26 +4043,48 @@ function applyLocalMove(matchId, beforeId){
    event (the display interleaves events to share courts fairly), so the number
    resolves to "before the next match of its own event at or below that place";
    with one event running, that lands exactly on the number typed. */
-async function moveQueuePrompt(matchId){
+/* Where a waiting match should sit, picked from the queue as it actually is
+   rather than typed as a number, which meant counting rows on a phone. It
+   replaces both the old Move prompt and the Postpone button: sending a match
+   to the back is just choosing the last place, and choosing it by name is
+   harder to get wrong than remembering what Postpone did. */
+function queuePlaceSelect(matchId){
+  const q = pendingQueue();
+  const cur = q.findIndex(x => x.id === matchId);
+  if (cur === -1) return '';
+  const mine = q.filter(x => x.event_id === q[cur].event_id);
+  if (mine.length < 2)
+    return '<span class="qtag">Only one waiting</span>';
+  const label = x => entrantName(x.entrant1_id) + " v " + entrantName(x.entrant2_id);
+  let h = '<select class="mv qplace" onchange="moveQueueTo(\'' + matchId + '\', this.value)">';
+  h += '<option value="">Move to…</option>';
+  q.forEach((x, i) => {
+    if (i === cur) return;
+    h += '<option value="' + i + '">' + (i + 1) + '. before ' + esc(label(x)) + '</option>';
+  });
+  h += '<option value="end">Last in the queue</option>';
+  return h + '</select>';
+}
+async function moveQueueTo(matchId, choice){
+  if (choice === "") return;
   const q = pendingQueue();
   const cur = q.findIndex(x => x.id === matchId);
   if (cur === -1){ toast("That match is not waiting in the queue."); return; }
   const m = q[cur];
-  if (q.filter(x => x.event_id === m.event_id).length < 2){
-    toast("Only waiting match in its event, so its turn is set by the court rotation.");
-    return;
-  }
-  const raw = prompt(swText("Move to which place in the queue? 1-" + q.length +
-    " (now " + (cur + 1) + ")"), "");
-  if (raw == null || !raw.trim()) return;
-  const n = parseInt(raw.trim(), 10);
-  if (isNaN(n) || n < 1 || n > q.length){
-    toast("Enter a number from 1 to " + q.length + ".");
-    return;
-  }
-  if (n === cur + 1) return;
   const rest = q.filter(x => x.id !== matchId);
-  const anchor = rest.slice(n - 1).find(x => x.event_id === m.event_id);
+  /* The chosen index is into the queue as displayed, which still contains the
+     match being moved; once it is pulled out, everything after it shifts down
+     one. Ordering is then resolved inside the match's own event, because
+     across events the court rotation decides, so the anchor is the first
+     match of this event at or after the chosen place. */
+  let from;
+  if (choice === "end") from = rest.length;
+  else {
+    const i = parseInt(choice, 10);
+    if (!Number.isFinite(i)) return;
+    from = i > cur ? i - 1 : i;
+  }
+  const anchor = rest.slice(from).find(x => x.event_id === m.event_id);
   const beforeId = anchor ? anchor.id : null;
   applyLocalMove(matchId, beforeId);
   render();
