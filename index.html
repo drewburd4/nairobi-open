@@ -277,6 +277,30 @@ select.qplace{max-width:170px}
 .eclear{color:var(--muted); font-size:17px; line-height:1; padding:8px 4px; text-align:center; border-radius:6px}
 .eclear:hover,.eclear:focus-visible{color:var(--danger); background:var(--danger-soft)}
 .esum{background:var(--court-soft); border:1px solid var(--line); border-radius:8px; padding:9px 11px; font-size:13px; margin:10px 0; white-space:pre-line}
+/* Participants: one card per person rather than one wide row, because the
+   roster carries five fields plus a tick and a partner for every event and no
+   phone is wide enough to line that up. */
+.pgrid{display:flex; flex-direction:column; gap:10px; margin:10px 0 14px}
+.pcard{background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:9px 10px}
+.pcard.filled{background:var(--card); border-color:var(--line-strong,var(--line))}
+.ptop{display:grid; grid-template-columns:20px 1fr 26px; gap:6px; align-items:start}
+.ptop .enum{font-size:11px; font-weight:800; color:var(--muted); padding-top:11px; font-variant-numeric:tabular-nums}
+.pcells{display:grid; grid-template-columns:1fr 74px 66px 66px 96px; gap:6px}
+@media (max-width:700px){ .pcells{grid-template-columns:1fr 1fr; } .pcells .pname{grid-column:1 / -1} }
+.pcard input,.pcard select{width:100%; padding:8px 9px; border-radius:8px; border:1px solid var(--line); background:var(--card); font-size:14px; min-width:0}
+.pcard input.pnum{font-variant-numeric:tabular-nums; font-size:13px}
+.pcard input.efilled{border-color:var(--accent-soft)}
+.plabels{display:grid; grid-template-columns:1fr 74px 66px 66px 96px; gap:6px; padding:0 32px 0 26px; margin-bottom:-2px}
+@media (max-width:700px){ .plabels{display:none} }
+.plabels span{font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase; color:var(--muted)}
+.pentries{display:flex; flex-wrap:wrap; gap:8px; margin:8px 0 0 26px; padding-top:8px; border-top:1px dashed var(--line)}
+.pentry{display:flex; align-items:center; gap:6px; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:4px 8px 4px 7px}
+.pentry.on{border-color:var(--accent); background:var(--accent-soft)}
+.pentry label{display:flex; align-items:center; gap:6px; font-size:12.5px; font-weight:700; white-space:nowrap; cursor:pointer}
+.pentry input[type=checkbox]{width:auto; padding:0; margin:0}
+.pentry input.ppartner{width:150px; padding:5px 7px; font-size:13px; font-weight:400}
+.pbar{display:flex; flex-wrap:wrap; gap:8px; align-items:center; position:sticky; bottom:0; background:var(--bg); border-top:1px solid var(--line); padding:10px 0; margin-top:4px; z-index:5}
+.punsaved{font-size:12.5px; font-weight:700; color:var(--warn)}
 .gboard{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; margin-top:4px}
 .gcol{background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:8px; min-height:70px}
 .gcol.target{outline:2px dashed var(--accent); outline-offset:2px; cursor:pointer}
@@ -1418,6 +1442,17 @@ function demoStore(){
     },
     async adminSetContacts(){ return fail("Phone numbers only work on the live site."); },
     async adminListContacts(){ return { ok: true, data: [] }; },
+    async adminListParticipants(pin){
+      if (!checkPin(pin)) return { ok: true, data: [] };
+      return { ok: true, data: (db.participants || []).slice() };
+    },
+    async adminSaveParticipants(pin, rows){
+      if (!checkPin(pin)) return fail("Wrong PIN.");
+      if (!Array.isArray(rows)) return fail("Nothing to save.");
+      db.participants = rows.filter(r => String(r.name || "").trim())
+        .map(r => Object.assign({}, r, { id: r.id || uid(), name: String(r.name).trim() }));
+      notify(); return ok();
+    },
     async adminSetBracketTeams(pin, matchId, e1, e2){
       if (!checkPin(pin)) return fail("Wrong PIN.");
       const m = findMatch(matchId);
@@ -1576,7 +1611,9 @@ function liveStore(){
     adminListContacts: pin => rpc("nairobi_admin_list_contacts", { p_pin: pin }),
     adminSetBracketTeams: (pin, matchId, e1, e2) => rpc("nairobi_admin_set_bracket_teams", { p_pin: pin, p_match_id: matchId, p_entrant1_id: e1 || null, p_entrant2_id: e2 || null }),
     adminGenerateBracket: (pin, eventId, rows) => rpc("nairobi_admin_generate_bracket", { p_pin: pin, p_event_id: eventId, p_matches: rows }),
-    adminResetBracket: (pin, eventId) => rpc("nairobi_admin_reset_bracket", { p_pin: pin, p_event_id: eventId })
+    adminResetBracket: (pin, eventId) => rpc("nairobi_admin_reset_bracket", { p_pin: pin, p_event_id: eventId }),
+    adminListParticipants: pin => rpc("nairobi_admin_list_participants", { p_pin: pin }),
+    adminSaveParticipants: (pin, rows) => rpc("nairobi_admin_save_participants", { p_pin: pin, p_rows: rows })
   };
 }
 </script>
@@ -1594,6 +1631,7 @@ const state = {
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null, assignCourt: null, offCourtId: null,
   setupPreview: null, adminEventId: null, loadError: null,
   entryRows: null, entryDoubles: null, gedit: null, dragId: null,
+  pRows: null, pLoaded: false, pDirty: false,
   showAllQueue: false, showRedraw: false, pendingRender: false, division: "main",
   movePick: null,
   lang: safeLocal("pb_lang") === "sw" ? "sw" : "en",
@@ -1735,6 +1773,26 @@ const SW_EXACT = {
   "Advance per group": "Wanaofuzu kwa kundi", "Group size": "Ukubwa wa kundi",
   "Ending a game": "Mwisho wa gemu",
   "Win by 2 in the group stage": "Ushindi kwa 2 katika hatua ya makundi",
+  /* ---- participants ---- */
+  "Participants": "Washiriki",
+  "Unlock the Admin tab to see the participants.": "Fungua ukurasa wa Msimamizi ili kuona washiriki.",
+  "Everyone playing the tournament, entered once. Tick the events each person is in and name their partner; the Admin tab then seeds those events straight from this list. Only the desk can see this tab.":
+    "Kila anayecheza shindano, ameandikishwa mara moja. Weka alama kwenye mashindano ambayo kila mtu yumo na uandike mwenzake; kisha ukurasa wa Msimamizi hupanga mashindano hayo moja kwa moja kutoka orodha hii. Meza pekee ndiyo inaweza kuona ukurasa huu.",
+  "No event is taking its entries from here yet. On the Admin tab, pick an event and tick Take entries from the Participants tab.":
+    "Hakuna shindano linalochukua washiriki wake kutoka hapa bado. Kwenye ukurasa wa Msimamizi, chagua shindano na uweke alama kwenye Chukua washiriki kutoka ukurasa wa Washiriki.",
+  "Take entries from the Participants tab": "Chukua washiriki kutoka ukurasa wa Washiriki",
+  "Fill the rows from Participants": "Jaza mistari kutoka kwa Washiriki",
+  "Save participants": "Hifadhi washiriki",
+  "Entries so far": "Waliojiandikisha hadi sasa",
+  "Add 5 more rows": "Ongeza mistari 5 zaidi",
+  "Full name": "Jina kamili", "Gender": "Jinsia", "Man": "Mwanaume", "Woman": "Mwanamke",
+  "Singles": "Mmoja mmoja", "Doubles": "Jozi", "Partner": "Mwenzako",
+  "Name": "Jina", "DUPR S": "DUPR M", "DUPR D": "DUPR J",
+  "Remove this person": "Mwondoe mtu huyu",
+  "The participants list has changes you have not saved. Leave anyway?":
+    "Orodha ya washiriki ina mabadiliko ambayo hujahifadhi. Uondoke hata hivyo?",
+  "Could not load the participants.": "Imeshindwa kupakia washiriki.",
+  "Could not save.": "Imeshindwa kuhifadhi.",
   "Courts this event may use": "Viwanja ambavyo shindano hili linaweza kutumia",
   "Leave all ticked to share every court (weighted by how many matches each event still has). Tick only some to keep this event on just those courts.":
     "Acha vyote vikiwa na alama ili kushiriki kila uwanja (kwa uzito wa mechi zilizobaki za kila shindano). Weka alama kwenye baadhi tu ili shindano hili libaki kwenye viwanja hivyo pekee.",
@@ -1959,6 +2017,19 @@ const SW_EXACT = {
 };
 const SW_PATTERNS = [
   [/^Court (\d+)$/, "Uwanja $1"],
+  /* Participants. The name captures use [^·] so a pattern can never swallow a
+     composed "X · Y" line before the per-segment pass gets to it. */
+  [/^(\d+) participants saved$/, "Washiriki $1 wamehifadhiwa"],
+  [/^(\d+) person$/, "mtu $1"],
+  [/^(\d+) people$/, "watu $1"],
+  [/^Two people share a name: ([^·]+)\. Make them different first\.$/,
+   "Watu wawili wana jina moja: $1. Yatofautishe kwanza."],
+  [/^Remove "([^·]+)" from the participants list\?$/, "Mwondoe \"$1\" kwenye orodha ya washiriki?"],
+  [/^Nobody is ticked for "([^·]+)" on the Participants tab yet\.$/,
+   "Hakuna aliyewekewa alama kwa \"$1\" kwenye ukurasa wa Washiriki bado."],
+  [/^(\d+) pairs filled in$/, "Jozi $1 zimejazwa"],
+  [/^(\d+) pairs filled in, (\d+) left to sort out$/, "Jozi $1 zimejazwa, $2 zimebaki kupangwa"],
+  [/^No complete pairs yet\. ([^·]+)$/, "Hakuna jozi kamili bado. $1"],
   [/^(\d+) waiting$/, "$1 zinasubiri"],
   [/^(\d+) team$/, "timu $1"],
   [/^(\d+) team is unallocated\. Put them in a group before saving, or remove them\.$/,
@@ -2580,19 +2651,38 @@ function commitHtml(app, html){
    saved one between Preview and Draw, an uploaded entrant list emptied when a
    score landed on another phone. Unsaved field values are carried across,
    keyed by which panel is on screen so changing event or tab starts clean. */
-let admShown = { key: null, vals: null, courts: null, dirty: false, skip: false };
+let admShown = { key: null, vals: null, rendered: null, courts: null, courtsRendered: null, dirty: false, skip: false };
+const ADM_SEL = 'input[id^="adm-"],select[id^="adm-"],textarea[id^="adm-"]';
+const fieldVal = el => el.type === "checkbox" ? el.checked : el.value;
 function admKey(){
   return state.view !== "admin" ? null : "e:" + state.adminEventId + "|r:" + (state.showRedraw ? 1 : 0);
+}
+/* What the panel was just rendered with. Without it the capture below could not
+   tell a field somebody typed in from one the server changed, so it carried
+   every field and pinned the whole panel to its first render: another desk
+   phone's saved settings were painted in and immediately overwritten, and the
+   next Save pushed the stale values back over them. Court restrictions were the
+   worst of it, because an untouched panel saved them back as "no restriction". */
+function admSnapshot(app){
+  const r = {};
+  app.querySelectorAll(ADM_SEL).forEach(el => { r[el.id] = fieldVal(el); });
+  admShown.rendered = r;
+  admShown.courtsRendered = Array.from(app.querySelectorAll("input.adm-court")).map(el => el.checked);
 }
 function admCapture(app){
   /* skip: the panel was just saved, so the next render must show the event's
      own values and drop the "Not saved yet" marker. */
   if (admShown.key == null || admShown.skip){ admShown.vals = null; admShown.skip = false; return; }
+  const rendered = admShown.rendered || {};
   const vals = {};
-  app.querySelectorAll('input[id^="adm-"],select[id^="adm-"],textarea[id^="adm-"]')
-    .forEach(el => { vals[el.id] = el.type === "checkbox" ? el.checked : el.value; });
+  app.querySelectorAll(ADM_SEL).forEach(el => {
+    const v = fieldVal(el);
+    if (!(el.id in rendered) || rendered[el.id] !== v) vals[el.id] = v;
+  });
   admShown.vals = vals;
-  admShown.courts = Array.from(app.querySelectorAll("input.adm-court")).map(el => el.checked);
+  const courts = Array.from(app.querySelectorAll("input.adm-court")).map(el => el.checked);
+  const was = admShown.courtsRendered;
+  admShown.courts = (was && was.length === courts.length && was.every((b, i) => b === courts[i])) ? null : courts;
   const d = document.getElementById("adm-dirty");
   admShown.dirty = !!(d && d.style.display !== "none");
 }
@@ -2614,17 +2704,50 @@ function admRestore(app){
     if (sb) sb.classList.remove("secondary");
   }
 }
+/* The same story inside the modals, and worse there. Score boxes are rendered
+   from the stored match, so a re-render between typing a correction and pressing
+   Save refilled them with the score that was already saved, and the desk saved
+   that straight back with "Score saved" on top: the correction vanished with no
+   sign it ever happened. Covers the score boxes, the per-game boxes, the
+   bracket's Edit teams selects and the off-court queue place. */
+let modShown = { key: null, vals: null, rendered: null };
+const MOD_SEL = ".score-in,#slot1,#slot2,#off-place";
+function modKey(){
+  return state.modalMatchId || state.slotEditId || state.offCourtId || null;
+}
+function modSnapshot(app){
+  const r = {};
+  app.querySelectorAll(MOD_SEL).forEach(el => { if (el.id) r[el.id] = el.value; });
+  modShown.rendered = r;
+}
+function modCapture(app){
+  if (modShown.key == null){ modShown.vals = null; return; }
+  const rendered = modShown.rendered || {};
+  const vals = {};
+  app.querySelectorAll(MOD_SEL).forEach(el => {
+    if (el.id && (!(el.id in rendered) || rendered[el.id] !== el.value)) vals[el.id] = el.value;
+  });
+  modShown.vals = vals;
+}
+function modRestore(app){
+  if (!modShown.vals || modKey() !== modShown.key) return;
+  for(const id in modShown.vals){
+    const el = document.getElementById(id);
+    if (el) el.value = modShown.vals[id];
+  }
+}
 function render(){
   const app = document.getElementById("app");
   const ae = document.activeElement;
   const typingInForm = ae && app.contains(ae) && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName) && ae.id !== "pin-input" && ae.id !== "search-input";
-  if (typingInForm && (state.view === "admin" || state.modalMatchId || state.slotEditId)){
+  if (typingInForm && (state.view === "admin" || state.modalMatchId || state.slotEditId || state.offCourtId || state.assignCourt != null)){
     state.pendingRender = true;
     return;
   }
   const restoreId = ae && ae.id;
   const restoreVal = restoreId && ae.value;
   admCapture(app);
+  modCapture(app);
 
   /* Only take over the screen when there is nothing to show. A refresh that
      fails on patchy venue wifi must not throw away a board that is already on
@@ -2638,10 +2761,14 @@ function render(){
     return;
   }
 
+  /* Participants is desk-only: the roster carries genders and DUPR ids, so the
+     tab is not even offered until the panel is unlocked. */
   const tabs = [
     ["board", "Courts"], ["schedule", "Schedule"],
-    ["standings", "Standings"], ["bracket", "Bracket"], ["admin", "Admin"]
+    ["standings", "Standings"], ["bracket", "Bracket"]
   ];
+  if (state.adminPin) tabs.push(["participants", "Participants"]);
+  tabs.push(["admin", "Admin"]);
   let html = '<div class="topbar">';
   if (store.mode === "demo") html += '<div class="demo-banner">Demo with sample data. Changes reset on refresh. Admin PIN: ' + esc(store.demoPin) + '</div>';
   /* Club badge, top left: the Nairobi Pickleball Club logo, cropped square,
@@ -2668,6 +2795,7 @@ function render(){
   else if (state.view === "schedule") html += renderSchedule();
   else if (state.view === "standings") html += renderStandings();
   else if (state.view === "bracket") html += renderBracket();
+  else if (state.view === "participants") html += renderParticipants();
   else if (state.view === "admin") html += renderAdmin();
   html += '</main>';
 
@@ -2677,8 +2805,12 @@ function render(){
   html += renderCourtAssignModal();
   html += renderOffCourtModal();
   if (!commitHtml(app, html)) return;
+  admSnapshot(app);
+  modSnapshot(app);
   admRestore(app);
+  modRestore(app);
   admShown.key = admKey();
+  modShown.key = modKey();
 
   if (restoreId){
     const el = document.getElementById(restoreId);
@@ -3634,6 +3766,8 @@ function renderAdmin(){
       '<div class="field"><label>Ending a game</label><div style="padding:2px 0 0">' +
       '<label style="display:inline-flex;align-items:center;gap:6px;font-weight:600">' +
       '<input type="checkbox" onchange="updateTimeEstimate()" id="adm-wb2"' + (evSetting(ev, "win_by_two", false) ? ' checked' : '') + '> Win by 2 in the group stage</label>' +
+      '<label style="display:inline-flex;align-items:center;gap:6px;font-weight:600;margin-left:16px">' +
+      '<input type="checkbox" onchange="updateTimeEstimate()" id="adm-fromp"' + (evSetting(ev, "from_participants", false) ? ' checked' : '') + '> Take entries from the Participants tab</label>' +
       '</div><p class="note" style="margin:2px 0 0">Off: a group game ends dead on the target, even at ' +
       (evSetting(ev, "points_to_group", 21) - 1) + '-' + evSetting(ev, "points_to_group", 21) +
       ', which keeps the group stage a predictable length on shared courts. Knockout games always play win by 2.</p></div>' +
@@ -3661,6 +3795,17 @@ function renderAdmin(){
         '<button class="btn small secondary" onclick="document.getElementById(\'adm-csv\').click()">Fill the rows from a CSV</button><br>' +
         'One entrant per row. With a header row the columns are matched by name (player, DUPR, DUPR ID); without one, names come first and any number between 1 and 8 is read as a rating. ' +
         'Got an export in some other shape? Send Drew the file and the upload can be taught to read it.</p>';
+      /* The rows can also come off the Participants tab, which is the way the
+         desk enters people once and reuses them. It fills the grid rather than
+         drawing straight away, so the roster still gets one last look. */
+      if (evSetting(ev, "from_participants", false)){
+        const pp = participantPairs(ev);
+        h += '<p class="note" style="margin-top:4px">' +
+          '<button class="btn small secondary" onclick="seedFromParticipants()">Fill the rows from Participants</button><br>' +
+          pp.ticked + ' ticked for this event, ' + pp.pairs.length + ' complete ' +
+          (pp.pairs.length === 1 ? 'pair' : 'pairs') +
+          (pp.problems.length ? '. Still to sort out: ' + esc(pp.problems.join('; ')) : '.') + '</p>';
+      }
       h += renderEntryGrid(ev);
       h += '<div class="fieldrow" style="margin-top:12px"><div class="field"><label for="adm-gsize">Target group size</label><input id="adm-gsize" type="number" min="3" max="10" oninput="repriceEstimate();updateDrawSummary()" value="' + esc(String(evSetting(ev, "group_size", 6))) + '"></div>' +
         '<div class="field"><label for="adm-seed">How to split them up</label><select id="adm-seed" onchange="updateDrawSummary()">' +
@@ -3742,7 +3887,7 @@ function renderAdmin(){
     if (!ev.active && alsoStartable.length){
       h += '<div class="field" style="margin-top:8px"><label>Start another event at the same time</label><div style="padding:2px 0 0">' +
         alsoStartable.map(x => '<label style="display:inline-flex;align-items:center;gap:5px;margin:0 14px 6px 0;font-weight:600">' +
-          '<input type="checkbox" class="adm-alsostart" value="' + jsAttr(x.id) + '"> ' + esc(x.name) + '</label>').join("") +
+          '<input type="checkbox" class="adm-alsostart" id="adm-alsostart-' + jsAttr(x.id) + '" value="' + jsAttr(x.id) + '"> ' + esc(x.name) + '</label>').join("") +
         '</div><p class="note" style="margin:2px 0 0">Tick these and the courts are split between all of them at once, by how many matches each has left. Start them one after the other instead and the first one fills every court.</p></div>';
     }
     h += ' <button class="btn small secondary" onclick="toggleHidden()">' +
@@ -4093,7 +4238,12 @@ function renderOffCourtModal(){
 /* Home is the courts board, whatever the reader was looking at. */
 function goHome(){ state.division = "main"; setView("board"); try{ window.scrollTo(0, 0); }catch(e){} }
 function setView(v){
+  if (state.view === "participants" && v !== "participants" && state.pDirty &&
+      !confirm(swText("The participants list has changes you have not saved. Leave anyway?"))) return;
   state.view = v; state.setupPreview = null;
+  /* Pulled on arrival rather than on every reload: the roster is desk-only and
+     changes far less often than the board does. */
+  if (v === "participants" && !state.pLoaded) loadParticipants().then(render);
   /* Americano is never an option under Bracket (it has none), so switching to
      Bracket while it is selected would land on a dead end; jump to the first
      event that does have a bracket instead. */
@@ -4515,7 +4665,13 @@ async function tryUnlock(){
   toast("Admin unlocked");
   render();
 }
-function adminSignOut(){ state.adminPin = null; safeSession("pb_admin_pin", null); render(); }
+function adminSignOut(){
+  state.adminPin = null; safeSession("pb_admin_pin", null);
+  /* The roster is desk-only, so it leaves with the desk. */
+  state.pRows = null; state.pLoaded = false; state.pDirty = false;
+  if (state.view === "participants") state.view = "board";
+  render();
+}
 
 /* Reads the settings panel. Returns null if something is out of range, so a
    typo in a points target can't be saved: public score entry checks against
@@ -4536,6 +4692,7 @@ function readEventSettings(ev){
   const ksEl = document.getElementById("adm-ksize");
   const ks = ksEl ? ksEl.value : String(evSetting(ev, "knockout_size", "auto"));
   const wbEl = document.getElementById("adm-wb2");
+  const fpEl = document.getElementById("adm-fromp");
   /* Court override: every box ticked means no restriction (share every court);
      a subset limits the event to those courts. Unticking them all is a mistake
      rather than a setting, since an empty list reads as "no restriction"
@@ -4566,6 +4723,7 @@ function readEventSettings(ev){
     advance_per_group: num("adm-adv", evSetting(ev, "advance_per_group", 2), 1, 4, "Advance per group"),
     group_size: num("adm-gsize", evSetting(ev, "group_size", 6), 3, 32, "Group size"),
     win_by_two: wbEl ? wbEl.checked : !!evSetting(ev, "win_by_two", false),
+    from_participants: fpEl ? fpEl.checked : !!evSetting(ev, "from_participants", false),
     courts: courts
   });
   return bad ? { error: bad } : out;
@@ -4991,6 +5149,210 @@ function renderEntryGrid(ev){
   h += '<button class="btn small secondary" onclick="addEntryRows()">Add ' + ENTRY_CHUNK + ' more rows</button>';
   return h;
 }
+/* ---------- participants ----------
+   The desk's roster of people. An entrant is whatever plays a given event, and
+   in doubles that is a pair; a participant is a human, so their ratings and
+   DUPR id are entered once and follow them into every event they tick.
+   Everything lives in state and is written back into the markup on each render,
+   which is what keeps a background score from wiping half a typed roster. */
+const P_CHUNK = 5;
+function blankParticipant(){ return { id: null, name: "", gender: "", ds: "", dd: "", did: "", entries: {} }; }
+function pRows(){
+  if (!Array.isArray(state.pRows) || !state.pRows.length)
+    state.pRows = Array.from({ length: P_CHUNK }, blankParticipant);
+  return state.pRows;
+}
+/* Only events that say they take entries this way get a tick column, so the
+   roster does not sprout thirteen of them. The tick is on the event's own
+   admin panel. */
+function participantEvents(){
+  return data.events.filter(e => e.settings && e.settings.from_participants && !isHidden(e))
+    .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
+}
+async function loadParticipants(force){
+  if (!state.adminPin) return;
+  if (state.pLoaded && !force) return;
+  const r = await store.adminListParticipants(state.adminPin);
+  if (!r.ok){ toast(r.error || "Could not load the participants."); return; }
+  const rows = (r.data || []).map(p => ({
+    id: p.id, name: p.name || "", gender: p.gender || "",
+    ds: p.dupr_singles == null ? "" : String(p.dupr_singles),
+    dd: p.dupr_doubles == null ? "" : String(p.dupr_doubles),
+    did: p.dupr_id || "", entries: p.entries || {}
+  }));
+  state.pRows = rows.concat(Array.from({ length: P_CHUNK }, blankParticipant));
+  state.pLoaded = true;
+  state.pDirty = false;
+}
+function setPCell(i, key, val){
+  const rows = pRows();
+  if (!rows[i]) return;
+  rows[i][key] = val;
+  state.pDirty = true;
+  const mark = document.getElementById("p-unsaved");
+  if (mark) mark.style.display = "";
+}
+function setPEntry(i, evId, on){
+  const rows = pRows();
+  if (!rows[i]) return;
+  const entries = Object.assign({}, rows[i].entries);
+  if (on) entries[evId] = entries[evId] || { partner: "" };
+  else delete entries[evId];
+  rows[i].entries = entries;
+  state.pDirty = true;
+  blurThenRender();
+}
+function setPPartner(i, evId, val){
+  const rows = pRows();
+  if (!rows[i] || !rows[i].entries[evId]) return;
+  rows[i].entries[evId] = Object.assign({}, rows[i].entries[evId], { partner: val });
+  state.pDirty = true;
+  const mark = document.getElementById("p-unsaved");
+  if (mark) mark.style.display = "";
+}
+function addPRows(){ pRows().push(...Array.from({ length: P_CHUNK }, blankParticipant)); blurThenRender(); }
+function clearPRow(i){
+  const rows = pRows();
+  if (!rows[i]) return;
+  const r = rows[i];
+  if (String(r.name || "").trim() &&
+      !confirm(swText('Remove "' + r.name + '" from the participants list?'))) return;
+  rows.splice(i, 1);
+  if (!rows.length) rows.push(...Array.from({ length: P_CHUNK }, blankParticipant));
+  state.pDirty = true;
+  blurThenRender();
+}
+const pNum = s => { const v = parseFloat(String(s).replace(",", ".").trim()); return Number.isFinite(v) && v >= 1 && v <= 8 ? v : null; };
+function parseParticipants(){
+  return pRows().map((r, i) => {
+    const name = String(r.name || "").trim();
+    if (!name) return null;
+    return { id: r.id || uid(), name, gender: r.gender || null,
+             dupr_singles: pNum(r.ds), dupr_doubles: pNum(r.dd),
+             dupr_id: String(r.did || "").trim() || null,
+             entries: r.entries || {}, sort_order: i };
+  }).filter(Boolean);
+}
+async function saveParticipants(){
+  const rows = parseParticipants();
+  const names = rows.map(r => r.name.toLowerCase());
+  const dupes = [...new Set(names.filter((n, i) => names.indexOf(n) !== i))];
+  if (dupes.length){ toast("Two people share a name: " + dupes.join(", ") + ". Make them different first."); return; }
+  const r = await store.adminSaveParticipants(state.adminPin, rows);
+  if (!r.ok){ toast(r.error || "Could not save."); return; }
+  state.pDirty = false;
+  toast(rows.length + " participants saved");
+  await loadParticipants(true);
+  render();
+}
+/* Ticks and partner names make pairs. Both halves have to be ticked for the
+   same event and name each other, otherwise the desk is told exactly who is
+   unmatched rather than the seeding quietly guessing. */
+function participantPairs(ev){
+  const rows = parseParticipants().filter(p => p.entries && p.entries[ev.id]);
+  const byName = new Map(rows.map(p => [p.name.toLowerCase(), p]));
+  const pairs = [], seen = new Set(), problems = [];
+  rows.forEach(p => {
+    if (seen.has(p.name.toLowerCase())) return;
+    const wanted = String((p.entries[ev.id] || {}).partner || "").trim();
+    if (!wanted){ problems.push(p.name + " has no partner"); return; }
+    const q = byName.get(wanted.toLowerCase());
+    if (!q){ problems.push(p.name + "'s partner “" + wanted + "” is not ticked for this event"); return; }
+    const back = String((q.entries[ev.id] || {}).partner || "").trim();
+    if (back.toLowerCase() !== p.name.toLowerCase()){
+      problems.push(p.name + " and " + q.name + " do not name each other");
+      return;
+    }
+    seen.add(p.name.toLowerCase()); seen.add(q.name.toLowerCase());
+    pairs.push([p, q]);
+  });
+  return { pairs, problems, ticked: rows.length };
+}
+function renderParticipants(){
+  if (!state.adminPin)
+    return '<div class="empty">Unlock the Admin tab to see the participants.</div>';
+  const rows = pRows();
+  const pevs = participantEvents();
+  const filled = rows.filter(r => String(r.name || "").trim()).length;
+  let h = '<section class="card"><h2>Participants</h2>' +
+    '<p class="note">Everyone playing the tournament, entered once. Tick the events each person is in and name their partner; the Admin tab then seeds those events straight from this list. Only the desk can see this tab.</p>';
+
+  if (!pevs.length)
+    h += '<p class="note warnnote" style="margin-top:8px">No event is taking its entries from here yet. On the Admin tab, pick an event and tick <b>Take entries from the Participants tab</b>.</p>';
+
+  h += '<div class="plabels"><span>Name</span><span>Gender</span><span>DUPR S</span><span>DUPR D</span><span>DUPR ID</span></div>';
+  h += '<div class="pgrid">';
+  rows.forEach((r, i) => {
+    const has = !!String(r.name || "").trim();
+    const cell = (key, cls, ph, extra) =>
+      '<input class="' + cls + (r[key] ? ' efilled' : '') + '" type="text" ' + (extra || "") +
+      ' placeholder="' + ph + '" value="' + esc(r[key]) + '"' +
+      ' oninput="setPCell(' + i + ',\'' + key + '\',this.value)">';
+    h += '<div class="pcard' + (has ? ' filled' : '') + '"><div class="ptop"><span class="enum">' + (i + 1) + '</span><div class="pcells">' +
+      cell("name", "pname", "Full name") +
+      '<select onchange="setPCell(' + i + ',\'gender\',this.value)">' +
+        '<option value=""' + (r.gender ? '' : ' selected') + '>Gender</option>' +
+        '<option value="M"' + (r.gender === "M" ? ' selected' : '') + '>Man</option>' +
+        '<option value="F"' + (r.gender === "F" ? ' selected' : '') + '>Woman</option></select>' +
+      cell("ds", "pnum", "Singles", 'inputmode="decimal"') +
+      cell("dd", "pnum", "Doubles", 'inputmode="decimal"') +
+      cell("did", "pnum", "DUPR ID", 'inputmode="numeric"') +
+      '</div><button class="eclear" title="Remove this person" onclick="clearPRow(' + i + ')">&times;</button></div>';
+    if (has && pevs.length){
+      h += '<div class="pentries">' + pevs.map(ev => {
+        const on = !!(r.entries && r.entries[ev.id]);
+        const partner = on ? String(r.entries[ev.id].partner || "") : "";
+        return '<div class="pentry' + (on ? ' on' : '') + '">' +
+          '<label><input type="checkbox"' + (on ? ' checked' : '') +
+          ' onchange="setPEntry(' + i + ',\'' + jsAttr(ev.id) + '\',this.checked)"> ' + esc(ev.name) + '</label>' +
+          (on ? '<input class="ppartner" type="text" placeholder="Partner" value="' + esc(partner) + '"' +
+                ' oninput="setPPartner(' + i + ',\'' + jsAttr(ev.id) + '\',this.value)">' : '') +
+          '</div>';
+      }).join("") + '</div>';
+    }
+    h += '</div>';
+  });
+  h += '</div>';
+  h += '<button class="btn small secondary" onclick="addPRows()">Add ' + P_CHUNK + ' more rows</button>';
+
+  h += '<div class="pbar"><button class="btn" onclick="saveParticipants()">Save participants</button>' +
+    '<span class="punsaved" id="p-unsaved"' + (state.pDirty ? '' : ' style="display:none"') + '>Not saved yet</span>' +
+    '<span class="spacer" style="flex:1"></span>' +
+    '<span class="note" style="margin:0">' + filled + ' ' + (filled === 1 ? 'person' : 'people') + '</span></div>';
+
+  if (pevs.length){
+    h += '<h3 style="margin-top:18px">Entries so far</h3><div class="tags">';
+    pevs.forEach(ev => {
+      const { pairs, problems, ticked } = participantPairs(ev);
+      h += '<div class="esum" style="margin:6px 0">' + esc(ev.name) + ': ' + ticked + ' ticked, ' +
+        pairs.length + ' complete ' + (pairs.length === 1 ? 'pair' : 'pairs') +
+        (problems.length ? '\nStill to sort out: ' + problems.map(esc).join('; ') : '') + '</div>';
+    });
+    h += '</div>';
+  }
+  h += '</section>';
+  return h;
+}
+/* Fill the draw grid from the roster rather than drawing straight away: the
+   desk still sees the rows, can fix a partner, and presses Draw groups itself.
+   Doubles ratings are what seed a doubles event, so those are the ones that
+   ride across. */
+async function seedFromParticipants(){
+  const ev = eventById(state.adminEventId);
+  if (!ev) return;
+  await loadParticipants(true);
+  const { pairs, problems, ticked } = participantPairs(ev);
+  if (!ticked){ toast('Nobody is ticked for "' + ev.name + '" on the Participants tab yet.'); return; }
+  if (!pairs.length){ toast("No complete pairs yet. " + problems.join("; ")); return; }
+  state.entryDoubles = true;
+  state.entryRows = pairs.map(([a, b]) => ({
+    n1: a.name, d1: a.dupr_doubles == null ? "" : String(a.dupr_doubles), i1: a.dupr_id || "",
+    n2: b.name, d2: b.dupr_doubles == null ? "" : String(b.dupr_doubles), i2: b.dupr_id || ""
+  }));
+  state.entryRows.push(...Array.from({ length: ENTRY_CHUNK }, blankEntryRow));
+  toast(pairs.length + " pairs filled in" + (problems.length ? ", " + problems.length + " left to sort out" : ""));
+  render();
+}
 function entrantMetaFor(e){
   if (!e) return {};
   const meta = {};
@@ -5291,7 +5653,8 @@ async function doChangePin(){
   setInterval(() => {
     const ae = document.activeElement;
     const typing = ae && /^(INPUT|TEXTAREA|SELECT)$/.test(ae.tagName);
-    if (!document.hidden && !typing && !state.modalMatchId && !state.slotEditId && !state.teamModalId && state.view !== "admin") render();
+    if (!document.hidden && !typing && !state.modalMatchId && !state.slotEditId && !state.teamModalId &&
+        !state.offCourtId && state.assignCourt == null && state.view !== "admin") render();
   }, 45000);
   window.__APP_READY = true;
 })();

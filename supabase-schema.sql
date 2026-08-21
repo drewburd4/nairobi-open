@@ -96,12 +96,35 @@ create table if not exists nairobi_matches (
 
 create index if not exists nairobi_matches_queue_idx on nairobi_matches (event_id, status, play_order);
 
+-- ---------- participants ----------
+-- The tournament's people, entered once and reused. An entrant row is whatever
+-- plays a given event (a pair, in doubles); a participant is a human, with the
+-- ratings and the DUPR id that follow them from event to event. `entries` maps
+-- an event id to how they enter it: {"<event id>": {"partner": "Victor O."}}.
+-- Unlike every other table here this one is NOT public: it carries gender and
+-- DUPR ids for people who never agreed to publish them, so it has no read
+-- policy and is reached only through the PIN checked functions below.
+create table if not exists nairobi_participants (
+  id uuid primary key default gen_random_uuid(),
+  name text not null,
+  gender text,                                -- 'M', 'F', or blank
+  dupr_singles numeric,
+  dupr_doubles numeric,
+  dupr_id text,
+  entries jsonb not null default '{}'::jsonb,
+  sort_order numeric,
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists nairobi_participants_order_idx on nairobi_participants (sort_order);
+
 -- ---------- row level security: public read, no direct writes ----------
 
 alter table nairobi_tournaments enable row level security;
 alter table nairobi_events enable row level security;
 alter table nairobi_entrants enable row level security;
 alter table nairobi_matches enable row level security;
+alter table nairobi_participants enable row level security;
 
 drop policy if exists "public read nairobi_tournaments" on nairobi_tournaments;
 create policy "public read nairobi_tournaments" on nairobi_tournaments for select using (true);
@@ -122,6 +145,17 @@ create policy "public read nairobi_matches" on nairobi_matches for select using 
 -- DEFINER, so they still see the column.
 revoke select on nairobi_tournaments from anon, authenticated;
 grant select (id, name, settings, created_at) on nairobi_tournaments to anon, authenticated;
+
+-- Participants get no read policy at all, and the table grants come off too:
+-- row level security is the only thing standing between the anon key and every
+-- other table here, and this one holds data that must not leak even if a
+-- policy is loosened by accident later. The functions below are SECURITY
+-- DEFINER, so they still reach it.
+revoke all on nairobi_participants from anon, authenticated;
+
+do $$ begin
+  alter publication supabase_realtime drop table nairobi_participants;
+exception when others then null; end $$;
 
 -- Same reason: realtime replays changed rows to subscribers, so leaving this
 -- table in the publication would broadcast the new hash the moment the PIN is
@@ -1108,6 +1142,29 @@ $$;
 -- autostarted=false to re-arm. start_time is naive local time from the
 -- admin's phone; the tournament runs in Nairobi, hence the fixed zone. The
 -- 12-hour lower bound keeps long-past start times from ever firing.
+--
+-- An event whose start time comes round while another one is still playing
+-- does start: the courts are shared, so the two mix in exactly as they do when
+-- the desk starts them together by hand. What never auto-starts is an event
+-- that has already been played in, which is what stops a multi-day event
+-- resuming itself on day two off day one's start time.
+--
+-- One bad start_time used to take the whole tournament's auto-start with it:
+-- the update is a single statement, so a value that passed the regex but failed
+-- the cast aborted it for every event at once, and the catch-all below then
+-- reported success. Casting inside its own handler turns that into one null row
+-- instead of a silent tournament-wide outage.
+create or replace function nairobi_ts_or_null(p_text text)
+returns timestamptz
+language plpgsql stable security definer set search_path = public
+as $$
+begin
+  return (p_text::timestamp at time zone 'Africa/Nairobi');
+exception when others then
+  return null;
+end;
+$$;
+
 create or replace function nairobi_autostart_due()
 returns void
 language plpgsql security definer set search_path = public
@@ -1123,21 +1180,13 @@ begin
     and coalesce(e.settings ->> 'hidden', '') <> 'true'
     and coalesce(e.settings ->> 'start_time', '') <> ''
     and exists (select 1 from nairobi_matches m where m.event_id = e.id)
-    and case
-      when e.settings ->> 'start_time' ~ '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}' then
-        ((e.settings ->> 'start_time')::timestamp at time zone 'Africa/Nairobi')
-          between now() - interval '45 minutes' and now() + interval '5 minutes'
-      else false
-    end
-    -- Never start on top of play already in progress. A rain delay or an
-    -- overrunning morning event used to be interrupted by the afternoon one
-    -- turning itself on and taking half the courts.
-    and not exists (
-      select 1 from nairobi_events other
-      where other.active
-        and coalesce(other.settings ->> 'format', '') <> 'americano'
-        and exists (select 1 from nairobi_matches om
-                    where om.event_id = other.id and om.status = 'scheduled'));
+    -- Never restart an event that has already been played in. A multi-day event
+    -- paused overnight must be resumed by hand: the desk decides when day two
+    -- begins, and the stored start time belongs to day one.
+    and not exists (select 1 from nairobi_matches m2
+                    where m2.event_id = e.id and m2.status = 'played')
+    and nairobi_ts_or_null(e.settings ->> 'start_time')
+        between now() - interval '12 hours' and now() + interval '5 minutes';
   get diagnostics n = row_count;
   if n > 0 then perform nairobi_assign_courts(); end if;
 exception when others then
@@ -1385,9 +1434,73 @@ begin
 end;
 $$;
 
+-- ---------- participants ----------
+-- The roster of people, kept apart from the entrants who play a given event.
+-- Both functions are the only way in: the table has no read policy and no
+-- grants, so an unlocked admin panel is the only thing that ever sees a gender
+-- or a DUPR id.
+
+create or replace function nairobi_admin_list_participants(p_pin text)
+returns setof nairobi_participants
+language plpgsql stable security definer set search_path = public
+as $$
+begin
+  if not nairobi_verify_pin(p_pin) then return; end if;
+  return query select * from nairobi_participants order by sort_order nulls last, name;
+end;
+$$;
+
+-- Save the whole roster in one go, which is what the grid on screen means. Rows
+-- carry the ids they were loaded with, so a participant keeps their identity
+-- (and their entries) across an edit; anything the payload leaves out is gone
+-- on purpose, because removing a row is how you delete someone.
+create or replace function nairobi_admin_save_participants(p_pin text, p_rows jsonb)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  keep uuid[];
+begin
+  if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  if p_rows is null or jsonb_typeof(p_rows) <> 'array' then return 'Nothing to save.'; end if;
+
+  select coalesce(array_agg((x ->> 'id')::uuid), '{}')
+    into keep
+  from jsonb_array_elements(p_rows) x
+  where x ->> 'id' is not null;
+
+  delete from nairobi_participants where not (id = any(keep));
+
+  insert into nairobi_participants (id, name, gender, dupr_singles, dupr_doubles, dupr_id, entries, sort_order, updated_at)
+  select coalesce((x ->> 'id')::uuid, gen_random_uuid()),
+         btrim(x ->> 'name'),
+         nullif(btrim(coalesce(x ->> 'gender', '')), ''),
+         (x ->> 'dupr_singles')::numeric,
+         (x ->> 'dupr_doubles')::numeric,
+         nullif(btrim(coalesce(x ->> 'dupr_id', '')), ''),
+         coalesce(x -> 'entries', '{}'::jsonb),
+         (x ->> 'sort_order')::numeric,
+         now()
+  from jsonb_array_elements(p_rows) x
+  where btrim(coalesce(x ->> 'name', '')) <> ''
+  on conflict (id) do update
+    set name = excluded.name,
+        gender = excluded.gender,
+        dupr_singles = excluded.dupr_singles,
+        dupr_doubles = excluded.dupr_doubles,
+        dupr_id = excluded.dupr_id,
+        entries = excluded.entries,
+        sort_order = excluded.sort_order,
+        updated_at = now();
+
+  return 'OK';
+end;
+$$;
+
 -- ---------- permissions ----------
 
 revoke execute on function nairobi_advance_winner(uuid, uuid) from public, anon, authenticated;
+revoke execute on function nairobi_ts_or_null(text) from public, anon, authenticated;
 revoke execute on function nairobi_assign_courts() from public, anon, authenticated;
 revoke execute on function nairobi_check_score(uuid, text, int, int, jsonb, boolean) from public, anon, authenticated;
 revoke execute on function nairobi_ev_int_setting(uuid, text, int) from public, anon, authenticated;
@@ -1416,6 +1529,8 @@ grant execute on function nairobi_admin_add_entrant(text, uuid, jsonb, jsonb) to
 grant execute on function nairobi_admin_set_bracket_teams(text, uuid, uuid, uuid) to anon, authenticated;
 grant execute on function nairobi_admin_generate_bracket(text, uuid, jsonb) to anon, authenticated;
 grant execute on function nairobi_admin_reset_bracket(text, uuid) to anon, authenticated;
+grant execute on function nairobi_admin_list_participants(text) to anon, authenticated;
+grant execute on function nairobi_admin_save_participants(text, jsonb) to anon, authenticated;
 
 -- ---------- realtime ----------
 
