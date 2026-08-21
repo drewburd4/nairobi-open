@@ -309,7 +309,7 @@ select.qplace{max-width:170px}
 .pentry.on{border-color:var(--accent); background:var(--accent-soft)}
 .pentry label{display:flex; align-items:center; gap:6px; font-size:12.5px; font-weight:700; white-space:nowrap; cursor:pointer}
 .pentry input[type=checkbox]{width:auto; padding:0; margin:0}
-.pentry input.ppartner{width:150px; padding:5px 7px; font-size:13px; font-weight:400}
+.pentry .ppartner{width:auto; max-width:200px; padding:5px 7px; font-size:13px; font-weight:400}
 .pbar{display:flex; flex-wrap:wrap; gap:8px; align-items:center; position:sticky; bottom:0; background:var(--bg); border-top:1px solid var(--line); padding:10px 0; margin-top:4px; z-index:5}
 .punsaved{font-size:12.5px; font-weight:700; color:var(--warn)}
 .gboard{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; margin-top:4px}
@@ -1881,6 +1881,7 @@ const SW_EXACT = {
   "No event is taking its entries from here yet. On the Admin tab, pick an event and tick Take entries from the Participants tab.":
     "Hakuna shindano linalochukua washiriki wake kutoka hapa bado. Kwenye ukurasa wa Msimamizi, chagua shindano na uweke alama kwenye Chukua washiriki kutoka ukurasa wa Washiriki.",
   "Take entries from the Participants tab": "Chukua washiriki kutoka ukurasa wa Washiriki",
+  "Pick a partner": "Chagua mwenzako", "Nobody else yet": "Hakuna mwingine bado",
   "Fill the rows from Participants": "Jaza mistari kutoka kwa Washiriki",
   "Save participants": "Hifadhi washiriki",
   "Entries so far": "Waliojiandikisha hadi sasa",
@@ -2371,6 +2372,25 @@ const eventById = id => data.events.find(e => e.id === id);
    out of every player-facing list. It is the safe way to clear a test event
    off the board mid-tournament; the admin event switcher still shows them. */
 const isHidden = ev => !!(ev && ev.settings && ev.settings.hidden);
+/* Archived is a step past hidden. Hidden takes an event off the player screens
+   but leaves it in the admin event switcher, which is right for something the
+   desk still has to reach. Archived takes it out of the app entirely, admin
+   panel included, so last year's results and a finished side event stop being
+   thirteen things to scroll past. Nothing in the UI sets or clears it: it is a
+   settings.archived flag set straight on the database, deliberately, so putting
+   an event back is a considered act rather than a mis-tap at the desk. */
+const isArchived = ev => !!(ev && ev.settings && ev.settings.archived);
+/* Dropped at the door rather than filtered in twenty places, so an archived
+   event cannot leak through a list somebody forgets to guard. */
+function dropArchived(d){
+  if (!d || !Array.isArray(d.events)) return d;
+  const gone = new Set(d.events.filter(isArchived).map(e => e.id));
+  if (!gone.size) return d;
+  d.events = d.events.filter(e => !gone.has(e.id));
+  if (Array.isArray(d.entrants)) d.entrants = d.entrants.filter(e => !gone.has(e.event_id));
+  if (Array.isArray(d.matches)) d.matches = d.matches.filter(m => !gone.has(m.event_id));
+  return d;
+}
 const publicEvents = () => data.events.filter(e => !isHidden(e));
 const activeEvents = () => data.events.filter(e => e.active && !isHidden(e)).sort((a, b) => a.sort_order - b.sort_order);
 const courtsCount = () => (data.tournament && data.tournament.settings && data.tournament.settings.courts) || 4;
@@ -4512,7 +4532,7 @@ async function reload(background){
       else fresh.matches = data.matches.filter(m => !now.has(m.event_id)).concat(fresh.matches || []);
     }
     if (gen !== loadGen) return;   /* a newer reload superseded this one */
-    data = fresh;
+    data = dropArchived(fresh);
     state.loadError = null;
     maybeBackup();
     if (state.eventId && !eventById(state.eventId)) state.eventId = null;
@@ -5367,8 +5387,11 @@ function pRows(){
 /* Only events that say they take entries this way get a tick column, so the
    roster does not sprout thirteen of them. The tick is on the event's own
    admin panel. */
+/* Hidden means hidden from players, not from the desk: an event is usually
+   still hidden while its roster is being built, so this list deliberately
+   ignores that flag and only asks whether the event takes its entries here. */
 function participantEvents(){
-  return data.events.filter(e => e.settings && e.settings.from_participants && !isHidden(e))
+  return data.events.filter(e => e.settings && e.settings.from_participants)
     .sort((a, b) => (a.sort_order || 0) - (b.sort_order || 0));
 }
 async function loadParticipants(force){
@@ -5389,6 +5412,20 @@ async function loadParticipants(force){
 function setPCell(i, key, val){
   const rows = pRows();
   if (!rows[i]) return;
+  /* A rename has to follow the person into every partner box pointing at them,
+     or the pair quietly stops counting. */
+  if (key === "name"){
+    const was = String(rows[i].name || "").trim();
+    if (was && was !== String(val || "").trim()){
+      rows.forEach(r => {
+        if (r === rows[i] || !r.entries) return;
+        Object.keys(r.entries).forEach(evId => {
+          if (String(r.entries[evId].partner || "").trim().toLowerCase() === was.toLowerCase())
+            r.entries[evId] = Object.assign({}, r.entries[evId], { partner: val });
+        });
+      });
+    }
+  }
   rows[i][key] = val;
   state.pDirty = true;
   const mark = document.getElementById("p-unsaved");
@@ -5397,6 +5434,9 @@ function setPCell(i, key, val){
 function setPEntry(i, evId, on){
   const rows = pRows();
   if (!rows[i]) return;
+  /* Dropping out of an event leaves the partner free rather than pointing at
+     somebody who is no longer in it. */
+  if (!on) setPPartnerRaw(rows, i, evId, "");
   const entries = Object.assign({}, rows[i].entries);
   if (on) entries[evId] = entries[evId] || { partner: "" };
   else delete entries[evId];
@@ -5404,13 +5444,50 @@ function setPEntry(i, evId, on){
   state.pDirty = true;
   blurThenRender();
 }
-function setPPartner(i, evId, val){
+/* The reciprocal clear, without the re-render setPPartner does. */
+function setPPartnerRaw(rows, i, evId, val){
+  const me = rows[i];
+  if (!me || !me.entries || !me.entries[evId]) return;
+  const was = String(me.entries[evId].partner || "").trim();
+  if (was){
+    const other = rows.find(r => r !== me && String(r.name || "").trim().toLowerCase() === was.toLowerCase()
+                              && r.entries && r.entries[evId]);
+    if (other) other.entries[evId] = Object.assign({}, other.entries[evId], { partner: val });
+  }
+  me.entries[evId] = Object.assign({}, me.entries[evId], { partner: val });
+}
+/* Picking a partner sets it on both people at once, and frees whoever either
+   of them was previously down with. Typing the name by hand was the whole
+   source of "these two do not name each other": one side gets updated, the
+   other keeps pointing somewhere else, and the pair silently does not count. */
+function setPPartner(i, evId, name){
   const rows = pRows();
-  if (!rows[i] || !rows[i].entries[evId]) return;
-  rows[i].entries[evId] = Object.assign({}, rows[i].entries[evId], { partner: val });
+  const me = rows[i];
+  if (!me || !me.entries[evId]) return;
+  const key = n => String(n || "").trim().toLowerCase();
+  const partnerOf = r => (r && r.entries && r.entries[evId]) ? String(r.entries[evId].partner || "").trim() : "";
+  const setP = (r, v) => { if (r && r.entries && r.entries[evId])
+    r.entries[evId] = Object.assign({}, r.entries[evId], { partner: v }); };
+  const find = n => rows.find(r => r !== me && key(r.name) === key(n) && r.entries && r.entries[evId]);
+
+  /* Whoever I was with is now free. */
+  const old = find(partnerOf(me));
+  if (old) setP(old, "");
+
+  if (!String(name || "").trim()){ setP(me, ""); }
+  else {
+    const them = find(name);
+    if (!them){ setP(me, ""); }
+    else {
+      /* And whoever they were with is free too. */
+      const theirs = find(partnerOf(them));
+      if (theirs && theirs !== me) setP(theirs, "");
+      setP(me, them.name);
+      setP(them, me.name);
+    }
+  }
   state.pDirty = true;
-  const mark = document.getElementById("p-unsaved");
-  if (mark) mark.style.display = "";
+  blurThenRender();
 }
 function addPRows(){ pRows().push(...Array.from({ length: P_CHUNK }, blankParticipant)); blurThenRender(); }
 function clearPRow(i){
@@ -5504,12 +5581,29 @@ function renderParticipants(){
       h += '<div class="pentries">' + pevs.map(ev => {
         const on = !!(r.entries && r.entries[ev.id]);
         const partner = on ? String(r.entries[ev.id].partner || "") : "";
+        let pick = '';
+        if (on){
+          /* Everyone else already ticked for this event. Empty for the first
+             person in, which is the honest answer: there is nobody to pair
+             with yet. Anyone already taken says who by, and picking them moves
+             them, so a mis-pairing is one tap to fix rather than four edits. */
+          const mates = rows.filter((x, j) => j !== i && String(x.name || "").trim() &&
+                                    x.entries && x.entries[ev.id]);
+          pick = '<select class="ppartner" onchange="setPPartner(' + i + ',\'' + jsAttr(ev.id) + '\',this.value)">' +
+            '<option value=""' + (partner ? '' : ' selected') + '>' +
+            (mates.length ? 'Pick a partner' : 'Nobody else yet') + '</option>' +
+            mates.map(x => {
+              const theirs = String((x.entries[ev.id] || {}).partner || "").trim();
+              const taken = theirs && theirs.toLowerCase() !== String(r.name || "").trim().toLowerCase();
+              return '<option value="' + esc(x.name) + '"' +
+                (partner.toLowerCase() === String(x.name).trim().toLowerCase() ? ' selected' : '') + '>' +
+                esc(x.name) + (taken ? ' — with ' + esc(theirs) : '') + '</option>';
+            }).join("") + '</select>';
+        }
         return '<div class="pentry' + (on ? ' on' : '') + '">' +
           '<label><input type="checkbox"' + (on ? ' checked' : '') +
           ' onchange="setPEntry(' + i + ',\'' + jsAttr(ev.id) + '\',this.checked)"> ' + esc(ev.name) + '</label>' +
-          (on ? '<input class="ppartner" type="text" placeholder="Partner" value="' + esc(partner) + '"' +
-                ' oninput="setPPartner(' + i + ',\'' + jsAttr(ev.id) + '\',this.value)">' : '') +
-          '</div>';
+          pick + '</div>';
       }).join("") + '</div>';
     }
     h += '</div>';
