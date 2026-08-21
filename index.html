@@ -97,6 +97,14 @@ button.mast-left:hover,button.mast-left:focus-visible{background:var(--accent-so
 .microlabel{font-size:11px; font-weight:800; letter-spacing:.09em; text-transform:uppercase; color:var(--muted)}
 .tag{display:inline-block; font-size:11px; font-weight:700; padding:2px 7px; border-radius:5px; background:var(--accent-soft); color:var(--accent); white-space:nowrap}
 .tag.good{background:var(--good-soft); color:var(--good)}
+/* A changed score is marked wherever the match appears, for everyone. */
+.tag.corr{background:var(--bg); color:var(--muted); border:1px solid var(--line); font-weight:600}
+.hist{margin-top:10px; border-top:1px solid var(--line); padding-top:8px}
+.hist summary{font-size:12.5px; font-weight:700; color:var(--muted); cursor:pointer; list-style:none}
+.hist summary::-webkit-details-marker{display:none}
+.hist summary::before{content:"▸ "; color:var(--muted)}
+.hist[open] summary::before{content:"▾ "}
+.histline{font-size:12.5px; color:var(--muted); padding:3px 0 0 14px; font-variant-numeric:tabular-nums}
 .tag.warn{background:var(--warn-soft); color:var(--warn)}
 .tag.plain{background:transparent; border:1px solid var(--line); color:var(--muted)}
 .btn{display:inline-block; padding:9px 14px; border-radius:8px; font-weight:700; font-size:14px; background:var(--accent); color:var(--accent-ink); border:1px solid var(--accent); text-align:center}
@@ -422,15 +430,20 @@ function makeGroups(names, target, rand){
    even spread of ratings. Unrated entries sort last (in pasted order) and fill
    the tail. Groups that hit their size are skipped, so uneven sizes from
    groupSizes still come out full. */
+/* Seeds are dealt straight across the groups and then round again from the
+   first: with three groups, 1-2-3 go to A-B-C, then 4-5-6 to A-B-C, and so on.
+   Drew's call over a snake, which reverses every other pass. A snake evens the
+   groups out (A gets seeds 1 and 6, C gets 3 and 4); dealing straight gives
+   group A the 1st, 4th and 7th seeds, so it is the tougher group by design. */
 function makeSeededGroups(entries, target){
   const sizes = groupSizes(entries.length, target);
   const ordered = entries.slice().sort((a, b) => (b.dupr != null ? b.dupr : -1) - (a.dupr != null ? a.dupr : -1));
   const groups = sizes.map((s, i) => ({ name: groupLetter(i), size: s, members: [] }));
   let idx = 0;
+  /* Groups can be uneven, so a full one is skipped and the deal carries on
+     round the rest rather than dropping anybody. */
   for(let r = 0; idx < ordered.length && r < entries.length + 2; r++){
-    const order = groups.map((_, i) => i);
-    if (r % 2) order.reverse();
-    for(const gi of order){
+    for(let gi = 0; gi < groups.length; gi++){
       if (idx >= ordered.length) break;
       if (groups[gi].members.length < groups[gi].size) groups[gi].members.push(ordered[idx++].name);
     }
@@ -1055,6 +1068,20 @@ function demoStore(){
     }
   }
 
+  /* Mirrors nairobi_score_text / nairobi_log_score so the offline build shows
+     the same history the live one does. */
+  function scoreText(m){
+    if (!m || m.status !== "played" || m.score1 == null) return null;
+    if (m.walkover) return "walkover";
+    if (Array.isArray(m.games) && m.games.length) return m.games.map(g => g[0] + "-" + g[1]).join(", ");
+    return m.score1 + "-" + m.score2;
+  }
+  function logScore(matchId, action, from, to, byDesk){
+    if (from === to) return;
+    db.log = db.log || [];
+    db.log.push({ id: uid(), match_id: matchId, at: new Date().toISOString(),
+                  action, from_text: from, to_text: to, by_desk: !!byDesk });
+  }
   function applyScore(m, s1, s2, games, isAdmin, walkover){
     const pts = settingFor(m, "points_to");
     const bo = settingFor(m, "best_of");
@@ -1071,8 +1098,42 @@ function demoStore(){
       if (err) return err;
       m.score1 = s1; m.score2 = s2; m.games = null;
     }
-    m.status = "played"; m.postponed = false; m.court = null;
-    m.walkover = !!walkover;
+    m.status = "played"; m.postponed = false; m.court = null; m.held = false;
+    m.walkover = !!walkover; m.retired = null;
+    return null;
+  }
+  /* Mirror of nairobi_admin_retire: completed games stand, the game in progress
+     is finished for the opponent, and the opponent takes the match. */
+  function applyRetire(m, retireeId, s1, s2, games){
+    if (retireeId !== m.entrant1_id && retireeId !== m.entrant2_id) return "Say which team retired.";
+    const winSlot = retireeId === m.entrant1_id ? 2 : 1;
+    const pts = settingFor(m, "points_to"), bo = settingFor(m, "best_of");
+    if (bo > 1){
+      const g = (games || []).map(x => [parseInt(x[0], 10), parseInt(x[1], 10)]);
+      if (!g.length) return "Enter the games that were played before the retirement.";
+      if (g.length > bo) return "Best of " + bo + ": that is too many games.";
+      if (g.some(x => !Number.isInteger(x[0]) || !Number.isInteger(x[1]) || x[0] < 0 || x[1] < 0))
+        return "Enter both scores as whole numbers.";
+      let w1 = g.filter(x => x[0] > x[1]).length, w2 = g.filter(x => x[1] > x[0]).length;
+      const last = g[g.length - 1];
+      if (Math.max(last[0], last[1]) < pts){
+        if (last[0] > last[1]) w1--; else if (last[1] > last[0]) w2--;
+        if (winSlot === 1){ last[0] = Math.max(pts, last[1] + 1); w1++; }
+        else { last[1] = Math.max(pts, last[0] + 1); w2++; }
+      }
+      const need = Math.floor(bo / 2) + 1;
+      if (winSlot === 1){ m.score1 = Math.max(w1, need); m.score2 = Math.min(w2, m.score1 - 1); }
+      else { m.score2 = Math.max(w2, need); m.score1 = Math.min(w1, m.score2 - 1); }
+      m.games = g;
+    } else {
+      if (!Number.isInteger(s1) || !Number.isInteger(s2) || s1 < 0 || s2 < 0)
+        return "Enter the score as it stood when they retired.";
+      m.score1 = s1; m.score2 = s2; m.games = null;
+      if (winSlot === 1 && m.score1 <= m.score2) m.score1 = Math.max(pts, m.score2 + 1);
+      if (winSlot === 2 && m.score2 <= m.score1) m.score2 = Math.max(pts, m.score1 + 1);
+    }
+    m.status = "played"; m.postponed = false; m.court = null; m.held = false;
+    m.walkover = false; m.retired = retireeId;
     return null;
   }
 
@@ -1101,6 +1162,7 @@ function demoStore(){
     async loadAll(activeOnly){
       autostartDue();
       const snap = JSON.parse(JSON.stringify(db));
+      snap.log = snap.log || [];
       if (activeOnly){
         const ids = new Set(snap.events.filter(e => e.active).map(e => e.id));
         snap.matches = snap.matches.filter(m => ids.has(m.event_id));
@@ -1115,8 +1177,10 @@ function demoStore(){
       if (m.status === "played") return fail("A score is already in. Ask the desk to change it.");
       if (!m.entrant1_id || !m.entrant2_id) return fail("Teams for this match aren't decided yet.");
       if (m.court == null) return fail("This match isn't on a court yet. The score is entered from the Courts tab once it's called; corrections go through the desk.");
+      const was = scoreText(m);
       const err = applyScore(m, s1, s2, games, false, false);
       if (err) return fail(err);
+      logScore(m.id, "score", was, scoreText(m), false);
       advanceWinner(m);
       assignCourtsGlobal(db);
       notify(); return ok();
@@ -1154,7 +1218,23 @@ function demoStore(){
           return fail("The next round already has a score. Clear it first.");
       }
       const oldW = m.status === "played" ? (m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id) : null;
+      const was = scoreText(m);
       applyScore(m, s1, s2, games, true, walkover);
+      logScore(m.id, walkover ? "walkover" : "score", was, scoreText(m), true);
+      advanceWinner(m, oldW);
+      assignCourtsGlobal(db);
+      notify(); return ok();
+    },
+    async adminRetire(pin, matchId, retireeId, s1, s2, games){
+      if (!checkPin(pin)) return fail("Wrong PIN.");
+      const m = findMatch(matchId);
+      if (!m) return fail("Match not found.");
+      if (!m.entrant1_id || !m.entrant2_id) return fail("Teams for this match aren't decided yet.");
+      const oldW = m.status === "played" ? (m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id) : null;
+      const was = scoreText(m);
+      const err = applyRetire(m, retireeId, s1, s2, games);
+      if (err) return fail(err);
+      logScore(m.id, "retire", was, scoreText(m), true);
       advanceWinner(m, oldW);
       assignCourtsGlobal(db);
       notify(); return ok();
@@ -1174,8 +1254,10 @@ function demoStore(){
           else if (nm.entrant2_id === w) nm.entrant2_id = null;
         }
       }
-      m.score1 = null; m.score2 = null; m.games = null; m.walkover = false;
-      m.status = "scheduled"; m.court = null;
+      const was = scoreText(m);
+      m.score1 = null; m.score2 = null; m.games = null; m.walkover = false; m.retired = null;
+      m.status = "scheduled"; m.court = null; m.held = false;
+      logScore(m.id, "clear", was, null, true);
       assignCourtsGlobal(db);
       notify(); return ok();
     },
@@ -1528,6 +1610,8 @@ function liveStore(){
         }catch(_){}
         debouncedNotify();
       })
+      /* A correction has to reach the other phones as fast as the score did. */
+      .on("postgres_changes", { event: "*", schema: "public", table: "nairobi_match_log" }, debouncedNotify)
       .subscribe();
     setInterval(() => { if (document.visibilityState === "visible") notify(); }, 180000);
     document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") notify(); });
@@ -1570,9 +1654,12 @@ function liveStore(){
       } else {
         ma = await c.from("nairobi_matches").select("*").order("play_order");
       }
-      const err = t.error || ev.error || en.error || ma.error;
+      /* One row per score write, so this stays tiny next to the matches. */
+      const lg = await c.from("nairobi_match_log").select("*").order("at");
+      const err = t.error || ev.error || en.error || ma.error || lg.error;
       if (err) throw new Error(err.message);
-      return { tournament: (t.data && t.data[0]) || null, events: ev.data || [], entrants: en.data || [], matches: ma.data || [] };
+      return { tournament: (t.data && t.data[0]) || null, events: ev.data || [], entrants: en.data || [],
+               matches: ma.data || [], log: lg.data || [] };
     },
     verifyPin: pin => rpc("nairobi_verify_pin", { p_pin: pin }).then(r =>
       r.ok && r.data === true ? { ok: true } : { ok: false, error: r.error || "Wrong PIN." }),
@@ -1580,6 +1667,7 @@ function liveStore(){
     submitScore: (id, s1, s2, games) => rpc("nairobi_submit_score", { p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null }),
     adminSubmitScore: (pin, id, s1, s2, games, walkover, hadScore) => rpc("nairobi_admin_submit_score", { p_pin: pin, p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null, p_walkover: !!walkover, p_had_score: hadScore == null ? null : !!hadScore }),
     adminClearScore: (pin, id) => rpc("nairobi_admin_clear_score", { p_pin: pin, p_match_id: id }),
+    adminRetire: (pin, id, retireeId, s1, s2, games) => rpc("nairobi_admin_retire", { p_pin: pin, p_match_id: id, p_retiree_id: retireeId, p_score1: s1 == null ? null : s1, p_score2: s2 == null ? null : s2, p_games: games || null }),
     adminPostpone: (pin, id, toEnd) => rpc("nairobi_admin_postpone", { p_pin: pin, p_match_id: id, p_to_end: !!toEnd }),
     adminPlayNext: (pin, id) => rpc("nairobi_admin_play_next", { p_pin: pin, p_match_id: id }),
     adminSwapOut: (pin, id) => rpc("nairobi_admin_swap_out", { p_pin: pin, p_match_id: id }),
@@ -1624,7 +1712,7 @@ window.__APP_ERRORS = [];
 window.addEventListener("error", e => window.__APP_ERRORS.push(String(e.message)));
 
 const store = (SUPABASE_URL && SUPABASE_ANON_KEY) ? liveStore() : demoStore();
-let data = { tournament: null, events: [], entrants: [], matches: [] };
+let data = { tournament: null, events: [], entrants: [], matches: [], log: [] };
 const state = {
   view: "board", eventId: null, search: "", roundFilter: "all",
   standingsFilter: "all",
@@ -1773,6 +1861,21 @@ const SW_EXACT = {
   "Advance per group": "Wanaofuzu kwa kundi", "Group size": "Ukubwa wa kundi",
   "Ending a game": "Mwisho wa gemu",
   "Win by 2 in the group stage": "Ushindi kwa 2 katika hatua ya makundi",
+  /* ---- retirement and the score history ---- */
+  "Someone had to stop mid-match? Fill in the score as it stood, then say who retired:":
+    "Kuna aliyelazimika kusimama katikati ya mechi? Jaza matokeo yalivyokuwa, kisha useme nani amejitoa:",
+  "Fill in the score as it stood first, then say who retired.":
+    "Jaza kwanza matokeo yalivyokuwa, kisha useme nani amejitoa.",
+  "Fill in the games that were played first, then say who retired.":
+    "Jaza kwanza michezo iliyochezwa, kisha useme nani amejitoa.",
+  "Enter the games that were played before the retirement.": "Weka michezo iliyochezwa kabla ya kujitoa.",
+  "Enter the score as it stood when they retired.": "Weka matokeo yalivyokuwa walipojitoa.",
+  "Say which team retired.": "Sema timu ipi imejitoa.",
+  "Retirement recorded": "Kujitoa kumerekodiwa",
+  "This score was changed": "Matokeo haya yalibadilishwa",
+  "Score history": "Historia ya matokeo",
+  "corrected": "yamerekebishwa",
+  "This score was changed.": "Matokeo haya yalibadilishwa.",
   /* ---- participants ---- */
   "Participants": "Washiriki",
   "Unlock the Admin tab to see the participants.": "Fungua ukurasa wa Msimamizi ili kuona washiriki.",
@@ -2020,6 +2123,12 @@ const SW_PATTERNS = [
   /* Participants. The name captures use [^·] so a pattern can never swallow a
      composed "X · Y" line before the per-segment pass gets to it. */
   [/^(\d+) participants saved$/, "Washiriki $1 wamehifadhiwa"],
+  /* Retirement and the score history. [^·] again so nothing swallows a
+     composed line before the per-segment pass reaches it. */
+  [/^([^·]+) retired\. The games they finished stand and count\.$/,
+   "$1 alijitoa. Michezo waliyomaliza inabaki na inahesabika."],
+  [/^([^·]+) retired, so ([^·]+) wins\? The games already finished stand and their points count\.$/,
+   "$1 amejitoa, kwa hiyo $2 anashinda? Michezo iliyokwisha malizika inabaki na alama zake zinahesabika."],
   [/^(\d+) person$/, "mtu $1"],
   [/^(\d+) people$/, "watu $1"],
   [/^Two people share a name: ([^·]+)\. Make them different first\.$/,
@@ -2403,6 +2512,14 @@ function koLabel(m){
   return roundLabelFor(m.bracket_round, total);
 }
 function roundName(m){ return m.stage === "knockout" ? koLabel(m) : "Round " + m.round; }
+/* Every recorded change to one match's score, oldest first. */
+function matchLog(id){
+  return (data.log || []).filter(e => e.match_id === id)
+    .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+}
+/* True once a score has been written more than once: the match everybody is
+   about to argue over. */
+const wasCorrected = id => matchLog(id).length > 1;
 function gamesStr(m){
   if (Array.isArray(m.games) && m.games.length) return m.games.map(g => g[0] + "-" + g[1]).join(", ");
   return null;
@@ -3153,7 +3270,9 @@ function scheduleRow(m, withScore){
     if (played){
       const gs = gamesStr(m);
       res = '<span class="res">' + (gs ? esc(gs) : m.score1 + '-' + m.score2) + '</span>' +
-        (m.walkover ? ' <span class="tag warn">W/O</span>' : '');
+        (m.walkover ? ' <span class="tag warn">W/O</span>' : '') +
+        (m.retired ? ' <span class="tag warn">Ret.</span>' : '') +
+        (wasCorrected(m.id) ? ' <span class="tag corr" title="This score was changed">corrected</span>' : '');
     }
     else if (m.court != null) res = '<span class="res pending">Court ' + m.court + '</span>';
     else if (m.postponed) res = '<span class="res pending">Postponed</span>';
@@ -3395,6 +3514,7 @@ function renderBracket(){
   const total = Math.max(...ko.map(m => m.bracket_round));
   const bodyH = bkBodyH(total);
   const wo = ' <span class="bktag">W/O</span>';
+  const ret = ' <span class="bktag">Ret.</span>';
   const matchCell = (m, r, j) => {
     const n1 = entrantName(m.entrant1_id), n2 = entrantName(m.entrant2_id);
     const played = m.status === "played" && m.score1 != null;
@@ -3407,8 +3527,10 @@ function renderBracket(){
       ? m.games.map(g => g[n - 1]).join(' ')
       : (n === 1 ? m.score1 : m.score2);
     const rows =
-      bkTeamRow(n1 ? esc(n1) : 'TBD', bkSideCls(!!n1, w1, played), played ? side(1) : null, m.walkover && w1 ? wo : '') +
-      bkTeamRow(n2 ? esc(n2) : (bye ? 'BYE' : 'TBD'), bkSideCls(!!n2, w2, played), played ? side(2) : null, m.walkover && w2 ? wo : '');
+      bkTeamRow(n1 ? esc(n1) : 'TBD', bkSideCls(!!n1, w1, played), played ? side(1) : null,
+                m.walkover && w1 ? wo : (m.retired && w1 ? ret : '')) +
+      bkTeamRow(n2 ? esc(n2) : (bye ? 'BYE' : 'TBD'), bkSideCls(!!n2, w2, played), played ? side(2) : null,
+                m.walkover && w2 ? wo : (m.retired && w2 ? ret : ''));
     const top = bkCenter(r, j) - BK_HALF;
     const clickable = !bye && m.entrant1_id && m.entrant2_id;
     const editable = !!(state.adminPin && m.status === "scheduled" && !bye);
@@ -3809,7 +3931,7 @@ function renderAdmin(){
       h += renderEntryGrid(ev);
       h += '<div class="fieldrow" style="margin-top:12px"><div class="field"><label for="adm-gsize">Target group size</label><input id="adm-gsize" type="number" min="3" max="10" oninput="repriceEstimate();updateDrawSummary()" value="' + esc(String(evSetting(ev, "group_size", 6))) + '"></div>' +
         '<div class="field"><label for="adm-seed">How to split them up</label><select id="adm-seed" onchange="updateDrawSummary()">' +
-        '<option value="dupr" selected>Snake by DUPR (strongest spread evenly)</option>' +
+        '<option value="dupr" selected>By DUPR (seeds dealt A, B, C, then round again)</option>' +
         '<option value="random">Random draw</option>' +
         '<option value="order">Keep the order above</option></select></div></div>' +
         '<div class="esum" id="adm-summary">' + esc(drawSummaryText(ev)) + '</div>' +
@@ -4010,6 +4132,40 @@ function renderScoreModal(){
       '<button class="btn small secondary" onclick="walkover(\'' + m.id + '\', 1)">W/O · ' + esc(n1) + '</button>' +
       '<button class="btn small secondary" onclick="walkover(\'' + m.id + '\', 2)">W/O · ' + esc(n2) + '</button></div>';
   };
+  /* A retirement is not a no-show: they played, so the score boxes above are
+     filled in as far as the match got and these buttons say who stopped. The
+     rest of the game in progress goes to the opponent and the completed games
+     stand, points and all. */
+  const retireRow = () => {
+    if (!isAdmin || !m.entrant1_id || !m.entrant2_id) return '';
+    return '<p class="note" style="margin-top:10px">Someone had to stop mid-match? Fill in the score as it stood, then say who retired:</p>' +
+      '<div class="actions" style="margin-top:4px">' +
+      '<button class="btn small secondary" onclick="retire(\'' + m.id + '\', 1)">Ret. · ' + esc(n1) + '</button>' +
+      '<button class="btn small secondary" onclick="retire(\'' + m.id + '\', 2)">Ret. · ' + esc(n2) + '</button></div>';
+  };
+  /* Every change to this score, for everyone. The desk being seen to change a
+     score is what settles the argument; a silent correction is what starts it. */
+  const historyRow = () => {
+    const log = matchLog(m.id);
+    if (!log.length) return '';
+    /* Built in both languages here rather than through the dictionary: too many
+       moving parts for a text-node pattern to match cleanly, which is the same
+       reason the wait estimate builds its own sentence. */
+    const sw = state.lang === "sw";
+    const line = e => {
+      const when = e.at ? new Date(e.at).toLocaleTimeString(sw ? "sw" : [], { hour: "numeric", minute: "2-digit" }) : "";
+      const who = sw ? (e.by_desk ? "meza" : "wachezaji") : (e.by_desk ? "the desk" : "the players");
+      if (e.action === "clear") return when + " · " + (sw ? "imefutwa na " + who : "cleared by " + who);
+      if (!e.from_text)
+        return when + " · " + (sw ? "imewekwa na " + who + " kama " + e.to_text : "entered by " + who + " as " + e.to_text);
+      return when + " · " + (sw
+        ? "imebadilishwa na " + who + " kutoka " + e.from_text + " hadi " + e.to_text
+        : "changed by " + who + " from " + e.from_text + " to " + e.to_text);
+    };
+    return '<details class="hist"' + (log.length > 1 ? ' open' : '') + '>' +
+      '<summary>' + (log.length > 1 ? 'This score was changed' : 'Score history') + '</summary>' +
+      log.map(e => '<div class="histline">' + esc(line(e)) + '</div>').join("") + '</details>';
+  };
 
   if (played && !isAdmin){
     h += '<div class="score-line"><label>' + esc(n1) + '</label><span style="font-size:22px;font-weight:800;font-variant-numeric:tabular-nums">' + m.score1 + '</span></div>';
@@ -4017,6 +4173,8 @@ function renderScoreModal(){
     const gs = gamesStr(m);
     if (gs) h += '<p class="note">Games: ' + esc(gs) + '</p>';
     if (m.walkover) h += '<p class="note">Walkover.</p>';
+    if (m.retired) h += '<p class="note">' + esc(entrantName(m.retired)) + ' retired. The games they finished stand and count.</p>';
+    h += historyRow();
     h += '<p class="note">Score already recorded. Spot a mistake? Ask at the desk and an organizer can fix it.</p>';
     h += '<div class="actions"><span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Close</button></div>';
   } else if (infoOnly){
@@ -4068,7 +4226,7 @@ function renderScoreModal(){
     h += '<div class="actions">' + adminExtras() +
       '<span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Close</button>' +
       '<button class="btn" onclick="saveScore(\'' + m.id + '\')">' + (isAdmin ? 'Save (admin)' : 'Save score') + '</button></div>';
-    h += walkoverRow();
+    h += walkoverRow() + retireRow() + historyRow();
   } else {
     h += '<div class="score-line"><label for="score1">' + esc(n1) + '</label><input class="score-in" id="score1" type="number" inputmode="numeric" min="0" value="' + (played ? m.score1 : '') + '"></div>';
     h += '<div class="score-line"><label for="score2">' + esc(n2) + '</label><input class="score-in" id="score2" type="number" inputmode="numeric" min="0" value="' + (played ? m.score2 : '') + '"></div>';
@@ -4077,7 +4235,7 @@ function renderScoreModal(){
     h += '<div class="actions">' + adminExtras() +
       '<span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Close</button>' +
       '<button class="btn" onclick="saveScore(\'' + m.id + '\')">' + (isAdmin ? 'Save (admin)' : 'Save score') + '</button></div>';
-    h += walkoverRow();
+    h += walkoverRow() + retireRow() + historyRow();
   }
   h += '</div></div>';
   return h;
@@ -4113,6 +4271,7 @@ function renderTeamModal(){
       const gs = gamesStr(m);
       res = '<span class="tmres ' + (mine > theirs ? 'w' : 'l') + '">' + (mine > theirs ? 'W' : 'L') + ' ' + mine + '-' + theirs +
         (m.walkover ? ' <span class="tmgames">W/O</span>' : '') +
+        (m.retired ? ' <span class="tmgames">Ret.</span>' : '') +
         (gs ? ' <span class="tmgames">(' + esc(gs) + ')</span>' : '') + '</span>';
     } else if (bye){
       res = '<span class="tmres pending">Bye</span>';
@@ -4469,6 +4628,37 @@ async function walkover(matchId, side){
   if (!r.ok){ const errEl = document.getElementById("score-err"); if (errEl) errEl.textContent = swText(r.error); else toast(r.error); return; }
   state.modalMatchId = null;
   toast("Walkover recorded");
+  await reload();
+}
+/* A retirement, not a no-show. The score boxes above hold the match as far as
+   it got; the server finishes the game in progress for the opponent, keeps the
+   completed games, and records who stopped. */
+async function retire(matchId, side){
+  const m = data.matches.find(x => x.id === matchId);
+  if (!m) return;
+  const errEl = () => document.getElementById("score-err");
+  const show = msg => { const e = errEl(); if (e && e.isConnected) e.textContent = swText(msg); else toast(msg); };
+  const retiree = side === 1 ? m.entrant1_id : m.entrant2_id;
+  const who = entrantName(retiree), other = entrantName(side === 1 ? m.entrant2_id : m.entrant1_id);
+  const bo = matchBestOf(m);
+  let s1 = null, s2 = null, games = null;
+  if (bo > 1){
+    games = collectGames(bo);
+    if (!games || !games.length){ show("Fill in the games that were played first, then say who retired."); return; }
+  } else {
+    const a = document.getElementById("score1"), b = document.getElementById("score2");
+    s1 = a ? parseInt(a.value, 10) : NaN;
+    s2 = b ? parseInt(b.value, 10) : NaN;
+    if (!Number.isInteger(s1) || !Number.isInteger(s2)){
+      show("Fill in the score as it stood first, then say who retired.");
+      return;
+    }
+  }
+  if (!confirm(swText(who + " retired, so " + other + " wins? The games already finished stand and their points count."))) return;
+  const r = await store.adminRetire(state.adminPin, matchId, retiree, s1, s2, games);
+  if (!r.ok){ show(r.error || "Something went wrong."); return; }
+  state.modalMatchId = null;
+  toast("Retirement recorded");
   await reload();
 }
 async function clearScore(matchId){
@@ -5602,7 +5792,8 @@ function downloadResults(allEvents){
        nothing imports as a played result. */
     const games = m.walkover ? [] : (Array.isArray(m.games) && m.games.length ? m.games : [[m.score1, m.score2]]);
     for(let g = 0; g < maxGames; g++) row.push(games[g] ? games[g][0] : "", games[g] ? games[g][1] : "");
-    row.push(entrantName(m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id) || "", m.walkover ? "Walkover" : "");
+    row.push(entrantName(m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id) || "",
+             m.walkover ? "Walkover" : m.retired ? "Retired: " + (entrantName(m.retired) || "") : "");
     lines.push(row.map(csvCell).join(","));
   });
   const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });

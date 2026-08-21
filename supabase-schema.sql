@@ -118,6 +118,23 @@ create table if not exists nairobi_participants (
 
 create index if not exists nairobi_participants_order_idx on nairobi_participants (sort_order);
 
+-- ---------- score history ----------
+-- Every write to a score, kept so a correction is never silent. A score that
+-- changed after it was first entered is the one thing players argue about, and
+-- until now the only trace was updated_at. Public, deliberately: the desk being
+-- seen to change a score is what settles the argument on the spot.
+create table if not exists nairobi_match_log (
+  id uuid primary key default gen_random_uuid(),
+  match_id uuid not null references nairobi_matches(id) on delete cascade,
+  at timestamptz not null default now(),
+  action text not null,                       -- 'score', 'clear', 'walkover', 'retire'
+  from_text text,                             -- what it was, null when nothing was there
+  to_text text,                               -- what it became, null when cleared
+  by_desk boolean not null default false      -- desk, or the players on court
+);
+
+create index if not exists nairobi_match_log_match_idx on nairobi_match_log (match_id, at);
+
 -- ---------- row level security: public read, no direct writes ----------
 
 alter table nairobi_tournaments enable row level security;
@@ -125,6 +142,7 @@ alter table nairobi_events enable row level security;
 alter table nairobi_entrants enable row level security;
 alter table nairobi_matches enable row level security;
 alter table nairobi_participants enable row level security;
+alter table nairobi_match_log enable row level security;
 
 drop policy if exists "public read nairobi_tournaments" on nairobi_tournaments;
 create policy "public read nairobi_tournaments" on nairobi_tournaments for select using (true);
@@ -134,6 +152,8 @@ drop policy if exists "public read nairobi_entrants" on nairobi_entrants;
 create policy "public read nairobi_entrants" on nairobi_entrants for select using (true);
 drop policy if exists "public read nairobi_matches" on nairobi_matches;
 create policy "public read nairobi_matches" on nairobi_matches for select using (true);
+drop policy if exists "public read nairobi_match_log" on nairobi_match_log;
+create policy "public read nairobi_match_log" on nairobi_match_log for select using (true);
 
 -- The admin PIN hash must never leave the database. Row level security is per
 -- row, not per column, so the public read policy above would otherwise hand the
@@ -169,6 +189,11 @@ exception when others then null; end $$;
 -- (safe no-ops on a fresh install)
 
 alter table nairobi_matches add column if not exists held boolean not null default false;
+
+-- Who retired, when somebody started a match and could not finish it. Distinct
+-- from a walkover, which is a no-show: a retirement was played, so the games
+-- that were completed stand and their points count. Null on every other match.
+alter table nairobi_matches add column if not exists retired uuid references nairobi_entrants(id) on delete set null;
 
 drop function if exists nairobi_assign_courts(uuid);      -- replaced by the shared-pool nairobi_assign_courts()
 drop function if exists nairobi_courts_conflict(uuid, jsonb);  -- per-event court allocation removed
@@ -674,6 +699,39 @@ begin
 end;
 $$;
 
+-- ---------- score history helpers ----------
+
+-- How a score reads on one line: "21-15", or "11-5, 9-11, 11-7" for best-of.
+-- Null when the match has no score, which is what makes a first entry show as
+-- an entry rather than a change.
+create or replace function nairobi_score_text(m nairobi_matches)
+returns text
+language sql stable security definer set search_path = public
+as $$
+  select case
+    when m.status <> 'played' or m.score1 is null then null
+    when m.walkover then 'walkover'
+    when m.games is not null and jsonb_typeof(m.games) = 'array' and jsonb_array_length(m.games) > 0
+      then (select string_agg((g ->> 0) || '-' || (g ->> 1), ', ')
+            from jsonb_array_elements(m.games) with ordinality t(g, i))
+    else m.score1 || '-' || m.score2
+  end;
+$$;
+
+-- Only a real change is worth a line. A save that lands the same score as
+-- before is not a correction and would just add noise to the match everyone is
+-- already looking at.
+create or replace function nairobi_log_score(p_match_id uuid, p_action text, p_from text, p_to text, p_by_desk boolean)
+returns void
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if p_from is not distinct from p_to then return; end if;
+  insert into nairobi_match_log (match_id, action, from_text, to_text, by_desk)
+  values (p_match_id, p_action, p_from, p_to, coalesce(p_by_desk, false));
+end;
+$$;
+
 -- ---------- public score entry (first entry only, on-court matches only) ----------
 
 create or replace function nairobi_submit_score(p_match_id uuid, p_score1 int, p_score2 int, p_games jsonb default null)
@@ -699,9 +757,12 @@ begin
 
   update nairobi_matches
   set score1 = chk.o_score1, score2 = chk.o_score2, games = chk.o_games,
-      status = 'played', postponed = false, held = false, court = null, walkover = false, updated_at = now()
+      status = 'played', postponed = false, held = false, court = null,
+      walkover = false, retired = null, updated_at = now()
   where id = p_match_id;
 
+  perform nairobi_log_score(p_match_id, 'score', nairobi_score_text(m),
+                            nairobi_score_text((select x from nairobi_matches x where x.id = p_match_id)), false);
   perform nairobi_advance_winner(p_match_id);
   perform nairobi_assign_courts();
   return 'OK';
@@ -770,10 +831,14 @@ begin
 
   update nairobi_matches
   set score1 = v_s1, score2 = v_s2, games = v_games,
-      status = 'played', postponed = false, court = null,
-      walkover = coalesce(p_walkover, false), updated_at = now()
+      status = 'played', postponed = false, court = null, held = false,
+      walkover = coalesce(p_walkover, false), retired = null, updated_at = now()
   where id = p_match_id;
 
+  perform nairobi_log_score(p_match_id,
+                            case when coalesce(p_walkover, false) then 'walkover' else 'score' end,
+                            nairobi_score_text(m),
+                            nairobi_score_text((select x from nairobi_matches x where x.id = p_match_id)), true);
   perform nairobi_advance_winner(p_match_id, old_w);
   perform nairobi_assign_courts();
   return 'OK';
@@ -988,9 +1053,10 @@ begin
   end if;
 
   update nairobi_matches
-  set score1 = null, score2 = null, games = null, walkover = false,
+  set score1 = null, score2 = null, games = null, walkover = false, retired = null,
       status = 'scheduled', court = null, held = false, updated_at = now()
   where id = p_match_id;
+  perform nairobi_log_score(p_match_id, 'clear', nairobi_score_text(m), null, true);
   perform nairobi_assign_courts();
   return 'OK';
 end;
@@ -1434,6 +1500,123 @@ begin
 end;
 $$;
 
+-- ---------- retirement ----------
+-- Somebody started the match and could not finish it. The rulebook answer, and
+-- what a Tournament Planner export does: the completed games stand, the game in
+-- progress is credited to the opponent, and the opponent takes the match.
+-- Unlike a walkover the points are real, because they were really scored, so
+-- nothing here is zeroed out of the standings.
+--
+-- The caller sends the score as it stood. This function finishes it:
+--   best of 1  -> the opponent's side is raised to the points target
+--   best of N  -> the last game is finished for the opponent, and the games-won
+--                 column credits them the win without inventing a game that was
+--                 never played, so `games` stays a record of what happened.
+create or replace function nairobi_admin_retire(p_pin text, p_match_id uuid, p_retiree_id uuid,
+                                                p_score1 int default null, p_score2 int default null,
+                                                p_games jsonb default null)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+declare
+  m nairobi_matches;
+  nm nairobi_matches;
+  old_w uuid;
+  win_slot int;
+  pts int;
+  bo int;
+  need int;
+  g jsonb;
+  arr jsonb := '[]'::jsonb;
+  a int; b int;
+  w1 int := 0; w2 int := 0;
+  v_s1 int; v_s2 int;
+  n int;
+begin
+  if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
+  select * into m from nairobi_matches where id = p_match_id for update;
+  if not found then return 'Match not found.'; end if;
+  if m.entrant1_id is null or m.entrant2_id is null then return 'Teams for this match are not decided yet.'; end if;
+  if p_retiree_id is null or p_retiree_id not in (m.entrant1_id, m.entrant2_id) then
+    return 'Say which team retired.';
+  end if;
+  win_slot := case when p_retiree_id = m.entrant1_id then 2 else 1 end;
+
+  pts := nairobi_ev_int_setting(m.event_id, case when m.stage = 'knockout' then 'points_to_knockout' else 'points_to_group' end,
+                                case when m.stage = 'knockout' then 11 else 21 end);
+  bo := nairobi_ev_int_setting(m.event_id, case when m.stage = 'knockout' then 'best_of_knockout' else 'best_of_group' end,
+                               case when m.stage = 'knockout' then 3 else 1 end);
+
+  if bo > 1 then
+    need := bo / 2 + 1;
+    if p_games is null or jsonb_typeof(p_games) <> 'array' or jsonb_array_length(p_games) = 0 then
+      return 'Enter the games that were played before the retirement.';
+    end if;
+    if jsonb_array_length(p_games) > bo then return 'Best of ' || bo || ': that is too many games.'; end if;
+    for g in select * from jsonb_array_elements(p_games) loop
+      begin
+        a := (g ->> 0)::int; b := (g ->> 1)::int;
+      exception when others then
+        return 'Enter both scores as whole numbers.';
+      end;
+      if a is null or b is null or a < 0 or b < 0 then return 'Enter both scores as whole numbers.'; end if;
+      arr := arr || jsonb_build_array(jsonb_build_array(a, b));
+      if a > b then w1 := w1 + 1; elsif b > a then w2 := w2 + 1; end if;
+    end loop;
+    -- Finish the game that was in progress. A game is over once somebody has
+    -- reached the points target, so anything short of that is where they
+    -- stopped, and the rest of it goes to the opponent. A game the retiring
+    -- team had already won outright is left exactly as they won it.
+    n := jsonb_array_length(arr) - 1;
+    a := (arr -> n ->> 0)::int;
+    b := (arr -> n ->> 1)::int;
+    if greatest(a, b) < pts then
+      if a > b then w1 := w1 - 1; elsif b > a then w2 := w2 - 1; end if;
+      if win_slot = 1 then a := greatest(pts, b + 1); w1 := w1 + 1;
+      else b := greatest(pts, a + 1); w2 := w2 + 1; end if;
+      arr := jsonb_set(arr, array[n::text], jsonb_build_array(a, b));
+    end if;
+    -- Credit the match without adding a game nobody played.
+    if win_slot = 1 then v_s1 := greatest(w1, need); v_s2 := least(w2, v_s1 - 1);
+    else v_s2 := greatest(w2, need); v_s1 := least(w1, v_s2 - 1); end if;
+  else
+    if p_score1 is null or p_score2 is null or p_score1 < 0 or p_score2 < 0 then
+      return 'Enter the score as it stood when they retired.';
+    end if;
+    arr := null;
+    v_s1 := p_score1; v_s2 := p_score2;
+    if win_slot = 1 and v_s1 <= v_s2 then v_s1 := greatest(pts, v_s2 + 1); end if;
+    if win_slot = 2 and v_s2 <= v_s1 then v_s2 := greatest(pts, v_s1 + 1); end if;
+  end if;
+
+  old_w := case when m.status = 'played' and m.score1 > m.score2 then m.entrant1_id
+                when m.status = 'played' then m.entrant2_id else null end;
+
+  if m.next_match_id is not null then
+    select * into nm from nairobi_matches where id = m.next_match_id for update;
+    if found and nm.status = 'played' then
+      if (case when m.next_slot = 1 then nm.entrant1_id else nm.entrant2_id end)
+         is distinct from (case when win_slot = 1 then m.entrant1_id else m.entrant2_id end) then
+        return 'The next round already has a score. Clear it first.';
+      end if;
+    end if;
+  end if;
+
+  update nairobi_matches
+  set score1 = v_s1, score2 = v_s2, games = arr,
+      status = 'played', postponed = false, court = null, held = false,
+      walkover = false, retired = p_retiree_id, updated_at = now()
+  where id = p_match_id;
+
+  perform nairobi_log_score(p_match_id, 'retire', nairobi_score_text(m),
+                            nairobi_score_text((select x from nairobi_matches x where x.id = p_match_id)), true);
+  perform nairobi_advance_winner(p_match_id, old_w);
+  perform nairobi_assign_courts();
+  return 'OK';
+end;
+$$;
+
 -- ---------- participants ----------
 -- The roster of people, kept apart from the entrants who play a given event.
 -- Both functions are the only way in: the table has no read policy and no
@@ -1501,6 +1684,8 @@ $$;
 
 revoke execute on function nairobi_advance_winner(uuid, uuid) from public, anon, authenticated;
 revoke execute on function nairobi_ts_or_null(text) from public, anon, authenticated;
+revoke execute on function nairobi_score_text(nairobi_matches) from public, anon, authenticated;
+revoke execute on function nairobi_log_score(uuid, text, text, text, boolean) from public, anon, authenticated;
 revoke execute on function nairobi_assign_courts() from public, anon, authenticated;
 revoke execute on function nairobi_check_score(uuid, text, int, int, jsonb, boolean) from public, anon, authenticated;
 revoke execute on function nairobi_ev_int_setting(uuid, text, int) from public, anon, authenticated;
@@ -1529,6 +1714,7 @@ grant execute on function nairobi_admin_add_entrant(text, uuid, jsonb, jsonb) to
 grant execute on function nairobi_admin_set_bracket_teams(text, uuid, uuid, uuid) to anon, authenticated;
 grant execute on function nairobi_admin_generate_bracket(text, uuid, jsonb) to anon, authenticated;
 grant execute on function nairobi_admin_reset_bracket(text, uuid) to anon, authenticated;
+grant execute on function nairobi_admin_retire(text, uuid, uuid, int, int, jsonb) to anon, authenticated;
 grant execute on function nairobi_admin_list_participants(text) to anon, authenticated;
 grant execute on function nairobi_admin_save_participants(text, jsonb) to anon, authenticated;
 
@@ -1543,8 +1729,15 @@ exception when others then null; end $$;
 do $$ begin
   alter publication supabase_realtime add table nairobi_events;
 exception when others then null; end $$;
+-- Corrections have to reach the other phones the moment they happen: a match
+-- whose score changed is exactly the one everybody is looking at.
+do $$ begin
+  alter publication supabase_realtime add table nairobi_match_log;
+exception when others then null; end $$;
 -- nairobi_tournaments is deliberately NOT published: its row carries the admin
 -- PIN hash, and realtime would replay it to subscribers. See the revoke above.
+-- nairobi_participants is not published either: it is desk-only, and realtime
+-- replays whole rows regardless of who is listening.
 
 -- Install-only helper: invents the first admin PIN and remembers it for the
 -- rest of this session, so the insert below and the printout at the end of the
