@@ -1,0 +1,331 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Language control — options</title>
+<style>
+/* Tokens copied verbatim from index.html so these render exactly like the app. */
+:root{
+  --bg:#f7f5f0; --card:#fffefb; --ink:#26251f; --muted:#6f6a5e; --line:#e2ddd1;
+  --accent:#9a4526; --accent-ink:#ffffff; --accent-soft:#f4e7e0;
+  --good:#46704f; --good-soft:#e9efe7;
+  --warn:#a8730a; --warn-soft:#f6ecd9;
+  --shadow:0 1px 2px rgba(38,37,31,.05);
+}
+:root[data-theme="dark"]{
+  --bg:#171511; --card:#201d18; --ink:#ece8df; --muted:#a39b8b; --line:#353026;
+  --accent:#d07a55; --accent-ink:#1c130d; --accent-soft:#3a2a20;
+  --good:#8db394; --good-soft:#26302a;
+  --warn:#d9a24a; --warn-soft:#33270f;
+  --shadow:none;
+}
+
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg); color:var(--ink);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  font-size:15px; line-height:1.45; -webkit-font-smoothing:antialiased}
+button{font:inherit; color:inherit; background:none; border:none; padding:0; cursor:pointer; text-align:left; appearance:none}
+:focus-visible{outline:2px solid var(--accent); outline-offset:2px; border-radius:4px}
+
+.page{max-width:980px; margin:0 auto; padding:26px 18px 90px}
+h1{font-size:23px; font-weight:800; margin:0 0 6px; letter-spacing:.005em}
+.lede{color:var(--muted); font-size:14.5px; margin:0 0 22px; max-width:62ch}
+.lede code{background:var(--card); border:1px solid var(--line); border-radius:4px; padding:1px 5px; font-size:12.5px}
+
+.controls{display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+  padding:10px 12px; background:var(--card); border:1px solid var(--line);
+  border-radius:10px; margin-bottom:26px; font-size:13.5px}
+.controls .lbl{color:var(--muted); font-weight:700; font-size:12px; letter-spacing:.06em; text-transform:uppercase}
+.ctlbtn{padding:5px 12px; border:1px solid var(--line); border-radius:999px;
+  background:var(--bg); font-weight:700; font-size:13px}
+.ctlbtn[aria-pressed="true"]{background:var(--accent); color:var(--accent-ink); border-color:var(--accent)}
+
+.opt{background:var(--card); border:1px solid var(--line); border-radius:12px;
+  padding:16px 16px 14px; margin-bottom:16px; box-shadow:var(--shadow)}
+.opt-head{display:flex; align-items:baseline; gap:10px; flex-wrap:wrap; margin-bottom:3px}
+.opt-key{font-size:11px; font-weight:800; letter-spacing:.1em; color:var(--accent);
+  background:var(--accent-soft); border-radius:4px; padding:2px 7px}
+.opt-name{font-weight:800; font-size:16px}
+.opt-tag{font-size:11px; font-weight:700; letter-spacing:.06em; text-transform:uppercase;
+  color:var(--good); background:var(--good-soft); border-radius:4px; padding:2px 7px}
+.opt-tag.now{color:var(--muted); background:var(--bg); border:1px solid var(--line)}
+.opt-note{color:var(--muted); font-size:13.5px; margin:2px 0 13px; max-width:70ch}
+
+/* the phone-width frame the masthead sits in */
+.frame{width:360px; max-width:100%; border:1px solid var(--line); border-radius:10px;
+  overflow:hidden; background:var(--bg)}
+.topbar{background:var(--bg); border-bottom:1px solid var(--line)}
+.masthead{padding:14px 14px 0; display:flex; align-items:center; justify-content:space-between; gap:10px}
+.mast-left{display:flex; align-items:center; gap:10px; min-width:0}
+.clublogo{width:32px; height:32px; flex:none; display:block; border-radius:50%}
+.wordmark{font-weight:800; font-size:20px; letter-spacing:.005em}
+.tabs{padding:8px 14px 0; display:flex; gap:2px; overflow-x:auto}
+.tab{padding:8px 12px 10px; font-weight:700; font-size:14px; color:var(--muted);
+  border-bottom:3px solid transparent; white-space:nowrap; border-radius:6px 6px 0 0}
+.tab[aria-current="true"]{color:var(--ink); border-bottom-color:var(--accent); background:var(--accent-soft)}
+
+/* ---------- A: current, single pill showing the target language ---------- */
+.langbtn{flex:none; padding:5px 11px; font-weight:800; font-size:12.5px; letter-spacing:.06em;
+  color:var(--muted); background:var(--card); border:1px solid var(--line); border-radius:999px}
+
+/* ---------- shared segmented control ---------- */
+.seg{flex:none; display:flex; background:var(--card); border:1px solid var(--line);
+  border-radius:999px; padding:2px; gap:2px}
+.seg button{padding:4px 10px; border-radius:999px; font-weight:800; font-size:12.5px;
+  letter-spacing:.06em; color:var(--muted); line-height:1.3; white-space:nowrap}
+.seg button[aria-pressed="true"]{background:var(--accent); color:var(--accent-ink)}
+.seg.flags button{padding:3px 9px; font-size:15px; letter-spacing:0}
+.seg.flagcode button{display:flex; align-items:center; gap:5px; padding:4px 10px}
+.seg.flagcode .fl{font-size:14px; line-height:1}
+.seg.words button{padding:4px 11px; font-size:12.5px; letter-spacing:.02em}
+
+/* ---------- E: single pill, full word of the target language ---------- */
+.langword{flex:none; padding:5px 12px; font-weight:700; font-size:12.5px; letter-spacing:.01em;
+  color:var(--muted); background:var(--card); border:1px solid var(--line); border-radius:999px}
+
+/* ---------- F: globe + current code ---------- */
+.langglobe{flex:none; display:flex; align-items:center; gap:6px; padding:5px 11px;
+  font-weight:800; font-size:12.5px; letter-spacing:.06em; color:var(--muted);
+  background:var(--card); border:1px solid var(--line); border-radius:999px}
+.langglobe .globe{font-size:13px; line-height:1; opacity:.75}
+
+.verdict{margin-top:12px; padding:9px 12px; border-radius:8px; font-size:13px;
+  background:var(--bg); border:1px solid var(--line); color:var(--muted)}
+.verdict b{color:var(--ink); font-weight:700}
+.warnbox{margin-top:12px; padding:10px 12px; border-radius:8px; font-size:13.5px;
+  background:var(--warn-soft); color:var(--warn); border:1px solid transparent}
+.warnbox b{font-weight:800}
+.hint{font-size:12.5px; color:var(--muted); margin:8px 0 0}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <h1>Language control: seven options</h1>
+  <p class="lede">
+    Every masthead below is the real one from <code>index.html</code>, same tokens, same
+    spacing, at 360px phone width. <b>Tap any control to flip it</b> and see both states.
+    Option A is what is live today.
+  </p>
+
+  <div class="controls">
+    <span class="lbl">Theme</span>
+    <button class="ctlbtn" aria-pressed="true" onclick="setTheme('light',this)">Light</button>
+    <button class="ctlbtn" aria-pressed="false" onclick="setTheme('dark',this)">Dark</button>
+    <span style="flex:1"></span>
+    <span class="lbl">Page language</span>
+    <button class="ctlbtn" aria-pressed="true" onclick="setLang('en',this)">English</button>
+    <button class="ctlbtn" aria-pressed="false" onclick="setLang('sw',this)">Swahili</button>
+  </div>
+
+  <!-- ============ A ============ -->
+  <div class="opt">
+    <div class="opt-head">
+      <span class="opt-key">A</span>
+      <span class="opt-name">Two letters, target language</span>
+      <span class="opt-tag now">Live today</span>
+    </div>
+    <p class="opt-note">
+      One pill showing the language you would switch <em>to</em>. Smallest possible footprint.
+      The catch: a pill reading “SW” is equally readable as “you are in Swahili”, and there
+      is nothing else on screen to disambiguate until the page is already translated.
+    </p>
+    <div class="frame">
+      <div class="topbar"><div class="masthead">
+        <div class="mast-left"><img class="clublogo" src="../npc_logo.png" alt=""><div class="wordmark">Nairobi Open 2026</div></div>
+        <button class="langbtn" onclick="flip(this)">EN</button>
+      </div><nav class="tabs" data-tabs></nav></div>
+    </div>
+    <div class="verdict"><b>Trade-off:</b> smallest and quietest, but ambiguous about which state you are in.</div>
+  </div>
+
+  <!-- ============ B ============ -->
+  <div class="opt">
+    <div class="opt-head">
+      <span class="opt-key">B</span>
+      <span class="opt-name">Segmented, two letters</span>
+      <span class="opt-tag">Recommended</span>
+    </div>
+    <p class="opt-note">
+      Both languages always visible, the active one filled in accent. Removes A's ambiguity
+      for about 26px more width, and a segmented control is a pattern people already know
+      from every settings screen.
+    </p>
+    <div class="frame">
+      <div class="topbar"><div class="masthead">
+        <div class="mast-left"><img class="clublogo" src="../npc_logo.png" alt=""><div class="wordmark">Nairobi Open 2026</div></div>
+        <div class="seg" onclick="seg(this, event)"><button aria-pressed="false">SW</button><button aria-pressed="true">EN</button></div>
+      </div><nav class="tabs" data-tabs></nav></div>
+    </div>
+    <div class="verdict"><b>Trade-off:</b> unambiguous and still compact. Two tap targets instead of one, each a little smaller.</div>
+  </div>
+
+  <!-- ============ C ============ -->
+  <div class="opt">
+    <div class="opt-head">
+      <span class="opt-key">C</span>
+      <span class="opt-name">Segmented, flags only</span>
+    </div>
+    <p class="opt-note">
+      Kenyan flag for Swahili, American flag for English. Reads instantly across a language
+      barrier and needs no reading at all, which is its whole appeal.
+    </p>
+    <div class="frame">
+      <div class="topbar"><div class="masthead">
+        <div class="mast-left"><img class="clublogo" src="../npc_logo.png" alt=""><div class="wordmark">Nairobi Open 2026</div></div>
+        <div class="seg flags" onclick="seg(this, event)"><button aria-pressed="false">🇰🇪</button><button aria-pressed="true">🇺🇸</button></div>
+      </div><nav class="tabs" data-tabs></nav></div>
+    </div>
+    <div class="warnbox">
+      <b>Worth thinking about before you pick this.</b> English is an official language of Kenya,
+      so a Kenyan flag standing for “Swahili” and an American flag standing for “English” tells a
+      Kenyan player that the Kenyan option is the other one. A British flag has the same problem
+      with extra history attached. Flags also render differently on every phone: Android shows
+      them, older Windows browsers show “KE” and “US” letter boxes instead.
+    </div>
+  </div>
+
+  <!-- ============ D ============ -->
+  <div class="opt">
+    <div class="opt-head">
+      <span class="opt-key">D</span>
+      <span class="opt-name">Segmented, flag plus code</span>
+    </div>
+    <p class="opt-note">
+      The flag carries recognition, the two letters carry the meaning, so it still works on a
+      phone that cannot draw the emoji. Widest of the options.
+    </p>
+    <div class="frame">
+      <div class="topbar"><div class="masthead">
+        <div class="mast-left"><img class="clublogo" src="../npc_logo.png" alt=""><div class="wordmark">Nairobi Open</div></div>
+        <div class="seg flagcode" onclick="seg(this, event)">
+          <button aria-pressed="false"><span class="fl">🇰🇪</span>SW</button>
+          <button aria-pressed="true"><span class="fl">🇬🇧</span>EN</button>
+        </div>
+      </div><nav class="tabs" data-tabs></nav></div>
+    </div>
+    <div class="verdict"><b>Trade-off:</b> most explicit, but at ~112px it starts squeezing the wordmark on a 360px screen. Shown here with the shorter “Nairobi Open” for that reason.</div>
+  </div>
+
+  <!-- ============ E ============ -->
+  <div class="opt">
+    <div class="opt-head">
+      <span class="opt-key">E</span>
+      <span class="opt-name">One pill, the language's own name</span>
+      <span class="opt-tag">Also good</span>
+    </div>
+    <p class="opt-note">
+      Each language written the way its own speakers write it: in English mode the pill offers
+      <em>Kiswahili</em>, in Swahili mode it offers <em>English</em>. Self-explanatory with no
+      legend, no flag, and no politics, and it is the convention most international sites landed on.
+    </p>
+    <div class="frame">
+      <div class="topbar"><div class="masthead">
+        <div class="mast-left"><img class="clublogo" src="../npc_logo.png" alt=""><div class="wordmark">Nairobi Open 2026</div></div>
+        <button class="langword" onclick="flipWord(this)">Kiswahili</button>
+      </div><nav class="tabs" data-tabs></nav></div>
+    </div>
+    <div class="verdict"><b>Trade-off:</b> clearest single-button option. Still technically ambiguous the same way A is, but a word people recognise as “the other language” makes it read as an offer rather than a status.</div>
+  </div>
+
+  <!-- ============ F ============ -->
+  <div class="opt">
+    <div class="opt-head">
+      <span class="opt-key">F</span>
+      <span class="opt-name">Globe plus current code</span>
+    </div>
+    <p class="opt-note">
+      The globe is the near-universal “language” icon, so the pill announces what it is before
+      anyone reads the letters. Here the letters mean the language you are <em>in</em>, which is
+      the opposite of A and the reason the globe is doing real work.
+    </p>
+    <div class="frame">
+      <div class="topbar"><div class="masthead">
+        <div class="mast-left"><img class="clublogo" src="../npc_logo.png" alt=""><div class="wordmark">Nairobi Open 2026</div></div>
+        <button class="langglobe" onclick="flipGlobe(this)"><span class="globe">🌐</span><span>EN</span></button>
+      </div><nav class="tabs" data-tabs></nav></div>
+    </div>
+    <div class="verdict"><b>Trade-off:</b> best affordance of the one-button options; the emoji globe renders as flat line art on some Androids and can look slightly off next to the club badge.</div>
+  </div>
+
+  <!-- ============ G ============ -->
+  <div class="opt">
+    <div class="opt-head">
+      <span class="opt-key">G</span>
+      <span class="opt-name">Segmented, full words</span>
+    </div>
+    <p class="opt-note">
+      Nothing to decode at all. It is the widest control here, so the wordmark has to give up
+      room; on a 360px phone “Nairobi Open 2026” will not fit alongside it.
+    </p>
+    <div class="frame">
+      <div class="topbar"><div class="masthead">
+        <div class="mast-left"><img class="clublogo" src="../npc_logo.png" alt=""><div class="wordmark">Nairobi Open</div></div>
+        <div class="seg words" onclick="seg(this, event)"><button aria-pressed="false">Kiswahili</button><button aria-pressed="true">English</button></div>
+      </div><nav class="tabs" data-tabs></nav></div>
+    </div>
+    <div class="verdict"><b>Trade-off:</b> zero ambiguity, but it competes with the wordmark for the top line instead of sitting quietly beside it.</div>
+  </div>
+
+  <p class="hint">
+    One small bug spotted while building this: the live button's <code>aria-label</code> is hardcoded
+    to “Badilisha lugha”, so a screen reader announces it in Swahili even in English mode.
+    Whichever option you pick, that label should follow the language.
+  </p>
+
+</div>
+
+<script>
+/* Every mockup is live: tapping a control flips it, so both states are inspectable. */
+const TABS_EN = ["Courts","Schedule","Standings","Bracket","Admin"];
+const TABS_SW = ["Viwanja","Ratiba","Msimamo","Mchujo","Msimamizi"];
+let pageLang = "en";
+
+function paintTabs(){
+  const labels = pageLang === "sw" ? TABS_SW : TABS_EN;
+  document.querySelectorAll("[data-tabs]").forEach(nav => {
+    nav.innerHTML = labels.map((t,i) =>
+      '<button class="tab" aria-current="' + (i===0) + '">' + t + '</button>').join("");
+  });
+}
+function setTheme(t, btn){
+  document.documentElement.setAttribute("data-theme", t);
+  btn.parentElement.querySelectorAll(".ctlbtn").forEach(b => b.setAttribute("aria-pressed","false"));
+  btn.setAttribute("aria-pressed","true");
+}
+function setLang(l, btn){
+  pageLang = l;
+  const group = [...btn.parentElement.querySelectorAll(".ctlbtn")].slice(2);
+  group.forEach(b => b.setAttribute("aria-pressed","false"));
+  btn.setAttribute("aria-pressed","true");
+  paintTabs();
+  /* Drive every mockup control to match, so the page reads as one coherent state. */
+  document.querySelectorAll(".langbtn").forEach(b => b.textContent = l === "sw" ? "EN" : "SW");
+  document.querySelectorAll(".langword").forEach(b => b.textContent = l === "sw" ? "English" : "Kiswahili");
+  document.querySelectorAll(".langglobe span:last-child").forEach(s => s.textContent = l === "sw" ? "SW" : "EN");
+  document.querySelectorAll(".seg").forEach(s => {
+    const [sw, en] = s.querySelectorAll("button");
+    sw.setAttribute("aria-pressed", String(l === "sw"));
+    en.setAttribute("aria-pressed", String(l !== "sw"));
+  });
+}
+const other = () => pageLang === "sw" ? "en" : "sw";
+function flip(){ setLang(other(), langCtl(other())); }
+function flipWord(){ setLang(other(), langCtl(other())); }
+function flipGlobe(){ setLang(other(), langCtl(other())); }
+function seg(el, ev){
+  const hit = ev.target.closest("button");
+  if (!hit) return;
+  const l = [...el.querySelectorAll("button")].indexOf(hit) === 0 ? "sw" : "en";
+  setLang(l, langCtl(l));
+}
+function langCtl(l){
+  const btns = document.querySelectorAll(".controls .ctlbtn");
+  return l === "sw" ? btns[3] : btns[2];
+}
+paintTabs();
+</script>
+</body>
+</html>
