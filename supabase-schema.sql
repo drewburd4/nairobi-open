@@ -1507,11 +1507,17 @@ $$;
 -- Unlike a walkover the points are real, because they were really scored, so
 -- nothing here is zeroed out of the standings.
 --
--- The caller sends the score as it stood. This function finishes it:
---   best of 1  -> the opponent's side is raised to the points target
---   best of N  -> the last game is finished for the opponent, and the games-won
---                 column credits them the win without inventing a game that was
---                 never played, so `games` stays a record of what happened.
+-- The score is stored exactly as it stood, because that is the score that goes
+-- to DUPR: a retirement is rated on what was actually played, not on a game
+-- finished on paper by somebody who had already left the court.
+--
+-- Best of N is clean, because the games and the result live in separate
+-- columns: `games` keeps what happened (11-5, 3-7) and the games-won columns
+-- credit the opponent the match. Best of 1 has only the one pair of numbers to
+-- carry both, so when the retiring side is the one ahead there is no way to
+-- record the real score and the right winner at once; the opponent is given the
+-- smallest score that wins rather than the full target, which is the least
+-- distortion available.
 create or replace function nairobi_admin_retire(p_pin text, p_match_id uuid, p_retiree_id uuid,
                                                 p_score1 int default null, p_score2 int default null,
                                                 p_games jsonb default null)
@@ -1531,7 +1537,6 @@ declare
   a int; b int;
   w1 int := 0; w2 int := 0;
   v_s1 int; v_s2 int;
-  n int;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
   perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
@@ -1564,20 +1569,9 @@ begin
       arr := arr || jsonb_build_array(jsonb_build_array(a, b));
       if a > b then w1 := w1 + 1; elsif b > a then w2 := w2 + 1; end if;
     end loop;
-    -- Finish the game that was in progress. A game is over once somebody has
-    -- reached the points target, so anything short of that is where they
-    -- stopped, and the rest of it goes to the opponent. A game the retiring
-    -- team had already won outright is left exactly as they won it.
-    n := jsonb_array_length(arr) - 1;
-    a := (arr -> n ->> 0)::int;
-    b := (arr -> n ->> 1)::int;
-    if greatest(a, b) < pts then
-      if a > b then w1 := w1 - 1; elsif b > a then w2 := w2 - 1; end if;
-      if win_slot = 1 then a := greatest(pts, b + 1); w1 := w1 + 1;
-      else b := greatest(pts, a + 1); w2 := w2 + 1; end if;
-      arr := jsonb_set(arr, array[n::text], jsonb_build_array(a, b));
-    end if;
-    -- Credit the match without adding a game nobody played.
+    -- The games stay exactly as they were played, including the one that was
+    -- interrupted. Only the games-won columns are credited, so the opponent
+    -- takes the match without a single point being invented.
     if win_slot = 1 then v_s1 := greatest(w1, need); v_s2 := least(w2, v_s1 - 1);
     else v_s2 := greatest(w2, need); v_s1 := least(w1, v_s2 - 1); end if;
   else
@@ -1586,8 +1580,11 @@ begin
     end if;
     arr := null;
     v_s1 := p_score1; v_s2 := p_score2;
-    if win_slot = 1 and v_s1 <= v_s2 then v_s1 := greatest(pts, v_s2 + 1); end if;
-    if win_slot = 2 and v_s2 <= v_s1 then v_s2 := greatest(pts, v_s1 + 1); end if;
+    -- One game, one pair of numbers, and they have to name the winner as well
+    -- as the score. Untouched whenever the opponent was already ahead, which is
+    -- the ordinary case; otherwise the smallest score that wins.
+    if win_slot = 1 and v_s1 <= v_s2 then v_s1 := v_s2 + 1; end if;
+    if win_slot = 2 and v_s2 <= v_s1 then v_s2 := v_s1 + 1; end if;
   end if;
 
   old_w := case when m.status = 'played' and m.score1 > m.score2 then m.entrant1_id
