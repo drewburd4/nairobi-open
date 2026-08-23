@@ -90,6 +90,10 @@ create table if not exists nairobi_matches (
   called_at timestamptz,                      -- when the match was called to a court
   called_ack boolean not null default false,  -- desk confirmed players are on court
   next_match_id uuid,
+  -- Where the LOSER goes. Only the third-place match is fed this way; every
+  -- other knockout match leaves its loser out of the tournament.
+  loser_match_id uuid,
+  loser_slot int,
   next_slot int,
   updated_at timestamptz not null default now()
 );
@@ -272,19 +276,42 @@ as $$
 declare
   m nairobi_matches;
   w uuid;
+  l uuid;
+  old_l uuid;
 begin
   select * into m from nairobi_matches where id = p_match_id;
-  if not found or m.next_match_id is null or m.status <> 'played' then return; end if;
+  if not found or m.status <> 'played' then return; end if;
   if m.score1 is null or m.score2 is null then return; end if;
   w := case when m.score1 > m.score2 then m.entrant1_id else m.entrant2_id end;
-  if m.next_slot = 1 then
-    update nairobi_matches set entrant1_id = w, updated_at = now()
-    where id = m.next_match_id and status = 'scheduled'
-      and (entrant1_id is null or entrant1_id = w or entrant1_id = p_old_winner);
-  else
-    update nairobi_matches set entrant2_id = w, updated_at = now()
-    where id = m.next_match_id and status = 'scheduled'
-      and (entrant2_id is null or entrant2_id = w or entrant2_id = p_old_winner);
+  l := case when m.score1 > m.score2 then m.entrant2_id else m.entrant1_id end;
+  -- Whoever the old winner was, the old loser was this match's other team.
+  old_l := case when p_old_winner is null then null
+                when p_old_winner = m.entrant1_id then m.entrant2_id
+                when p_old_winner = m.entrant2_id then m.entrant1_id
+                else null end;
+
+  if m.next_match_id is not null then
+    if m.next_slot = 1 then
+      update nairobi_matches set entrant1_id = w, updated_at = now()
+      where id = m.next_match_id and status = 'scheduled'
+        and (entrant1_id is null or entrant1_id = w or entrant1_id = p_old_winner);
+    else
+      update nairobi_matches set entrant2_id = w, updated_at = now()
+      where id = m.next_match_id and status = 'scheduled'
+        and (entrant2_id is null or entrant2_id = w or entrant2_id = p_old_winner);
+    end if;
+  end if;
+
+  if m.loser_match_id is not null and l is not null then
+    if m.loser_slot = 1 then
+      update nairobi_matches set entrant1_id = l, updated_at = now()
+      where id = m.loser_match_id and status = 'scheduled'
+        and (entrant1_id is null or entrant1_id = l or entrant1_id = old_l);
+    else
+      update nairobi_matches set entrant2_id = l, updated_at = now()
+      where id = m.loser_match_id and status = 'scheduled'
+        and (entrant2_id is null or entrant2_id = l or entrant2_id = old_l);
+    end if;
   end if;
 end;
 $$;
@@ -889,6 +916,18 @@ begin
   end if;
 
   new_w := case when v_s1 > v_s2 then m.entrant1_id else m.entrant2_id end;
+  -- Same reasoning as the next round: if the third-place match has been played
+  -- off this semifinal's loser, flipping the loser here would leave the bronze
+  -- sitting on a result that no longer happened.
+  if m.loser_match_id is not null then
+    select * into nm from nairobi_matches where id = m.loser_match_id for update;
+    if found and nm.status = 'played' then
+      if (case when m.loser_slot = 1 then nm.entrant1_id else nm.entrant2_id end)
+         is distinct from (case when v_s1 > v_s2 then m.entrant2_id else m.entrant1_id end) then
+        return 'The third place match already has a score. Clear it first.';
+      end if;
+    end if;
+  end if;
   if m.next_match_id is not null then
     -- locked read: the winner-flip guard must not race a concurrent score on
     -- the next match, and refuse only when the played next round actually
@@ -921,6 +960,23 @@ $$;
 
 -- Dismiss the "go to court" banner for everyone: desk confirms players are on court.
 -- The desk can take score entry back off the players entirely.
+-- Whether finals and the third place match are being held for the last day.
+-- Only the wind-down trigger reads it: with this on, a running event that has
+-- nothing left but its final does not hold up the next batch.
+create or replace function nairobi_admin_set_finals_sunday(p_pin text, p_on boolean)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  update nairobi_tournaments
+  set settings = coalesce(settings, '{}'::jsonb)
+                 || jsonb_build_object('finals_sunday', coalesce(p_on, true));
+  return 'OK';
+end;
+$$;
+grant execute on function nairobi_admin_set_finals_sunday(text, boolean) to anon, authenticated;
+
 create or replace function nairobi_admin_set_player_scores(p_pin text, p_on boolean)
 returns text
 language plpgsql security definer set search_path = public
@@ -1116,6 +1172,9 @@ as $$
 declare
   m nairobi_matches;
   nm nairobi_matches;
+  lm nairobi_matches;
+  v_w uuid;
+  v_l uuid;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
   -- Advisory lock BEFORE any row lock: this function locks match rows and
@@ -1124,6 +1183,13 @@ begin
   perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into m from nairobi_matches where id = p_match_id for update;
   if not found then return 'Match not found.'; end if;
+
+  v_w := case when m.status = 'played' and m.score1 is not null and m.score1 > m.score2
+              then m.entrant1_id
+              when m.status = 'played' and m.score1 is not null then m.entrant2_id end;
+  v_l := case when m.status = 'played' and m.score1 is not null and m.score1 > m.score2
+              then m.entrant2_id
+              when m.status = 'played' and m.score1 is not null then m.entrant1_id end;
 
   if m.next_match_id is not null then
     -- locked read: without it a concurrent score on the next match could land
@@ -1134,16 +1200,30 @@ begin
     if found and nm.status = 'played' then
       return 'The next round already has a score. Clear it first.';
     end if;
-    if found and m.status = 'played' and m.score1 is not null then
-      if m.next_slot = 1 then
-        update nairobi_matches set entrant1_id = null, updated_at = now()
-        where id = nm.id and status = 'scheduled'
-          and entrant1_id = (case when m.score1 > m.score2 then m.entrant1_id else m.entrant2_id end);
-      else
-        update nairobi_matches set entrant2_id = null, updated_at = now()
-        where id = nm.id and status = 'scheduled'
-          and entrant2_id = (case when m.score1 > m.score2 then m.entrant1_id else m.entrant2_id end);
-      end if;
+  end if;
+  if m.loser_match_id is not null then
+    select * into lm from nairobi_matches where id = m.loser_match_id for update;
+    if found and lm.status = 'played' then
+      return 'The third place match already has a score. Clear it first.';
+    end if;
+  end if;
+
+  if m.next_match_id is not null and nm.id is not null and v_w is not null then
+    if m.next_slot = 1 then
+      update nairobi_matches set entrant1_id = null, updated_at = now()
+      where id = nm.id and status = 'scheduled' and entrant1_id = v_w;
+    else
+      update nairobi_matches set entrant2_id = null, updated_at = now()
+      where id = nm.id and status = 'scheduled' and entrant2_id = v_w;
+    end if;
+  end if;
+  if m.loser_match_id is not null and lm.id is not null and v_l is not null then
+    if m.loser_slot = 1 then
+      update nairobi_matches set entrant1_id = null, updated_at = now()
+      where id = lm.id and status = 'scheduled' and entrant1_id = v_l;
+    else
+      update nairobi_matches set entrant2_id = null, updated_at = now()
+      where id = lm.id and status = 'scheduled' and entrant2_id = v_l;
     end if;
   end if;
 
@@ -1151,6 +1231,7 @@ begin
   set score1 = null, score2 = null, games = null, walkover = false, retired = null,
       status = 'scheduled', court = null, held = false, updated_at = now()
   where id = p_match_id;
+
   perform nairobi_log_score(p_match_id, 'clear', nairobi_score_text(m), null, true);
   perform nairobi_assign_courts();
   return 'OK';
@@ -1335,7 +1416,13 @@ language plpgsql security definer set search_path = public
 as $$
 declare
   n int;
+  m int;
+  v_left int;
+  v_running int;
+  v_sunday boolean;
+  v_winding boolean;
 begin
+  -- Pass one: events that start on the clock.
   update nairobi_events e
   set active = true,
       settings = coalesce(e.settings, '{}'::jsonb) || '{"autostarted": true}'::jsonb
@@ -1343,13 +1430,9 @@ begin
     and coalesce(e.settings ->> 'autostarted', '') <> 'true'
     and coalesce(e.settings ->> 'hidden', '') <> 'true'
     and coalesce(e.settings ->> 'archived', '') <> 'true'
-    -- An event can refuse to start itself. The afternoon batch is set this
-    -- way: left to a timer it would come on top of a morning still being
-    -- played, and four events splitting four courts finishes neither. The
-    -- desk gets asked instead, by the bar the client puts up.
     and coalesce(e.settings ->> 'autostart', '') <> 'false'
     and coalesce(e.settings ->> 'start_time', '') <> ''
-    and exists (select 1 from nairobi_matches m where m.event_id = e.id)
+    and exists (select 1 from nairobi_matches mm where mm.event_id = e.id)
     -- Never restart an event that has already been played in. A multi-day event
     -- paused overnight must be resumed by hand: the desk decides when day two
     -- begins, and the stored start time belongs to day one.
@@ -1360,6 +1443,63 @@ begin
     and nairobi_ts_or_null(e.settings ->> 'start_time')
         between now() - interval '12 hours' and now() + interval '75 minutes';
   get diagnostics n = row_count;
+
+  -- Pass two: events that refused the clock. They come on when the courts are
+  -- about to free up rather than at a printed time, which is the only way a
+  -- second batch does not land on top of a first that has not finished.
+  select coalesce((settings ->> 'finals_sunday') is distinct from 'false', true)
+    into v_sunday from nairobi_tournaments limit 1;
+
+  select count(*) into v_running from nairobi_events e
+   where e.active
+     and coalesce(e.settings ->> 'hidden', '') <> 'true'
+     and coalesce(e.settings ->> 'archived', '') <> 'true'
+     and coalesce(e.settings ->> 'format', '') <> 'americano';
+
+  -- What is left to play in whatever is running. Finals and the third place
+  -- match are held back for the last day, so while that is the plan they are
+  -- not what anybody is waiting on.
+  select count(*) into v_left
+    from nairobi_matches mm
+    join nairobi_events ee on ee.id = mm.event_id
+   where ee.active
+     and coalesce(ee.settings ->> 'hidden', '') <> 'true'
+     and coalesce(ee.settings ->> 'archived', '') <> 'true'
+     and coalesce(ee.settings ->> 'format', '') <> 'americano'
+     and mm.status <> 'played'
+     and not (v_sunday and mm.stage = 'knockout'
+              and (mm.bracket_round = 0
+                   or mm.bracket_round = (select max(x.bracket_round) from nairobi_matches x
+                                          where x.event_id = mm.event_id and x.stage = 'knockout')));
+
+  v_winding := (v_running > 0 and v_left <= 3);
+  if v_running = 0 or v_winding then
+    update nairobi_events e
+    set active = true,
+        settings = coalesce(e.settings, '{}'::jsonb) || '{"autostarted": true}'::jsonb
+    where not e.active
+      and coalesce(e.settings ->> 'autostart', '') = 'false'
+      and coalesce(e.settings ->> 'autostarted', '') <> 'true'
+      and coalesce(e.settings ->> 'hidden', '') <> 'true'
+      and coalesce(e.settings ->> 'archived', '') <> 'true'
+      and coalesce(e.settings ->> 'start_time', '') <> ''
+      and exists (select 1 from nairobi_matches mm where mm.event_id = e.id)
+      and not exists (select 1 from nairobi_matches m2
+                      where m2.event_id = e.id and m2.status = 'played')
+      -- Not before the printed time, bar the same run-up the clock gets: the
+      -- people in this batch were told an hour, and turning up to find their
+      -- match already called and gone is worse than an idle court.
+      and nairobi_ts_or_null(e.settings ->> 'start_time')
+          between now() - interval '12 hours' and now() + interval '75 minutes'
+      -- A desk-set hold stops the idle-courts case, but three matches to go in
+      -- something actually running beats it: those courts are about to empty.
+      and (v_winding
+           or nairobi_ts_or_null(e.settings ->> 'delay_until') is null
+           or nairobi_ts_or_null(e.settings ->> 'delay_until') <= now());
+    get diagnostics m = row_count;
+    n := n + m;
+  end if;
+
   if n > 0 then perform nairobi_assign_courts(); end if;
 exception when others then
   -- a malformed start_time must never break loading for every phone
@@ -1429,14 +1569,15 @@ begin
 
   insert into nairobi_matches (id, event_id, stage, group_name, round, bracket_round, bracket_pos,
                        entrant1_id, entrant2_id, score1, score2, games, status, play_order, postponed,
-                       court, next_match_id, next_slot)
+                       court, next_match_id, next_slot, loser_match_id, loser_slot)
   select (x ->> 'id')::uuid, v_eid, coalesce(x ->> 'stage', 'group'), x ->> 'group_name',
          (x ->> 'round')::int, (x ->> 'bracket_round')::int, (x ->> 'bracket_pos')::int,
          (x ->> 'entrant1_id')::uuid, (x ->> 'entrant2_id')::uuid,
          (x ->> 'score1')::int, (x ->> 'score2')::int, x -> 'games',
          coalesce(x ->> 'status', 'scheduled'), (x ->> 'play_order')::numeric,
          coalesce((x ->> 'postponed')::boolean, false),
-         null, (x ->> 'next_match_id')::uuid, (x ->> 'next_slot')::int
+         null, (x ->> 'next_match_id')::uuid, (x ->> 'next_slot')::int,
+         (x ->> 'loser_match_id')::uuid, (x ->> 'loser_slot')::int
   from jsonb_array_elements(coalesce(p_matches, '[]'::jsonb)) x;
 
   perform nairobi_assign_courts();
@@ -1499,12 +1640,12 @@ begin
 
   insert into nairobi_matches (id, event_id, stage, group_name, round, bracket_round, bracket_pos,
                        entrant1_id, entrant2_id, score1, score2, games, status, play_order, postponed,
-                       court, next_match_id, next_slot)
+                       court, next_match_id, next_slot, loser_match_id, loser_slot)
   select (x ->> 'id')::uuid, p_event_id, coalesce(x ->> 'stage', 'group'), x ->> 'group_name',
          (x ->> 'round')::int, null, null,
          (x ->> 'entrant1_id')::uuid, (x ->> 'entrant2_id')::uuid,
          null, null, null, 'scheduled', (x ->> 'play_order')::numeric, false,
-         null, null, null
+         null, null, null, null, null
   from jsonb_array_elements(coalesce(p_matches, '[]'::jsonb)) x;
 
   perform nairobi_assign_courts();
@@ -1540,12 +1681,12 @@ begin
 
   insert into nairobi_matches (id, event_id, stage, group_name, round, bracket_round, bracket_pos,
                        entrant1_id, entrant2_id, score1, score2, games, status, play_order, postponed,
-                       court, next_match_id, next_slot)
+                       court, next_match_id, next_slot, loser_match_id, loser_slot)
   select (x ->> 'id')::uuid, e.event_id, 'group', p_group,
          (x ->> 'round')::int, null, null,
          (x ->> 'entrant1_id')::uuid, (x ->> 'entrant2_id')::uuid,
          null, null, null, 'scheduled', (x ->> 'play_order')::numeric, false,
-         null, null, null
+         null, null, null, null, null
   from jsonb_array_elements(coalesce(p_matches, '[]'::jsonb)) x;
 
   perform nairobi_assign_courts();
@@ -1609,13 +1750,14 @@ begin
 
   insert into nairobi_matches (id, event_id, stage, group_name, round, bracket_round, bracket_pos,
                        entrant1_id, entrant2_id, score1, score2, games, status, play_order, postponed,
-                       court, next_match_id, next_slot)
+                       court, next_match_id, next_slot, loser_match_id, loser_slot)
   select (x ->> 'id')::uuid, p_event_id, 'knockout', null,
          (x ->> 'round')::int, (x ->> 'bracket_round')::int, (x ->> 'bracket_pos')::int,
          (x ->> 'entrant1_id')::uuid, (x ->> 'entrant2_id')::uuid,
          (x ->> 'score1')::int, (x ->> 'score2')::int, null,
          coalesce(x ->> 'status', 'scheduled'), (x ->> 'play_order')::numeric, false,
-         null, (x ->> 'next_match_id')::uuid, (x ->> 'next_slot')::int
+         null, (x ->> 'next_match_id')::uuid, (x ->> 'next_slot')::int,
+         (x ->> 'loser_match_id')::uuid, (x ->> 'loser_slot')::int
   from jsonb_array_elements(coalesce(p_matches, '[]'::jsonb)) x;
 
   update nairobi_events set stage = 'knockout' where id = p_event_id;
@@ -1754,6 +1896,15 @@ begin
       if (case when m.next_slot = 1 then nm.entrant1_id else nm.entrant2_id end)
          is distinct from (case when win_slot = 1 then m.entrant1_id else m.entrant2_id end) then
         return 'The next round already has a score. Clear it first.';
+      end if;
+    end if;
+  end if;
+  if m.loser_match_id is not null then
+    select * into nm from nairobi_matches where id = m.loser_match_id for update;
+    if found and nm.status = 'played' then
+      if (case when m.loser_slot = 1 then nm.entrant1_id else nm.entrant2_id end)
+         is distinct from (case when win_slot = 1 then m.entrant2_id else m.entrant1_id end) then
+        return 'The third place match already has a score. Clear it first.';
       end if;
     end if;
   end if;

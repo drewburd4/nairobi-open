@@ -118,10 +118,18 @@ button.mast-left:hover,button.mast-left:focus-visible{background:var(--accent-so
 .note{font-size:12.5px; color:var(--muted)}
 .empty{padding:36px 16px; text-align:center; color:var(--muted); font-size:14px}
 .err{color:var(--danger); font-size:13px; font-weight:600; margin-top:8px}
+.bkthird{margin:14px 0 0; max-width:260px}
+.bkthird .bkhead{margin-bottom:6px}
+.bkmatch.bkflat{position:static; width:100%}
+.btn.warn{background:var(--warn); border-color:var(--warn); color:#fff}
+.btn.warn:hover{filter:brightness(1.06)}
 .check{display:flex; align-items:center; gap:7px; font-weight:600; margin:8px 0; cursor:pointer}
 .check input{flex:none}
 .startbar{background:var(--warn); color:#fff; font-size:13px; font-weight:700; padding:8px 12px;
   display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; text-align:center}
+.startbar .sbhold{display:inline-flex; gap:6px; align-items:center; flex-wrap:wrap}
+.startbar .sbhold input{font-size:12px; padding:4px 6px; border-radius:6px; border:1px solid rgba(255,255,255,.6);
+  background:rgba(255,255,255,.14); color:#fff}
 .startbar .sbwhat{flex:1 1 100%; font-weight:600; font-size:12px; opacity:.92}
 .startbar .btn{background:#fff; color:var(--warn); border-color:#fff}
 .startbar .btn.secondary{background:transparent; color:#fff; border-color:rgba(255,255,255,.6)}
@@ -667,18 +675,59 @@ function computeStandings(entrants, matches){
    two with best next-placed finishers. sizeOverride N: exactly N spots, whole
    place-tiers first, then best-of-the-next-tier to fill.
    Partial-tier qualifiers are marked wildcard ("best 3rd" etc). */
-function seedField(groupsStandings, adv, sizeOverride){
-  const tierList = t => groupsStandings
-    .map(g => g.rows[t] ? { row: g.rows[t], group: g.group } : null)
-    .filter(Boolean)
-    .map(x => ({
-      entrantId: x.row.id, name: x.row.name, group: x.group, place: t + 1,
-      w: x.row.w, l: x.row.l,
-      winPct: x.row.p ? x.row.w / x.row.p : 0,
-      avgDiff: x.row.p ? x.row.diff / x.row.p : 0,
-      avgPf: x.row.p ? x.row.pf / x.row.p : 0
-    }))
-    .sort((a, b) => b.winPct - a.winPct || b.avgDiff - a.avgDiff || b.avgPf - a.avgPf || a.name.localeCompare(b.name));
+/* The lot a drawn block recorded for this exact set of teams, or null. Same
+   meta.lot / meta.lotFor pair the group standings use; the block key is the
+   sorted ids, so a lot drawn for one block is invisible to every other. */
+function lotsForBlock(ids){
+  const key = ids.slice().sort().join(",");
+  const lots = ids.map(id => {
+    const e = typeof entrantById === "function" ? entrantById(id) : null;
+    return (e && e.meta && e.meta.lotFor === key && e.meta.lot != null) ? e.meta.lot : null;
+  });
+  return lots.every(v => v != null) ? lots : null;
+}
+/* Seeds come from where teams finished, tier by tier: every group winner
+   outranks every runner-up. Within a tier the order is either how well they
+   did, or the group letter, depending on what the desk picked.
+   NAME IS NEVER A TIEBREAKER. When a tier holds teams that nothing separates,
+   the block is reported in seedTies and the caller refuses to seed off it;
+   drawn lots settle it, exactly as they do inside a group. */
+function seedField(groupsStandings, adv, sizeOverride, order){
+  const byGroup = order === "group";
+  const seedTies = [];
+  const level = (a, b) => a.winPct === b.winPct && a.avgDiff === b.avgDiff && a.avgPf === b.avgPf;
+  const tierList = t => {
+    const list = groupsStandings
+      .map(g => g.rows[t] ? { row: g.rows[t], group: g.group } : null)
+      .filter(Boolean)
+      .map(x => ({
+        entrantId: x.row.id, name: x.row.name, group: x.group, place: t + 1,
+        w: x.row.w, l: x.row.l,
+        winPct: x.row.p ? x.row.w / x.row.p : 0,
+        avgDiff: x.row.p ? x.row.diff / x.row.p : 0,
+        avgPf: x.row.p ? x.row.pf / x.row.p : 0
+      }))
+      .sort((a, b) => String(a.group).localeCompare(String(b.group)));
+    /* Group letter order is a stated rule, so it needs no tiebreak at all. */
+    if (byGroup) return list;
+    const ranked = list.slice().sort((a, b) => b.winPct - a.winPct || b.avgDiff - a.avgDiff || b.avgPf - a.avgPf);
+    /* Walk the dead heats. A drawn lot settles one; anything left is reported
+       and the bracket waits, rather than the alphabet deciding a seeding. */
+    for(let i = 0; i < ranked.length; ){
+      let j = i;
+      while(j < ranked.length && level(ranked[i], ranked[j])) j++;
+      if (j - i > 1){
+        const block = ranked.slice(i, j);
+        const lots = lotsForBlock(block.map(x => x.entrantId));
+        if (lots) block.forEach((x, k) => { x.lot = lots[k]; });
+        else seedTies.push({ place: t + 1, ids: block.map(x => x.entrantId), names: block.map(x => x.name) });
+        block.sort((a, b) => (a.lot || 0) - (b.lot || 0));
+        ranked.splice(i, block.length, ...block);
+      }
+      i = j;
+    }
+    return ranked;
+  };
   const maxPlace = Math.max(0, ...groupsStandings.map(g => g.rows.length));
   const seeds = [];
   let size, guaranteed = 0;
@@ -727,7 +776,12 @@ function seedField(groupsStandings, adv, sizeOverride){
       wildcardTie = { names: inTied.concat(outTied).map(c => c.name) };
     }
   }
-  return { seeds, size, guaranteed, wildcards: seeds.filter(s => s.wildcard).length, wildcardTie };
+  /* Only a tie inside a tier that actually made the bracket can change who
+     plays whom, so tiers nobody qualified from are not worth stopping for. */
+  const used = new Set(seeds.map(s => s.entrantId));
+  const ties = seedTies.filter(t => t.ids.some(id => used.has(id)));
+  return { seeds, size, guaranteed, wildcards: seeds.filter(s => s.wildcard).length,
+           wildcardTie, seedTies: ties };
 }
 
 function nextPow2(n){ let p = 1; while(p < n) p *= 2; return p; }
@@ -802,7 +856,7 @@ function buildBracket(eventId, seeds, startOrder){
         entrant1_id: null, entrant2_id: null, score1: null, score2: null, games: null,
         status: "scheduled", play_order: ord, postponed: false, court: null,
         walkover: false, called_at: null, called_ack: false,
-        next_match_id: null, next_slot: null
+        next_match_id: null, next_slot: null, loser_match_id: null, loser_slot: null
       };
       list.push(row); rows.push(row);
     }
@@ -824,6 +878,26 @@ function buildBracket(eventId, seeds, startOrder){
       if (nm){ if (m.next_slot === 1) nm.entrant1_id = m.entrant1_id; else nm.entrant2_id = m.entrant1_id; }
     }
   });
+  /* Third place, played by the two beaten semifinalists. Skipped when a
+     semifinal is a bye, which only happens in a four-slot bracket that three
+     teams qualified for: a bye has no loser, so the match could never fill. */
+  const semiHasBye = totalRounds === 2 && pairs.some(p => !p[0] || !p[1]);
+  if (totalRounds >= 2 && !semiHasBye){
+    ord += 10;
+    const third = {
+      id: uid(), event_id: eventId, stage: "knockout", group_name: null,
+      round: totalRounds + 1, bracket_round: 0, bracket_pos: 0,
+      entrant1_id: null, entrant2_id: null, score1: null, score2: null, games: null,
+      status: "scheduled", play_order: ord, postponed: false, court: null,
+      walkover: false, called_at: null, called_ack: false,
+      next_match_id: null, next_slot: null, loser_match_id: null, loser_slot: null
+    };
+    rows.push(third);
+    roundMatches[totalRounds - 2].forEach((sf, i) => {
+      sf.loser_match_id = third.id;
+      sf.loser_slot = i + 1;
+    });
+  }
   return rows;
 }
 
@@ -1105,17 +1179,26 @@ function demoStore(){
   const checkPin = pin => pin === PIN;
 
   function advanceWinner(m, oldW){
-    if (!m.next_match_id || m.status !== "played") return;
+    if (m.status !== "played" || m.score1 == null || m.score2 == null) return;
     const w = m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id;
-    const nm = findMatch(m.next_match_id);
-    if (nm && nm.status === "scheduled"){
-      /* Respect a manual bracket edit: only overwrite the slot when it is
-         empty, already the winner, or still holds this feeder's old winner. */
-      const cur = m.next_slot === 1 ? nm.entrant1_id : nm.entrant2_id;
-      if (cur == null || cur === w || (oldW != null && cur === oldW)){
-        if (m.next_slot === 1) nm.entrant1_id = w; else nm.entrant2_id = w;
+    const l = m.score1 > m.score2 ? m.entrant2_id : m.entrant1_id;
+    /* Whoever the old winner was, the old loser was the other team. */
+    const oldL = oldW == null ? null
+      : (oldW === m.entrant1_id ? m.entrant2_id : oldW === m.entrant2_id ? m.entrant1_id : null);
+    /* Respect a manual bracket edit: only overwrite the slot when it is
+       empty, already this team, or still holds this feeder's old result. */
+    const push = (id, slot, team, was) => {
+      if (!id || team == null) return;
+      const nm = findMatch(id);
+      if (!nm || nm.status !== "scheduled") return;
+      const cur = slot === 1 ? nm.entrant1_id : nm.entrant2_id;
+      if (cur == null || cur === team || (was != null && cur === was)){
+        if (slot === 1) nm.entrant1_id = team; else nm.entrant2_id = team;
       }
-    }
+    };
+    push(m.next_match_id, m.next_slot, w, oldW);
+    /* And the loser sideways, which only the third place match asks for. */
+    push(m.loser_match_id, m.loser_slot, l, oldL);
   }
 
   /* Mirrors nairobi_score_text / nairobi_log_score so the offline build shows
@@ -1311,17 +1394,22 @@ function demoStore(){
       if (!checkPin(pin)) return fail("Wrong PIN.");
       const m = findMatch(matchId);
       if (!m) return fail("Match not found.");
-      if (m.next_match_id){
-        const nm = findMatch(m.next_match_id);
-        if (nm && nm.status === "played") return fail("The next round already has a score. Clear it first.");
-        if (nm && m.status === "played"){
-          /* only pull back this feeder's own winner; a manually substituted
-             team in that slot stays put */
-          const w = m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id;
-          if (m.next_slot === 1){ if (nm.entrant1_id === w) nm.entrant1_id = null; }
-          else if (nm.entrant2_id === w) nm.entrant2_id = null;
-        }
-      }
+      const played = m.status === "played" && m.score1 != null;
+      const won  = played ? (m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id) : null;
+      const lost = played ? (m.score1 > m.score2 ? m.entrant2_id : m.entrant1_id) : null;
+      const nm = m.next_match_id ? findMatch(m.next_match_id) : null;
+      const lm = m.loser_match_id ? findMatch(m.loser_match_id) : null;
+      if (nm && nm.status === "played") return fail("The next round already has a score. Clear it first.");
+      if (lm && lm.status === "played") return fail("The third place match already has a score. Clear it first.");
+      /* Only pull back this feeder's own result; a manually substituted team in
+         either slot stays put. */
+      const pull = (target, slot, team) => {
+        if (!target || team == null) return;
+        if (slot === 1){ if (target.entrant1_id === team) target.entrant1_id = null; }
+        else if (target.entrant2_id === team) target.entrant2_id = null;
+      };
+      pull(nm, m.next_slot, won);
+      pull(lm, m.loser_slot, lost);
       const was = scoreText(m);
       m.score1 = null; m.score2 = null; m.games = null; m.walkover = false; m.retired = null;
       m.status = "scheduled"; m.court = null; m.held = false;
@@ -1523,6 +1611,11 @@ function demoStore(){
     async adminSetPlayerScores(pin, on){
       if (!checkPin(pin)) return fail("Wrong PIN.");
       db.tournament.settings = Object.assign({}, db.tournament.settings, { player_scores: !!on });
+      notify(); return ok();
+    },
+    async adminSetFinalsSunday(pin, on){
+      if (!checkPin(pin)) return fail("Wrong PIN.");
+      db.tournament.settings = Object.assign({}, db.tournament.settings, { finals_sunday: !!on });
       notify(); return ok();
     },
     async adminDeleteEvent(pin, eventId){
@@ -1812,7 +1905,8 @@ function liveStore(){
     adminResetBracket: (pin, eventId) => rpc("nairobi_admin_reset_bracket", { p_pin: pin, p_event_id: eventId }),
     adminListParticipants: pin => rpc("nairobi_admin_list_participants", { p_pin: pin }),
     adminSaveParticipants: (pin, rows, seen) => rpc("nairobi_admin_save_participants", { p_pin: pin, p_rows: rows, p_seen: seen || null }),
-    adminSetPlayerScores: (pin, on) => rpc("nairobi_admin_set_player_scores", { p_pin: pin, p_on: !!on })
+    adminSetPlayerScores: (pin, on) => rpc("nairobi_admin_set_player_scores", { p_pin: pin, p_on: !!on }),
+    adminSetFinalsSunday: (pin, on) => rpc("nairobi_admin_set_finals_sunday", { p_pin: pin, p_on: !!on })
   };
 }
 </script>
@@ -1828,7 +1922,7 @@ const state = {
   view: "board", eventId: null, search: "", roundFilter: "all",
   standingsFilter: "all",
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null, assignCourt: null, offCourtId: null,
-  startSnooze: 0, tiesForced: false,
+  tiesForced: false,
   setupPreview: null, adminEventId: null, loadError: null,
   entryRows: null, entryDoubles: null, gedit: null, dragId: null,
   pRows: null, pLoaded: false, pDirty: false,
@@ -2019,11 +2113,35 @@ const SW_EXACT = {
   "Pick a partner": "Chagua mwenzako", "Nobody else yet": "Hakuna mwingine bado",
   "Nobody free yet": "Hakuna aliye huru bado",
   /* The manual-start bar. */
-  "Due to start now": "Yanapaswa kuanza sasa",
-  "Start it": "Anzisha", "Start them": "Anzisha", "Not yet": "Bado",
+  "Due to start": "Yanapaswa kuanza",
+  "Start it": "Anzisha", "Start them": "Anzisha",
+  "Hold until": "Shikilia hadi", "Held until": "Yameshikiliwa hadi",
   "Matches still to play in what is running": "Mechi zilizobaki katika yanayoendelea",
-  "Starting now splits the courts between them.": "Kuanzisha sasa kunagawa viwanja kati yao.",
-  "Nothing else is running.": "Hakuna kingine kinachoendelea.",
+  "These come on by themselves once that is down to": "Haya yataanza yenyewe idadi hiyo ikifika",
+  "Nothing is running, so these come on by themselves.": "Hakuna kinachoendelea, hivyo haya yataanza yenyewe.",
+  "Only": "Ni",
+  "left in what is running, so these come on by themselves.":
+    "zilizobaki katika yanayoendelea, hivyo haya yataanza yenyewe.",
+  "Held until ": "Yameshikiliwa hadi ", "Hold cleared": "Kushikilia kumeondolewa",
+  /* Third place, seeding and the finals plan. */
+  "Third place": "Nafasi ya tatu",
+  "Edit teams": "Hariri timu",
+  "Played by the two beaten semifinalists. Both names appear once their semifinals are in.":
+    "Inachezwa na waliopoteza nusu fainali wawili. Majina yote mawili yanaonekana nusu fainali zao zikiisha.",
+  "Finals": "Fainali",
+  "Seeding": "Upangaji wa nafasi",
+  "How bracket seeds are numbered": "Jinsi nafasi za mchujo zinavyopangwa",
+  "By how they did: the best group winner is seed 1":
+    "Kwa matokeo: mshindi bora wa kundi ni nafasi ya 1",
+  "By group letter: A1 is seed 1, B1 is seed 2, then the runners-up":
+    "Kwa herufi ya kundi: A1 ni nafasi ya 1, B1 ni ya 2, kisha washindi wa pili",
+  "Seeding order saved": "Mpangilio wa nafasi umehifadhiwa",
+  "Finals and third place are played on the last day":
+    "Fainali na nafasi ya tatu zinachezwa siku ya mwisho",
+  "Finals held for the last day": "Fainali zimewekwa kwa siku ya mwisho",
+  "Finals counted with everything else": "Fainali zinahesabiwa pamoja na nyingine zote",
+  "Unsaved changes": "Mabadiliko hayajahifadhiwa",
+  "level": "sawa",
   "Start automatically, an hour and a quarter before the planned time":
     "Anza wenyewe, saa moja na robo kabla ya muda uliopangwa",
   "Unticked, the desk is asked instead: a bar appears from five minutes before, with a Start button and a count of what is still being played.":
@@ -2664,9 +2782,19 @@ function americanoStandings(ev){
       s1.forEach(n => { const r = touch(n); r.p++; r.pf += p1; r.pa += p2; if (m.score1 > m.score2) r.w++; });
       s2.forEach(n => { const r = touch(n); r.p++; r.pf += p2; r.pa += p1; if (m.score2 > m.score1) r.w++; });
     });
-  return Object.values(rows)
+  /* Points, then difference, then wins, and then nothing: alphabetical order
+     used to quietly decide an Americano, which is a result nobody played for.
+     Players nothing separates are marked instead, and the desk settles it. */
+  const out = Object.values(rows)
     .map(r => Object.assign(r, { diff: r.pf - r.pa }))
-    .sort((a, b) => b.pf - a.pf || b.diff - a.diff || b.w - a.w || a.name.localeCompare(b.name));
+    .sort((a, b) => b.pf - a.pf || b.diff - a.diff || b.w - a.w);
+  for(let i = 0; i < out.length; ){
+    let j = i;
+    while(j < out.length && out[j].pf === out[i].pf && out[j].diff === out[i].diff && out[j].w === out[i].w) j++;
+    if (j - i > 1) out.slice(i, j).forEach(r => { r.unresolvedTie = j - i; });
+    i = j;
+  }
+  return out;
 }
 const americanoRounds = ev => [...new Set(data.matches
   .filter(m => m.event_id === ev.id).map(m => m.round))].sort((a, b) => a - b);
@@ -2719,7 +2847,22 @@ async function drawLots(gname){
   if (!tie){ toast("Nothing left to draw for in group " + gname + "."); return; }
   if (!confirm(swText("Draw lots between " + tie.names.join(", ") +
     "? This decides who goes through and is recorded on the standings."))) return;
-  const order = tie.ids.slice();
+  return applyLots(tie.ids);
+}
+/* A seeding tier can dead heat across groups, where there is no head to head
+   to fall back on and the group standings have nothing left to say. Same draw,
+   same meta.lot, a block key of its own. */
+async function drawSeedLots(place){
+  const ev = eventById(state.adminEventId);
+  if (!ev) return;
+  const tie = seedTiesFor(ev).find(t => t.place === place);
+  if (!tie){ toast("Nothing left to draw for at that place."); return; }
+  if (!confirm(swText("Draw lots between " + tie.names.join(", ") +
+    "? This decides their seeding and is recorded against them."))) return;
+  return applyLots(tie.ids);
+}
+async function applyLots(ids){
+  const order = ids.slice();
   for(let i = order.length - 1; i > 0; i--){
     const j = Math.floor(Math.random() * (i + 1));
     [order[i], order[j]] = [order[j], order[i]];
@@ -2727,7 +2870,7 @@ async function drawLots(gname){
   /* Stamp which block the draw settles. A lot with no block, or with another
      block's, is ignored by the standings, so a draw that only half lands
      leaves the tie flagged rather than half-applied. */
-  const lotFor = tie.ids.slice().sort().join(",");
+  const lotFor = ids.slice().sort().join(",");
   const failed = [];
   for(let i = 0; i < order.length; i++){
     const e = entrantById(order[i]);
@@ -2774,12 +2917,23 @@ function seedFieldFor(ev){
   const gs = groups.map(g => ({ group: g, rows: standingsFor(ev, g) }));
   const ks = evSetting(ev, "knockout_size", "auto");
   const override = (ks === "auto" || !ks) ? null : parseInt(ks, 10);
-  return seedField(gs, evSetting(ev, "advance_per_group", 2), override);
+  return seedField(gs, evSetting(ev, "advance_per_group", 2), override,
+                   evSetting(ev, "seed_order", "performance"));
+}
+/* Blocks inside a seeding tier that nothing has separated. Same contract as
+   wildcardTieFor: empty means the bracket can be seeded honestly. */
+function seedTiesFor(ev){
+  return isAmericano(ev) ? [] : (seedFieldFor(ev).seedTies || []);
 }
 function wildcardTieFor(ev){
   return isAmericano(ev) ? null : (seedFieldFor(ev).wildcardTie || null);
 }
+/* bracket_round 0 is the third-place match: it hangs off the side of the tree
+   rather than sitting in a round of it, which is why it gets a round number no
+   column ever looks for. */
+const isThirdPlace = m => m.stage === "knockout" && m.bracket_round === 0;
 function koLabel(m){
+  if (isThirdPlace(m)) return "Third place";
   const ko = data.matches.filter(x => x.event_id === m.event_id && x.stage === "knockout");
   const total = Math.max(0, ...ko.map(x => x.bracket_round || 0));
   return roundLabelFor(m.bracket_round, total);
@@ -3263,28 +3417,69 @@ function manualStartDue(){
     return ms.length > 0 && !ms.some(m => m.status === "played");
   }).sort((a, b) => a.sort_order - b.sort_order);
 }
+/* Finals and the third place match are held for the last day, so while that is
+   the plan they are not what the next batch is waiting on. */
+const finalsSundayOn = () => !(data.tournament && data.tournament.settings &&
+  data.tournament.settings.finals_sunday === false);
+function matchesLeftRunning(){
+  const sunday = finalsSundayOn();
+  const koTotal = {};
+  data.matches.forEach(m => {
+    if (m.stage !== "knockout") return;
+    koTotal[m.event_id] = Math.max(koTotal[m.event_id] || 0, m.bracket_round || 0);
+  });
+  return data.matches.filter(m => {
+    const ev = eventById(m.event_id);
+    if (!ev || !ev.active || isHidden(ev) || isAmericano(ev)) return false;
+    if (m.status === "played") return false;
+    if (sunday && m.stage === "knockout" &&
+        (m.bracket_round === 0 || m.bracket_round === koTotal[m.event_id])) return false;
+    return true;
+  }).length;
+}
+const WIND_DOWN_AT = 3;
 function renderStartDue(){
   if (!state.adminPin) return "";
-  if (state.startSnooze && Date.now() < state.startSnooze) return "";
   const due = manualStartDue();
   if (!due.length) return "";
-  const left = data.matches.filter(m => m.status !== "played" &&
-    (eventById(m.event_id) || {}).active).length;
+  const running = activeEvents().filter(e => !isAmericano(e)).length;
+  const left = matchesLeftRunning();
+  const holdEl = due.map(e => evSetting(e, "delay_until", "")).find(v => v) || "";
+  const heldTill = holdEl ? new Date(holdEl) : null;
+  const holding = heldTill && !isNaN(heldTill.getTime()) && heldTill.getTime() > Date.now();
   const names = due.map(e => e.name).join(", ");
   let h = '<div class="startbar">';
-  h += '<span>' + swText("Due to start now") + ': ' + esc(names) + '</span>';
+  h += '<span>' + swText("Due to start") + ': ' + esc(names) + '</span>';
   h += '<button class="btn small" onclick="startDueEvents()">' +
     swText(due.length === 1 ? "Start it" : "Start them") + '</button>';
-  h += '<button class="btn small secondary" onclick="snoozeStartDue()">' + swText("Not yet") + '</button>';
-  /* The whole reason this is a question and not an autostart: say how much of
-     what is already running would now be sharing the courts. */
-  h += '<span class="sbwhat">' + (left
-    ? swText("Matches still to play in what is running") + ': ' + left + '. ' +
-      swText("Starting now splits the courts between them.")
-    : swText("Nothing else is running.")) + '</span>';
+  /* A time rather than a snooze: the desk knows when it wants these, and a ten
+     minute nag it has to dismiss six times is not that. */
+  h += '<span class="sbhold"><input type="datetime-local" id="startbar-hold" value="' + esc(holdEl) + '">' +
+    '<button class="btn small secondary" onclick="holdDueEvents()">' + swText("Hold until") + '</button></span>';
+  /* Why it will happen on its own, so the desk can leave it alone. */
+  let why;
+  if (!running) why = swText("Nothing is running, so these come on by themselves.");
+  else if (left <= WIND_DOWN_AT) why = swText("Only") + " " + left + " " +
+    swText("left in what is running, so these come on by themselves.");
+  else why = swText("Matches still to play in what is running") + ": " + left + ". " +
+    swText("These come on by themselves once that is down to") + " " + WIND_DOWN_AT + "." +
+    (holding ? " " + swText("Held until") + " " +
+      heldTill.toLocaleString(state.lang === "sw" ? "sw" : [], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) + "." : "");
+  h += '<span class="sbwhat">' + why + '</span>';
   return h + '</div>';
 }
-function snoozeStartDue(){ state.startSnooze = Date.now() + 10 * 60 * 1000; render(); }
+async function holdDueEvents(){
+  const el = document.getElementById("startbar-hold");
+  const v = el ? el.value : "";
+  const due = manualStartDue();
+  if (!due.length) return;
+  for(const ev of due){
+    const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, { delay_until: v || "" });
+    if (!r.ok){ toast(r.error); return; }
+  }
+  toast(v ? "Held until " + v.replace("T", " ") : "Hold cleared");
+  await reload();
+}
 async function startDueEvents(){
   const due = manualStartDue();
   if (!due.length) return;
@@ -3399,12 +3594,18 @@ function renderAmericanoBoard(ev){
 function renderAmericanoTable(table){
   let h = '<table class="standings"><thead><tr><th></th><th class="tname">Player</th>' +
     '<th>Pld</th><th>Won</th><th>Points</th><th>Diff</th></tr></thead><tbody>';
+  const stuck = table.filter(r => r.unresolvedTie).length;
   table.forEach((r, i) => {
-    h += '<tr><td>' + (i + 1) + '</td><td class="tname">' + esc(r.name) + '</td>' +
+    h += '<tr><td>' + (i + 1) + '</td><td class="tname">' + esc(r.name) +
+      (state.adminPin && r.unresolvedTie ? ' <span class="tag warn">level</span>' : '') + '</td>' +
       '<td>' + r.p + '</td><td>' + r.w + '</td><td><b>' + r.pf + '</b></td>' +
       '<td>' + (r.diff > 0 ? '+' : '') + r.diff + '</td></tr>';
   });
-  return h + '</tbody></table>';
+  h += '</tbody></table>';
+  if (state.adminPin && stuck)
+    h += '<p class="note" style="color:var(--warn);font-weight:700">' + stuck +
+      ' players are level on points, difference and wins. The order between them is not earned; settle it at the desk.</p>';
+  return h;
 }
 
 /* The Americano division runs on its own courts alongside the main draw, so
@@ -3890,7 +4091,9 @@ function renderBracket(){
       'Round 1 is on the left and winners move to the right, toward the final and champion. ' +
       field.seeds.length + ' qualify for a ' + size + '-slot bracket' +
       (field.wildcards ? ', including ' + field.wildcards + ' wildcard' + (field.wildcards > 1 ? 's' : '') + ' from the next places' : '') +
-      '. The real bracket is created when the desk confirms the group stage is finished.</p>';
+      '. The real bracket is created when the desk confirms the group stage is finished' +
+      (totalRounds >= 2 ? ', along with a third place match between the two beaten semifinalists' : '') +
+      '.</p>';
     return h;
   }
 
@@ -3949,6 +4152,32 @@ function renderBracket(){
   }
   h += bkChampCol(champHtml, total, bodyH);
   h += '</div></div>';
+  /* Third place sits beside the tree rather than in it: it is fed by the two
+     semifinal losers, so it belongs to no round and has nowhere to send a
+     winner. Rendering it as its own card keeps the tree geometry honest. */
+  const third = ko.find(isThirdPlace);
+  if (third){
+    const t1 = entrantName(third.entrant1_id), t2 = entrantName(third.entrant2_id);
+    const tPlayed = third.status === "played" && third.score1 != null;
+    const tw1 = tPlayed && third.score1 > third.score2, tw2 = tPlayed && third.score2 > third.score1;
+    const tSide = n => Array.isArray(third.games) && third.games.length && !third.walkover
+      ? third.games.map(g => g[n - 1]).join(' ')
+      : (n === 1 ? third.score1 : third.score2);
+    const tRows =
+      bkTeamRow(t1 ? esc(t1) : 'TBD', bkSideCls(!!t1, tw1, tPlayed), tPlayed ? tSide(1) : null,
+                third.walkover && tw1 ? wo : (third.retired === third.entrant1_id ? ret : '')) +
+      bkTeamRow(t2 ? esc(t2) : 'TBD', bkSideCls(!!t2, tw2, tPlayed), tPlayed ? tSide(2) : null,
+                third.walkover && tw2 ? wo : (third.retired === third.entrant2_id ? ret : ''));
+    const tClickable = third.entrant1_id && third.entrant2_id;
+    h += '<div class="bkthird"><div class="bkhead">Third place</div>';
+    h += tClickable
+      ? '<button class="bkmatch bkflat" onclick="openMatch(\'' + third.id + '\')">' + tRows + '</button>'
+      : '<div class="bkmatch bkflat">' + tRows + '</div>';
+    if (state.adminPin && third.status === "scheduled")
+      h += '<button class="btn small secondary" onclick="openSlotEditor(\'' + third.id + '\')">Edit teams</button>';
+    h += '<p class="note" style="margin:6px 0 0">Played by the two beaten semifinalists. Both names appear once their semifinals are in.</p>';
+    h += '</div>';
+  }
   h += '<p class="note">Winners move to the right, round by round, toward the champion. Tap a match to see or enter its result.' +
     (state.adminPin ? ' Unplayed matches have an Edit link to fix the teams by hand.' : '') + '</p>';
   return h;
@@ -4441,7 +4670,21 @@ function renderAdmin(){
       : 'Hiding takes a test or abandoned event off every player screen without losing anything, and can be undone. Deleting is permanent and asks you to type the name.') + '</p>';
     h += '<p class="note" style="margin-top:8px">Courts are shared automatically: every free court takes the next match in line across all running events, alternating between them. Start a second event and they mix in; pause an event and its matches leave the courts and queue.</p>';
 
-    h += '<div class="divider"></div><h4>4 · Finish group stage</h4>';
+    /* Two honest ways to number the seeds, and the organiser's preference is
+       not always the app's. Performance is the default: the best group winner
+       is seed 1. By group letter is what a draw sheet printed in advance
+       wants, and it is a stated rule rather than a hidden one. */
+    h += '<div class="divider"></div><h4>4 · Seeding</h4>';
+    h += '<div class="field"><label for="adm-seedorder">How bracket seeds are numbered</label>' +
+      '<select id="adm-seedorder" onchange="saveSeedOrder(this.value)">' +
+      '<option value="performance"' + (evSetting(ev, "seed_order", "performance") === "group" ? '' : ' selected') +
+        '>By how they did: the best group winner is seed 1</option>' +
+      '<option value="group"' + (evSetting(ev, "seed_order", "performance") === "group" ? ' selected' : '') +
+        '>By group letter: A1 is seed 1, B1 is seed 2, then the runners-up</option>' +
+      '</select></div>';
+    h += '<p class="note">Either way every group winner is seeded above every runner-up, and the bracket places seed 1 at the top, seed 2 at the bottom, seed 3 in the top of the bottom half, and so on. Groups themselves are drawn by DUPR snake unless you changed it above.</p>';
+
+    h += '<div class="divider"></div><h4>5 · Finish group stage</h4>';
     /* Nothing separated these teams and only some of them go through, so the
        bracket cannot be seeded until the desk draws. Left to itself the order
        would be alphabetical, which is not a result. */
@@ -4461,6 +4704,19 @@ function renderAdmin(){
         'Nothing in the rules separates them, so draw for it.' +
         '<div style="margin-top:8px"><button class="btn small" onclick="drawLots(\'' + jsAttr(t.group) + '\')">' +
         'Draw lots for group ' + esc(t.group) + '</button></div></div>';
+    });
+    /* A dead heat inside a seeding tier: nothing separates them and their seed
+       numbers decide who meets whom, so the desk draws rather than the app
+       picking. Held to the same rule as a group tie: only once the groups
+       feeding it have finished, or once seeding has been refused over it. */
+    const seedTies = (isAmericano(ev) ? [] : seedTiesFor(ev))
+      .filter(() => state.tiesForced || groupsOfEvent(ev).every(groupFinished));
+    seedTies.forEach(t => {
+      h += '<div class="gwarn">' + esc(t.names.join(", ")) + ' finished ' + ordinal(t.place) +
+        ' in their groups and are level on every measure that decides seeding, so their ' +
+        'places in the bracket are not earned. Draw for it.' +
+        '<div style="margin-top:8px"><button class="btn small" onclick="drawSeedLots(' + t.place + ')">' +
+        'Draw lots for the ' + ordinal(t.place) + ' places</button></div></div>';
     });
     const wcTie = isAmericano(ev) ? null : wildcardTieFor(ev);
     if (wcTie)
@@ -4504,7 +4760,7 @@ function renderAdmin(){
         '<button class="btn small' + (groupLeft ? ' secondary' : '') + '" ' + (hasMatches ? '' : 'disabled') + ' onclick="confirmGroupStage()">Confirm group stage finished</button>';
     }
 
-    h += '<div class="divider"></div><h4>5 · Export results</h4>';
+    h += '<div class="divider"></div><h4>6 · Export results</h4>';
     h += '<p class="note">One row per played match, players split out of team names, one column pair per game. Made to copy into DUPR\'s club "Import Matches via CSV" template (download that template from the DUPR club dashboard; it wants each player\'s DUPR ID, so collect those with the roster).</p>';
     h += '<button class="btn small secondary" onclick="downloadResults(false)">Download this event (CSV)</button> ' +
       '<button class="btn small secondary" onclick="downloadResults(true)">Download all events (CSV)</button>';
@@ -4531,6 +4787,14 @@ function renderAdmin(){
     ' onchange="setPlayerScores(this.checked)"> Let players enter their own scores</label>';
   if (!playerScoresOn())
     h += '<p class="note" style="color:var(--warn);font-weight:700">Off: players are told to report at the desk. Every score comes through an unlocked admin phone.</p>';
+  h += '</div>';
+
+  /* Tournament-wide and read by the wind-down trigger, so it belongs with the
+     other one-off decisions rather than inside any single event. */
+  h += '<div class="panel"><h3>Finals</h3>';
+  h += '<p class="note">With this ticked, a running event that has nothing left but its final and its third place match is treated as finished when deciding whether to bring the next batch on. Untick it if finals are being played the same day as their groups.</p>';
+  h += '<label class="check"><input type="checkbox" id="adm-finalssunday"' + (finalsSundayOn() ? ' checked' : '') +
+    ' onchange="setFinalsSunday(this.checked)"> Finals and third place are played on the last day</label>';
   h += '</div>';
 
   h += '<div class="panel"><h3>Admin powers on the other tabs</h3><p class="note">' +
@@ -5670,6 +5934,20 @@ async function saveNote(){
   if (!r.ok){ toast(r.error); return; }
   toast("Schedule saved"); await reload();
 }
+async function saveSeedOrder(v){
+  const ev = eventById(state.adminEventId);
+  if (!ev) return;
+  const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name,
+    { seed_order: v === "group" ? "group" : "performance" });
+  if (!r.ok){ toast(r.error); return; }
+  toast("Seeding order saved"); await reload();
+}
+async function setFinalsSunday(on){
+  const r = await store.adminSetFinalsSunday(state.adminPin, on);
+  if (!r.ok){ toast(r.error); render(); return; }
+  toast(on ? "Finals held for the last day" : "Finals counted with everything else");
+  await reload();
+}
 async function setPlayerScores(on){
   const r = await store.adminSetPlayerScores(state.adminPin, on);
   if (!r.ok){ toast(r.error); render(); return; }
@@ -5963,9 +6241,16 @@ function setPCell(i, key, val){
     }
   }
   rows[i][key] = val;
+  markPDirty();
+}
+/* Called from inside a keystroke, where a full render would take the keyboard
+   away, so the two things that have to change are changed by hand. */
+function markPDirty(){
   state.pDirty = true;
   const mark = document.getElementById("p-unsaved");
   if (mark) mark.style.display = "";
+  const btn = document.getElementById("p-save");
+  if (btn) btn.classList.add("warn");
 }
 function setPEntry(i, evId, on){
   const rows = pRows();
@@ -6174,8 +6459,11 @@ function renderParticipants(){
   h += '</div>';
   h += '<button class="btn small secondary" onclick="addPRows()">Add ' + P_CHUNK + ' more rows</button>';
 
-  h += '<div class="pbar"><button class="btn" onclick="saveParticipants()">Save participants</button>' +
-    '<span class="punsaved" id="p-unsaved"' + (state.pDirty ? '' : ' style="display:none"') + '>Not saved yet</span>' +
+  /* The button itself goes red the moment anything is typed. A grey Save with
+     a small grey note beside it is exactly what a desk walks away from. */
+  h += '<div class="pbar"><button class="btn' + (state.pDirty ? ' warn' : '') + '" id="p-save" onclick="saveParticipants()">' +
+    (state.pDirty ? 'Save participants' : 'Save participants') + '</button>' +
+    '<span class="punsaved" id="p-unsaved"' + (state.pDirty ? '' : ' style="display:none"') + '>Unsaved changes</span>' +
     '<span class="spacer" style="flex:1"></span>' +
     '<span class="note" style="margin:0">' + filled + ' ' + (filled === 1 ? 'person' : 'people') + '</span></div>';
 
@@ -6399,6 +6687,15 @@ async function confirmGroupStage(){
     render();
     return;
   }
+  const sTies = seedTiesFor(ev);
+  if (sTies.length){
+    state.tiesForced = true;
+    toast(sTies.map(t => ordinal(t.place) + " places: " + t.names.join(", ")).join(" · ") +
+      " are level on everything that decides seeding. Draw lots first.");
+    state.view = "admin";
+    render();
+    return;
+  }
   const wcTie = wildcardTieFor(ev);
   if (wcTie && !confirm(swText("A wildcard place is tied between " + wcTie.names.join(", ") +
       " on every cross-group measure; the pick will be alphabetical. Seed the bracket anyway? Edit teams can fix it after."))) return;
@@ -6437,7 +6734,7 @@ async function maybeAutoBracket(){
     if (!group.length || ms.some(m => m.stage === "knockout")) continue;
     if (group.some(m => m.status !== "played")) continue;
     if (!groupsOfEvent(ev).length) continue;
-    if (unresolvedTiesAtCut(ev).length || wildcardTieFor(ev)) continue;   /* wait for the desk to settle the tie */
+    if (unresolvedTiesAtCut(ev).length || wildcardTieFor(ev) || seedTiesFor(ev).length) continue;   /* wait for the desk to settle the tie */
     if (seedFieldFor(ev).seeds.length < 2) continue;
     await reload();
     /* Re-check everything against the fresh pull, not just some of it: another
@@ -6448,7 +6745,7 @@ async function maybeAutoBracket(){
     const freshMs = data.matches.filter(m => m.event_id === ev.id);
     if (freshMs.some(m => m.stage === "knockout")) continue;
     if (freshMs.filter(m => m.stage === "group").some(m => m.status !== "played")) continue;
-    if (unresolvedTiesAtCut(fresh).length || wildcardTieFor(fresh)) continue;
+    if (unresolvedTiesAtCut(fresh).length || wildcardTieFor(fresh) || seedTiesFor(fresh).length) continue;
     const field = seedFieldFor(fresh);
     if (field.seeds.length < 2) continue;
     const maxOrder = Math.max(0, ...freshMs.map(m => m.play_order || 0));
