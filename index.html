@@ -512,16 +512,24 @@ function buildCatchupMatches(eventId, groupName, newId, memberIds, startRound, s
   }));
 }
 
-/* Merge per-event pending lists into one queue, weighted by list length: an
-   event with more waiting matches appears proportionally more often, so it
-   claims proportionally more courts. Each match gets a fractional key
-   (position + 0.5) / count, and the queue is those keys ascending (ties broken
-   by event order). An equal split falls back to plain alternation. */
+/* Merge per-event pending lists into one queue. Court share is a blend
+   (Drew's split, Aug 2026): 35% divided evenly between the running events and
+   65% by how many matches each still has, so a big draw still finishes sooner
+   but can't starve a small one down to a single court. Each match gets a
+   fractional key (position + 0.5) / weight and the queue is those keys
+   ascending (ties broken by event order); one event alone reduces to the old
+   pure-proportional order exactly. Mirrors the frac in nairobi_assign_courts
+   and nairobi_admin_swap_out. */
 function weaveQueues(lists){
   const items = [];
+  const live = lists.filter(l => l.length);
+  const total = live.reduce((s, l) => s + l.length, 0);
+  const evenShare = live.length ? total / live.length : 0;
   lists.forEach((list, e) => {
     const n = list.length;
-    for(let i = 0; i < n; i++) items.push({ m: list[i], e: e, key: (i + 0.5) / n });
+    if (!n) return;
+    const w = 0.35 * evenShare + 0.65 * n;
+    for(let i = 0; i < n; i++) items.push({ m: list[i], e: e, key: (i + 0.5) / w });
   });
   items.sort((a, b) => a.key - b.key || a.e - b.e);
   return items.map(x => x.m);
@@ -940,8 +948,11 @@ const EVENT_CATEGORIES = [
   "Masters Doubles (Men)", "Masters Doubles (Women)", "Masters Mixed Doubles"];
 
 function defaultEventSettings(){
+  /* win_by_two on by default (Drew, Aug 2026): group games play out win-by-2
+     like the knockouts, and an organiser unticks it for a day that must run
+     to the clock. Explicit here so existing events keep whatever they have. */
   return { points_to_group: 21, points_to_knockout: 11, best_of_group: 1, best_of_knockout: 3,
-    advance_per_group: 2, knockout_size: "auto", group_size: 6, schedule_note: "" };
+    win_by_two: true, advance_per_group: 2, knockout_size: "auto", group_size: 6, schedule_note: "" };
 }
 
 function buildMockData(){
@@ -1918,8 +1929,8 @@ const SW_EXACT = {
   "Could not load the participants.": "Imeshindwa kupakia washiriki.",
   "Could not save.": "Imeshindwa kuhifadhi.",
   "Courts this event may use": "Viwanja ambavyo shindano hili linaweza kutumia",
-  "Leave all ticked to share every court (weighted by how many matches each event still has). Tick only some to keep this event on just those courts.":
-    "Acha vyote vikiwa na alama ili kushiriki kila uwanja (kwa uzito wa mechi zilizobaki za kila shindano). Weka alama kwenye baadhi tu ili shindano hili libaki kwenye viwanja hivyo pekee.",
+  "Leave all ticked to share every court (split partly evenly between events, mostly by how many matches each still has). Tick only some to keep this event on just those courts.":
+    "Acha vyote vikiwa na alama ili kushiriki kila uwanja (mgawanyo ni nusu-sawa kati ya mashindano, na zaidi kwa mechi zilizobaki za kila moja). Weka alama kwenye baadhi tu ili shindano hili libaki kwenye viwanja hivyo pekee.",
   "How long this will take": "Muda utakaochukua",
   "Save settings": "Hifadhi mipangilio", "Not saved yet": "Bado haijahifadhiwa",
   "Tick at least one court. To take this event off court entirely, pause it instead.":
@@ -3987,7 +3998,7 @@ function renderAdmin(){
         }
         return s;
       })() +
-      '</div><p class="note" style="margin:2px 0 0">Leave all ticked to share every court (weighted by how many matches each event still has). Tick only some to keep this event on just those courts.</p></div>' +
+      '</div><p class="note" style="margin:2px 0 0">Leave all ticked to share every court (split partly evenly between events, mostly by how many matches each still has). Tick only some to keep this event on just those courts.</p></div>' +
       '<div class="field"><label>How long this will take</label>' +
       '<p class="note" id="adm-estimate" style="margin:2px 0 0">' + estimateText(ev) + '</p></div>' +
       '<p class="note" style="margin-top:8px">Nothing above takes effect until you press Save settings; saved changes then apply right away, even mid-event. "Auto" knockout size takes the top ' + evSetting(ev, "advance_per_group", 2) + ' per group and fills to a full bracket with best next-placed teams; a fixed size does the same math for that exact number. The group size sits with the draw below, because drawing saves it for you.</p>' +
