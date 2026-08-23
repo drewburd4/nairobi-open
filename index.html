@@ -704,7 +704,23 @@ function seedField(groupsStandings, adv, sizeOverride){
       t++;
     }
   }
-  return { seeds, size, guaranteed, wildcards: seeds.filter(s => s.wildcard).length };
+  /* A wildcard place decided by nothing but name order is flagged, the same
+     honesty rule the group standings follow: the cross-group "best next
+     placed" comparison has no head-to-head to fall back on, so a dead heat at
+     the cut used to pick a qualifier alphabetically in silence. */
+  let wildcardTie = null;
+  const lastWc = seeds.filter(s => s.wildcard).slice(-1)[0];
+  if (lastWc){
+    const tier = tierList(lastWc.place - 1);
+    const inIds = new Set(seeds.map(s => s.entrantId));
+    const eq = c => c.winPct === lastWc.winPct && c.avgDiff === lastWc.avgDiff && c.avgPf === lastWc.avgPf;
+    const outTied = tier.filter(c => !inIds.has(c.entrantId) && eq(c));
+    if (outTied.length){
+      const inTied = tier.filter(c => inIds.has(c.entrantId) && eq(c));
+      wildcardTie = { names: inTied.concat(outTied).map(c => c.name) };
+    }
+  }
+  return { seeds, size, guaranteed, wildcards: seeds.filter(s => s.wildcard).length, wildcardTie };
 }
 
 function nextPow2(n){ let p = 1; while(p < n) p *= 2; return p; }
@@ -1970,6 +1986,7 @@ const SW_EXACT = {
   "Tick people for this event on the Participants tab first.":
     "Chagua watu wa shindano hili kwenye ukurasa wa Washiriki kwanza.",
   "Still to sort out:": "Bado kuna cha kutatua:",
+  "Clear the drawn lots": "Futa kura zilizopigwa",
   "No complete pairs yet.": "Hakuna jozi zilizokamilika bado.",
   "The participants list has changes you have not saved. Save them before drawing?":
     "Orodha ya washiriki ina mabadiliko ambayo hayajahifadhiwa. Yahifadhi kabla ya kuchora?",
@@ -2265,6 +2282,14 @@ const SW_PATTERNS = [
   [/^Draw lots between (.+)\? This decides who goes through and is recorded on the standings\.$/,
    "Mpige kura kati ya $1? Hii itaamua nani anafuzu na itarekodiwa kwenye msimamo."],
   [/^Lots drawn: (.+)$/, "Kura zimepigwa: $1"],
+  [/^Clear the drawn lots for group (\S+)\? The tie is flagged again and can be re-drawn\.$/,
+    "Ufute kura zilizopigwa za kundi $1? Sare itaonyeshwa tena na kura zinaweza kupigwa upya."],
+  [/^No drawn lots in group (\S+)\.$/, "Hakuna kura zilizopigwa kwenye kundi $1."],
+  [/^Could not record the draw for (.+)\. The draw was rolled back; try again\.$/,
+    "Imeshindwa kurekodi kura za $1. Kura zimerudishwa nyuma; jaribu tena."],
+  [/^Group (\S+) was settled by drawn lots\.$/, "Kundi $1 lilitatuliwa kwa kura zilizopigwa."],
+  [/^A wildcard place is tied between (.+) on every cross-group measure; the pick will be alphabetical\. Seed the bracket anyway\? Edit teams can fix it after\.$/,
+    "Nafasi ya wildcard ina sare kati ya $1 kwa kila kipimo; itachaguliwa kialfabeti. Uchore bango hata hivyo? Badilisha timu inaweza kurekebisha baadaye."],
   [/^Who comes on Court (\d+)\?$/, "Nani aingie Uwanja $1?"],
   [/^(\d+)\. before ([^·]+)$/, "$1. kabla ya $2"],
   [/^(\d+)\. the very front$/, "$1. mbele kabisa"],
@@ -2603,8 +2628,13 @@ function unresolvedTiesAtCut(ev){
       const block = blocks[key];
       if (block.length < 2) continue;
       const inCount = block.filter(r => through.has(r.id)).length;
-      if (inCount > 0 && inCount < block.length)
-        out.push({ group: g, names: block.map(r => r.name), ids: block.map(r => r.id) });
+      /* Any unresolved tie that touches the qualifiers blocks seeding, not
+         only one that straddles the cut: teams tied entirely ABOVE the cut
+         still get their bracket SLOTS from this order, and alphabetical is
+         not a seeding either. */
+      if (inCount > 0)
+        out.push({ group: g, names: block.map(r => r.name), ids: block.map(r => r.id),
+                   mixed: inCount < block.length });
     }
   }
   return out;
@@ -2637,11 +2667,36 @@ async function drawLots(gname){
     if (!r.ok) failed.push(e.name);
   }
   if (failed.length){
-    toast("Could not record the draw for " + failed.join(", ") + ". Nothing was applied; draw again.");
+    /* Roll back the lots that DID land, so the standings never run on half a
+       draw: before this, "Nothing was applied" was a hope, not a fact. */
+    for(const id of order){
+      const e = entrantById(id);
+      if (!e || failed.includes(e.name)) continue;
+      const meta = Object.assign({}, e.meta || {});
+      delete meta.lot; delete meta.lotFor;
+      try{ await store.adminSetEntrantMeta(state.adminPin, e.id, meta); }catch(_){}
+    }
+    toast("Could not record the draw for " + failed.join(", ") + ". The draw was rolled back; try again.");
     await reload();
     return;
   }
   toast("Lots drawn: " + order.map(id => (entrantById(id) || {}).name).join(", then "));
+  await reload();
+}
+/* The standings note promises a draw can be re-done; clearing the recorded
+   lots is how: the tie flags again and Draw lots reappears. */
+async function clearLots(gname){
+  const ev = eventById(state.adminEventId);
+  if (!ev) return;
+  const holders = data.entrants.filter(e => e.event_id === ev.id && e.group_name === gname && e.meta && e.meta.lot != null);
+  if (!holders.length){ toast("No drawn lots in group " + gname + "."); return; }
+  if (!confirm(swText("Clear the drawn lots for group " + gname + "? The tie is flagged again and can be re-drawn."))) return;
+  for(const e of holders){
+    const meta = Object.assign({}, e.meta);
+    delete meta.lot; delete meta.lotFor;
+    const r = await store.adminSetEntrantMeta(state.adminPin, e.id, meta);
+    if (!r.ok){ toast(r.error); break; }
+  }
   await reload();
 }
 function seedFieldFor(ev){
@@ -2650,6 +2705,9 @@ function seedFieldFor(ev){
   const ks = evSetting(ev, "knockout_size", "auto");
   const override = (ks === "auto" || !ks) ? null : parseInt(ks, 10);
   return seedField(gs, evSetting(ev, "advance_per_group", 2), override);
+}
+function wildcardTieFor(ev){
+  return isAmericano(ev) ? null : (seedFieldFor(ev).wildcardTie || null);
 }
 function koLabel(m){
   const ko = data.matches.filter(x => x.event_id === m.event_id && x.stage === "knockout");
@@ -4248,19 +4306,40 @@ function renderAdmin(){
     const cutTies = isAmericano(ev) ? [] : unresolvedTiesAtCut(ev);
     cutTies.forEach(t => {
       h += '<div class="gwarn">Group ' + esc(t.group) + ': ' + esc(t.names.join(", ")) +
-        ' are level on wins, head to head, point difference and points scored, and only some of them go through. ' +
+        ' are level on wins, head to head, point difference and points scored' +
+        (t.mixed ? ', and only some of them go through. ' : ', and their bracket seeding hangs on the order. ') +
         'Nothing in the rules separates them, so draw for it.' +
         '<div style="margin-top:8px"><button class="btn small" onclick="drawLots(\'' + jsAttr(t.group) + '\')">' +
         'Draw lots for group ' + esc(t.group) + '</button></div></div>';
+    });
+    const wcTie = isAmericano(ev) ? null : wildcardTieFor(ev);
+    if (wcTie)
+      h += '<div class="gwarn">A best-next-placed wildcard place is tied between ' + esc(wcTie.names.join(", ")) +
+        ' on every cross-group measure, so the pick shown is alphabetical, not earned. ' +
+        'Settle it at the desk and use Edit teams on the bracket if the wrong side is in.</div>';
+    /* Lots already drawn can be undone: the promise on the standings is that
+       a draw can be re-done, and clearing is how. */
+    const lotGroups = [...new Set(data.entrants
+      .filter(e => e.event_id === ev.id && e.meta && e.meta.lot != null)
+      .map(e => e.group_name))].sort();
+    lotGroups.forEach(g => {
+      h += '<p class="note">Group ' + esc(g) + ' was settled by drawn lots. ' +
+        '<button class="btn small secondary" onclick="clearLots(\'' + jsAttr(g) + '\')">Clear the drawn lots</button></p>';
     });
     if (koCount){
       /* Auto-seeding is one-shot, so a group score corrected afterwards changes
          the standings while the bracket keeps the old qualifiers. Nothing used
          to say so, and the desk has no reason to suspect it. */
-      const should = seedFieldFor(ev).seeds.map(x => x.entrantId).sort().join(",");
+      /* Compared as PAIRINGS, not as a sorted id set: a correction that keeps
+         the same qualifiers but reshuffles who plays whom is just as stale,
+         and the old set comparison could not see it. */
+      const fieldNow = seedFieldFor(ev);
+      const should = bracketPairs(fieldNow.seeds)
+        .map(p => [p[0], p[1]].map(s => s ? s.entrantId : "bye").sort().join("+")).join("|");
       const inBracket = data.matches
         .filter(m => m.event_id === ev.id && m.stage === "knockout" && m.bracket_round === 1)
-        .flatMap(m => [m.entrant1_id, m.entrant2_id]).filter(Boolean).sort().join(",");
+        .sort((a, b) => (a.bracket_pos || 0) - (b.bracket_pos || 0))
+        .map(m => [m.entrant1_id || "bye", m.entrant2_id || "bye"].sort().join("+")).join("|");
       const koPlayed = data.matches.some(m => m.event_id === ev.id && m.stage === "knockout" && m.status === "played");
       if (should && inBracket && should !== inBracket)
         h += '<div class="gwarn">The standings have changed since this bracket was drawn, so it no longer matches who qualified. ' +
@@ -6101,11 +6180,14 @@ async function confirmGroupStage(){
   const ties = unresolvedTiesAtCut(ev);
   if (ties.length){
     toast(ties.map(t => "Group " + t.group + ": " + t.names.join(", ")).join(" · ") +
-      " are level on every tiebreaker and only some of them go through. Draw lots first.");
+      " are level on every tiebreaker. Draw lots first.");
     state.view = "admin";
     render();
     return;
   }
+  const wcTie = wildcardTieFor(ev);
+  if (wcTie && !confirm(swText("A wildcard place is tied between " + wcTie.names.join(", ") +
+      " on every cross-group measure; the pick will be alphabetical. Seed the bracket anyway? Edit teams can fix it after."))) return;
   const msg = (left ? left + " group matches are still unplayed. " : "") +
     (hadKo ? "Rebuild the bracket from current standings? Knockout scores are wiped." :
       "Confirm the group stage is finished and create the knockout bracket?");
@@ -6141,7 +6223,7 @@ async function maybeAutoBracket(){
     if (!group.length || ms.some(m => m.stage === "knockout")) continue;
     if (group.some(m => m.status !== "played")) continue;
     if (!groupsOfEvent(ev).length) continue;
-    if (unresolvedTiesAtCut(ev).length) continue;   /* wait for the desk to draw lots */
+    if (unresolvedTiesAtCut(ev).length || wildcardTieFor(ev)) continue;   /* wait for the desk to settle the tie */
     if (seedFieldFor(ev).seeds.length < 2) continue;
     await reload();
     /* Re-check everything against the fresh pull, not just some of it: another
@@ -6152,7 +6234,7 @@ async function maybeAutoBracket(){
     const freshMs = data.matches.filter(m => m.event_id === ev.id);
     if (freshMs.some(m => m.stage === "knockout")) continue;
     if (freshMs.filter(m => m.stage === "group").some(m => m.status !== "played")) continue;
-    if (unresolvedTiesAtCut(fresh).length) continue;
+    if (unresolvedTiesAtCut(fresh).length || wildcardTieFor(fresh)) continue;
     const field = seedFieldFor(fresh);
     if (field.seeds.length < 2) continue;
     const maxOrder = Math.max(0, ...freshMs.map(m => m.play_order || 0));
