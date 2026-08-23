@@ -318,7 +318,11 @@ begin
 
   update nairobi_matches m set court = null, updated_at = now()
   where m.status = 'scheduled' and m.court is not null
-    and not exists (select 1 from nairobi_events e where e.id = m.event_id and e.active);
+    and not exists (select 1 from nairobi_events e where e.id = m.event_id and e.active
+                    -- an archived event's courts are released even while it is
+                    -- still flagged active: archived leaves the app entirely,
+                    -- so nothing could ever free them and they died for the day
+                    and coalesce(e.settings ->> 'archived', '') <> 'true');
 
   -- ===== main draw pool: non-Americano events on courts 1..total. Americano is
   -- a physically separate event with its own courts, so it is handled below as
@@ -372,6 +376,8 @@ begin
                dense_rank() over (order by m2.event_id) as dr
         from nairobi_matches m2
         join nairobi_events e on e.id = m2.event_id and e.active
+          -- archived leaves the app entirely; it must not be CALLED either
+          and coalesce(e.settings ->> 'archived', '') <> 'true'
         join nairobi_entrants e1 on e1.id = m2.entrant1_id
         join nairobi_entrants e2 on e2.id = m2.entrant2_id
         where m2.status = 'scheduled' and m2.court is null and not m2.held
@@ -402,7 +408,8 @@ begin
   -- Per-player gate: a match takes a court only when none of its four players are
   -- on a court and it is their earliest unplayed match, so a box schedule lets
   -- each court run its rounds back to back without double-booking anyone. =====
-  for ae in select * from nairobi_events where active and coalesce(settings ->> 'format', '') = 'americano' loop
+  for ae in select * from nairobi_events where active and coalesce(settings ->> 'format', '') = 'americano'
+            and coalesce(settings ->> 'archived', '') <> 'true' loop
     a_courts := null;
     if ae.settings ? 'courts' and jsonb_typeof(ae.settings -> 'courts') = 'array'
        and jsonb_array_length(ae.settings -> 'courts') > 0 then

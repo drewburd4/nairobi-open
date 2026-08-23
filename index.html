@@ -4867,7 +4867,15 @@ function maybeBackup(rosterChanged){
     let prev = null;
     try{ prev = JSON.parse(safeLocal("pb_backup") || "null"); }catch(_){}
     const prevPlayed = (prev && prev.played) || 0;
-    if (played < prevPlayed - 5) return;   /* looks like a wipe: keep the old copy */
+    /* Archiving events legitimately shrinks the played count (their matches
+       leave data entirely), and the wipe guard used to read that as a
+       database wipe and freeze the backup for the rest of the tournament.
+       An event SET that shrank means archive/delete, not a wipe: start a new
+       baseline instead of refusing forever. */
+    const evIds = (data.events || []).map(e => e.id).sort();
+    const prevEvIds = (prev && prev.eventIds) || null;
+    const setShrank = prevEvIds && prevEvIds.some(id => !evIds.includes(id));
+    if (played < prevPlayed - 5 && !setShrank) return;   /* looks like a wipe: keep the old copy */
     /* A roster save is worth a snapshot on its own: before any match is
        played the roster IS the tournament, and it lives nowhere else. */
     if (!rosterChanged){
@@ -4875,7 +4883,7 @@ function maybeBackup(rosterChanged){
       if (prev && Math.floor(played / 25) <= Math.floor(prevPlayed / 25)) return;
     }
     safeLocal("pb_backup", JSON.stringify({
-      taken_at: new Date().toISOString(), played,
+      taken_at: new Date().toISOString(), played, eventIds: evIds,
       tournament: data.tournament && data.tournament.name,
       events: data.events, entrants: data.entrants, matches: data.matches,
       participants: (state.pLoaded && Array.isArray(state.pRows))
