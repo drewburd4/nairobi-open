@@ -1676,7 +1676,9 @@ returns setof nairobi_participants
 language plpgsql stable security definer set search_path = public
 as $$
 begin
-  if not nairobi_verify_pin(p_pin) then return; end if;
+  -- A stale PIN raises rather than returning an empty set: ok-but-empty reads
+  -- as a deleted roster on the desk, and the save that follows makes it true.
+  if not nairobi_verify_pin(p_pin) then raise exception 'Wrong PIN.'; end if;
   return query select * from nairobi_participants order by sort_order nulls last, name;
 end;
 $$;
