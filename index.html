@@ -4026,8 +4026,8 @@ function gChip(m, locked){
       ' onclick="event.stopPropagation();gPick(\'' + m.id + '\')"') + '>' +
     '<span class="nm">' + esc(m.name) + '</span>' +
     (d ? '<span class="dupr">' + (+d.dupr).toFixed(2) +
-         (Array.isArray(d.duprs) && d.duprs.length > 1
-           ? '<small>' + d.duprs.map(x => (+x).toFixed(1)).join(' / ') + '</small>' : '') + '</span>'
+         (Array.isArray(d.duprs) && d.duprs.filter(x => x != null).length > 1
+           ? '<small>' + d.duprs.map(x => x == null ? '–' : (+x).toFixed(1)).join(' / ') + '</small>' : '') + '</span>'
        : '<span class="dupr unrated">&ndash;</span>') +
     (locked ? '' : '<span class="gact">' +
       '<button type="button" title="Rename" onclick="event.stopPropagation();gRename(\'' + m.id + '\')">Edit</button>' +
@@ -5404,9 +5404,12 @@ function entrantsCsvPicked(input){
       const names = [], duprs = [], ids = [];
       if (header){
         cs.forEach((c, i) => {
-          if (!c) return;
+          /* keep EMPTY cells too: each role's Nth column is its Nth slot, and
+             skipping blanks shifted every later value of that role one player
+             left, e.g. a partner-only DUPR ID landing on player 1 (the
+             "Brian & 4.41" class, back through this path) */
           const role = i < header.length ? roleOf(header[i]) : "name";
-          (role === "id" ? ids : role === "dupr" ? duprs : names).push(c);
+          (role === "id" ? ids : role === "dupr" ? duprs : names).push(c || "");
         });
       } else {
         /* No header to go on. A rating is 1-8; a long run of digits with no
@@ -5417,8 +5420,8 @@ function entrantsCsvPicked(input){
           else names.push(c);
         });
       }
-      if (!names.length) continue;
-      if (names.length > 2) extraNames++;
+      if (!names.some(n => n && n.trim())) continue;
+      if (names.filter(n => n && n.trim()).length > 2) extraNames++;
       r.n1 = names[0] || ""; r.n2 = names[1] || "";
       r.d1 = duprs[0] || "";  r.d2 = duprs[1] || "";
       r.i1 = ids[0] || "";    r.i2 = ids[1] || "";
@@ -5657,10 +5660,15 @@ function parseEntryRows(ev){
   return entryRows().map(r => {
     const names = [String(r.n1 || "").trim(), dbl ? String(r.n2 || "").trim() : ""].filter(Boolean);
     if (!names.length) return null;
-    const duprs = [cleanNum(r.d1), dbl ? cleanNum(r.d2) : null].filter(v => v != null);
-    const ids = [String(r.i1 || "").trim(), dbl ? String(r.i2 || "").trim() : ""].filter(Boolean);
-    const dupr = duprs.length ? Math.round(duprs.reduce((a, b) => a + b, 0) / duprs.length * 100) / 100 : null;
-    return { name: names.join(" & "), duprs, dupr, duprIds: ids, partial: dbl && names.length < 2 };
+    /* POSITIONAL, never compacted: slot 0 is always player 1 and slot 1 is
+       always player 2. Filtering the empties shifted a partner-only DUPR ID
+       into player 1's slot and it rode all the way into the results CSV that
+       goes to DUPR, crediting matches to the wrong human. */
+    const duprSlots = [cleanNum(r.d1), dbl ? cleanNum(r.d2) : null];
+    const idSlots = [String(r.i1 || "").trim(), dbl ? String(r.i2 || "").trim() : ""];
+    const rated = duprSlots.filter(v => v != null);
+    const dupr = rated.length ? Math.round(rated.reduce((a, b) => a + b, 0) / rated.length * 100) / 100 : null;
+    return { name: names.join(" & "), duprs: duprSlots, dupr, duprIds: idSlots, partial: dbl && names.length < 2 };
   }).filter(Boolean);
 }
 function renderEntryGrid(ev){
@@ -6040,7 +6048,8 @@ function entrantMetaFor(e){
   if (!e) return {};
   const meta = {};
   if (e.dupr != null){ meta.dupr = e.dupr; meta.duprs = e.duprs; }
-  if (e.duprIds && e.duprIds.length) meta.duprIds = e.duprIds;
+  /* positional slots: only worth storing when at least one is filled */
+  if (e.duprIds && e.duprIds.some(x => x)) meta.duprIds = e.duprIds;
   return meta;
 }
 /* One choice instead of two checkboxes that quietly fought each other: the
