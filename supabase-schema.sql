@@ -801,6 +801,13 @@ begin
   if p_had_score = false and m.status = 'played' then
     return 'A score just came in for this match; close and reopen it before changing anything.';
   end if;
+  -- A retirement is a recorded outcome, not a normal score: the stored games
+  -- are partial, so a blind re-save would re-derive the winner from them and
+  -- can flip the match to the player who retired. Corrections go through
+  -- Clear score first.
+  if m.retired is not null then
+    return 'This match ended by retirement. Clear the score first if it needs changing.';
+  end if;
   old_w := case when m.status = 'played' and m.score1 > m.score2 then m.entrant1_id
                 when m.status = 'played' then m.entrant2_id else null end;
 
@@ -1265,9 +1272,13 @@ grant execute on function nairobi_autostart_due() to anon, authenticated;
 -- Creates an event (null p_event_id) or wipes and rebuilds an existing one.
 -- The server forces event_id on every row so a payload can never write into
 -- another event.
+-- The signature grew p_force, and create-or-replace cannot change a signature:
+-- it would leave the old seven-argument overload behind and PostgREST would
+-- refuse to choose between them.
+drop function if exists nairobi_admin_replace_event(text, uuid, text, int, jsonb, jsonb, jsonb);
 create or replace function nairobi_admin_replace_event(
   p_pin text, p_event_id uuid, p_name text, p_sort_order int,
-  p_settings jsonb, p_entrants jsonb, p_matches jsonb)
+  p_settings jsonb, p_entrants jsonb, p_matches jsonb, p_force boolean default false)
 returns text
 language plpgsql security definer set search_path = public
 as $$
@@ -1276,6 +1287,10 @@ declare
   v_eid uuid;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- Advisory lock BEFORE any row write: this function deletes match rows and
+  -- then reaches the same advisory lock inside nairobi_assign_courts, which
+  -- without this line is exactly the AB-BA order the lock rule forbids.
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select id into v_tid from nairobi_tournaments limit 1;
   if v_tid is null then return 'No tournament row. Re-run the schema.'; end if;
 
@@ -1285,6 +1300,17 @@ begin
     returning id into v_eid;
   else
     v_eid := p_event_id;
+    -- A redraw rebuilds a division that has not started. Played or on-court
+    -- matches mean it HAS started, and the deletes below would take results
+    -- and their whole score history with them (the log cascades): refuse
+    -- unless the desk confirmed that loss explicitly and the client passed
+    -- the force flag. A stale phone can no longer wipe a live division.
+    if not coalesce(p_force, false) and exists (
+      select 1 from nairobi_matches
+      where event_id = v_eid and (status = 'played' or court is not null)
+    ) then
+      return 'This event has played or on-court matches, so the redraw was not applied.';
+    end if;
     update nairobi_events
     set name = coalesce(p_name, name),
         sort_order = coalesce(p_sort_order, sort_order),
@@ -1546,6 +1572,11 @@ begin
   if p_retiree_id is null or p_retiree_id not in (m.entrant1_id, m.entrant2_id) then
     return 'Say which team retired.';
   end if;
+  -- Same rule as the re-save guard in nairobi_admin_submit_score: a recorded
+  -- retirement is only ever changed by clearing it first.
+  if m.retired is not null then
+    return 'This match ended by retirement. Clear the score first if it needs changing.';
+  end if;
   win_slot := case when p_retiree_id = m.entrant1_id then 2 else 1 end;
 
   pts := nairobi_ev_int_setting(m.event_id, case when m.stage = 'knockout' then 'points_to_knockout' else 'points_to_group' end,
@@ -1632,9 +1663,13 @@ $$;
 
 -- Save the whole roster in one go, which is what the grid on screen means. Rows
 -- carry the ids they were loaded with, so a participant keeps their identity
--- (and their entries) across an edit; anything the payload leaves out is gone
--- on purpose, because removing a row is how you delete someone.
-create or replace function nairobi_admin_save_participants(p_pin text, p_rows jsonb)
+-- (and their entries) across an edit. A row the payload leaves out is deleted
+-- only when this desk had seen its latest version (p_seen): removing a row is
+-- still how you delete someone, but another desk's newer additions survive.
+-- The signature grew p_seen, and create-or-replace cannot change a signature:
+-- the old two-argument overload has to go or PostgREST refuses to choose.
+drop function if exists nairobi_admin_save_participants(text, jsonb);
+create or replace function nairobi_admin_save_participants(p_pin text, p_rows jsonb, p_seen timestamptz default null)
 returns text
 language plpgsql security definer set search_path = public
 as $$
@@ -1643,13 +1678,33 @@ declare
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
   if p_rows is null or jsonb_typeof(p_rows) <> 'array' then return 'Nothing to save.'; end if;
+  -- An empty save is never what a desk means: the tab paints blank rows while
+  -- the real roster is still loading, and saving that blank screen used to
+  -- delete everyone, with no backup anywhere to restore from.
+  if not exists (
+    select 1 from jsonb_array_elements(p_rows) x
+    where btrim(coalesce(x ->> 'name', '')) <> ''
+  ) then
+    return 'The roster cannot be saved empty. Add at least one person first.';
+  end if;
+  -- One desk at a time through the delete-and-upsert. The roster has its own
+  -- advisory key: this function never touches match rows, so it stays out of
+  -- the courts lock order entirely.
+  perform pg_advisory_xact_lock(hashtext('nairobi_participants'));
 
   select coalesce(array_agg((x ->> 'id')::uuid), '{}')
     into keep
   from jsonb_array_elements(p_rows) x
   where x ->> 'id' is not null;
 
-  delete from nairobi_participants where not (id = any(keep));
+  -- Two desks: a row this payload leaves out is deleted only when this desk
+  -- had actually seen its latest version (p_seen is the newest updated_at its
+  -- load returned). Anyone saved on another phone after that survives, so
+  -- desks merge instead of silently deleting each other's people. A null
+  -- p_seen (an old client) keeps the plain replace-all meaning.
+  delete from nairobi_participants
+  where not (id = any(keep))
+    and (p_seen is null or updated_at <= p_seen);
 
   insert into nairobi_participants (id, name, gender, dupr_singles, dupr_doubles, dupr_id, entries, sort_order, updated_at)
   select coalesce((x ->> 'id')::uuid, gen_random_uuid()),
@@ -1704,7 +1759,7 @@ grant execute on function nairobi_admin_delete_event(text, uuid) to anon, authen
 grant execute on function nairobi_admin_set_active_many(text, uuid[], boolean) to anon, authenticated;
 grant execute on function nairobi_admin_set_entrant_meta(text, uuid, jsonb) to anon, authenticated;
 grant execute on function nairobi_admin_hold(text, uuid, boolean) to anon, authenticated;
-grant execute on function nairobi_admin_replace_event(text, uuid, text, int, jsonb, jsonb, jsonb) to anon, authenticated;
+grant execute on function nairobi_admin_replace_event(text, uuid, text, int, jsonb, jsonb, jsonb, boolean) to anon, authenticated;
 grant execute on function nairobi_admin_rename_entrant(text, uuid, text) to anon, authenticated;
 grant execute on function nairobi_admin_remove_entrant(text, uuid) to anon, authenticated;
 grant execute on function nairobi_admin_add_entrant(text, uuid, jsonb, jsonb) to anon, authenticated;
@@ -1713,7 +1768,7 @@ grant execute on function nairobi_admin_generate_bracket(text, uuid, jsonb) to a
 grant execute on function nairobi_admin_reset_bracket(text, uuid) to anon, authenticated;
 grant execute on function nairobi_admin_retire(text, uuid, uuid, int, int, jsonb) to anon, authenticated;
 grant execute on function nairobi_admin_list_participants(text) to anon, authenticated;
-grant execute on function nairobi_admin_save_participants(text, jsonb) to anon, authenticated;
+grant execute on function nairobi_admin_save_participants(text, jsonb, timestamptz) to anon, authenticated;
 
 -- ---------- realtime ----------
 

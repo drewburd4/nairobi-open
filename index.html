@@ -1191,6 +1191,11 @@ function demoStore(){
          landed meanwhile: refuse rather than silently overwrite it. */
       if (hadScore === false && m.status === "played")
         return fail("A score just came in for this match; close and reopen it before changing anything.");
+      /* A retirement is a recorded outcome, not a normal score: the stored
+         games are partial, so a blind re-save would re-derive the winner from
+         them and can flip the match to the player who retired. */
+      if (m.retired)
+        return fail("This match ended by retirement. Clear the score first if it needs changing.");
       const bo = settingFor(m, "best_of");
       let newW;
       if (walkover){
@@ -1227,6 +1232,8 @@ function demoStore(){
       const m = findMatch(matchId);
       if (!m) return fail("Match not found.");
       if (!m.entrant1_id || !m.entrant2_id) return fail("Teams for this match aren't decided yet.");
+      if (m.retired)
+        return fail("This match ended by retirement. Clear the score first if it needs changing.");
       const oldW = m.status === "played" ? (m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id) : null;
       const was = scoreText(m);
       const err = applyRetire(m, retireeId, s1, s2, games);
@@ -1460,7 +1467,7 @@ function demoStore(){
       assignCourtsGlobal(db);
       notify(); return ok();
     },
-    async adminReplaceEvent(pin, eventId, meta, entrants, matches){
+    async adminReplaceEvent(pin, eventId, meta, entrants, matches, force){
       if (!checkPin(pin)) return fail("Wrong PIN.");
       let ev = eventId ? db.events.find(e => e.id === eventId) : null;
       if (!ev){
@@ -1468,6 +1475,11 @@ function demoStore(){
           stage: "group", active: false, settings: meta.settings };
         db.events.push(ev);
       } else {
+        /* A rebuild deletes every match of the division, results included, and
+           the score history goes with them. Only a draw the desk explicitly
+           confirmed over played or on-court matches may do that. */
+        if (!force && db.matches.some(x => x.event_id === ev.id && (x.status === "played" || x.court != null)))
+          return fail("This event has played or on-court matches, so the redraw was not applied.");
         ev.name = meta.name; ev.settings = meta.settings; ev.stage = "group"; ev.active = false;
       }
       db.entrants = db.entrants.filter(e => e.event_id !== ev.id);
@@ -1525,11 +1537,21 @@ function demoStore(){
       if (!checkPin(pin)) return { ok: true, data: [] };
       return { ok: true, data: (db.participants || []).slice() };
     },
-    async adminSaveParticipants(pin, rows){
+    async adminSaveParticipants(pin, rows, seen){
       if (!checkPin(pin)) return fail("Wrong PIN.");
       if (!Array.isArray(rows)) return fail("Nothing to save.");
-      db.participants = rows.filter(r => String(r.name || "").trim())
-        .map(r => Object.assign({}, r, { id: r.id || uid(), name: String(r.name).trim() }));
+      const named = rows.filter(r => String(r.name || "").trim())
+        .map(r => Object.assign({}, r, { id: r.id || uid(), name: String(r.name).trim(),
+          updated_at: new Date().toISOString() }));
+      if (!named.length) return fail("The roster cannot be saved empty. Add at least one person first.");
+      /* Mirrors the SQL: a row this save leaves out is deleted only when this
+         desk had seen its latest version; anyone saved on another phone after
+         `seen` survives, so two desks merge instead of deleting each other's
+         people. */
+      const keep = new Set(named.map(r => r.id));
+      const survivors = (db.participants || []).filter(p =>
+        !keep.has(p.id) && seen != null && String(p.updated_at || "") > String(seen));
+      db.participants = survivors.concat(named);
       notify(); return ok();
     },
     async adminSetBracketTeams(pin, matchId, e1, e2){
@@ -1679,11 +1701,12 @@ function liveStore(){
     adminSetEntrantMeta: (pin, id, meta) => rpc("nairobi_admin_set_entrant_meta", { p_pin: pin, p_entrant_id: id, p_meta: meta || {} }),
     adminHold: (pin, id, held) => rpc("nairobi_admin_hold", { p_pin: pin, p_match_id: id, p_held: !!held }),
     autostartDue: () => rpc("nairobi_autostart_due", {}),
-    adminReplaceEvent: async (pin, eventId, meta, entrants, matches) => {
+    adminReplaceEvent: async (pin, eventId, meta, entrants, matches, force) => {
       const r = await rpc("nairobi_admin_replace_event", {
         p_pin: pin, p_event_id: eventId, p_name: meta.name,
         p_sort_order: meta.sort_order != null ? meta.sort_order : 0,
-        p_settings: meta.settings, p_entrants: entrants, p_matches: matches
+        p_settings: meta.settings, p_entrants: entrants, p_matches: matches,
+        p_force: !!force
       });
       if (r.ok && typeof r.data === "string" && r.data.startsWith("OK:")) r.eventId = r.data.slice(3);
       return r;
@@ -1698,7 +1721,7 @@ function liveStore(){
     adminGenerateBracket: (pin, eventId, rows) => rpc("nairobi_admin_generate_bracket", { p_pin: pin, p_event_id: eventId, p_matches: rows }),
     adminResetBracket: (pin, eventId) => rpc("nairobi_admin_reset_bracket", { p_pin: pin, p_event_id: eventId }),
     adminListParticipants: pin => rpc("nairobi_admin_list_participants", { p_pin: pin }),
-    adminSaveParticipants: (pin, rows) => rpc("nairobi_admin_save_participants", { p_pin: pin, p_rows: rows })
+    adminSaveParticipants: (pin, rows, seen) => rpc("nairobi_admin_save_participants", { p_pin: pin, p_rows: rows, p_seen: seen || null })
   };
 }
 </script>
@@ -2114,9 +2137,25 @@ const SW_EXACT = {
   "A score just came in for this match; close and reopen it before changing anything.":
     "Matokeo ya mechi hii yameingia sasa hivi; funga na ufungue tena kabla ya kubadilisha chochote.",
   "Bad walkover score.": "Alama ya walkover si sahihi.",
+  "This match ended by retirement. Clear the score first if it needs changing.":
+    "Mechi hii ilimalizika kwa kujitoa. Futa matokeo kwanza kama yanahitaji kubadilishwa.",
+  "To change this result, clear the score first.": "Ili kubadilisha matokeo haya, yafute kwanza.",
+  "The roster is still loading.": "Orodha ya washiriki bado inapakiwa.",
+  "The roster cannot be saved empty. Add at least one person first.":
+    "Orodha ya washiriki haiwezi kuhifadhiwa ikiwa tupu. Ongeza angalau mtu mmoja kwanza.",
+  "This event has played or on-court matches, so the redraw was not applied.":
+    "Shindano hili lina mechi zilizochezwa au zilizo uwanjani, kwa hivyo makundi mapya hayakuchorwa.",
+  "Teams were added while this board was open, so nothing was saved. Close the groups board and open it again.":
+    "Timu ziliongezwa ubao huu ukiwa wazi, kwa hivyo hakuna kilichohifadhiwa. Funga ubao wa makundi kisha uufungue tena.",
+  "That spot in the queue just changed. Pick the place again.":
+    "Nafasi hiyo kwenye foleni imebadilika sasa hivi. Chagua nafasi tena.",
   "The next round already has a score. Clear it first.": "Raundi inayofuata tayari ina matokeo. Yafute kwanza."
 };
 const SW_PATTERNS = [
+  [/^This save removes (\d+) (?:person|people) from the roster\. Save anyway\?$/,
+    "Hifadhi hii inaondoa watu $1 kwenye orodha ya washiriki. Uhifadhi hata hivyo?"],
+  [/^Draw new groups for "(.+)" with (\d+) entrants\? This deletes (\d+) played results and takes (\d+) matches off court, wipes the score history, and pauses the event\. It cannot be undone\.$/,
+    "Chora makundi mapya ya \"$1\" na washiriki $2? Hii itafuta matokeo $3 yaliyochezwa na kuondoa mechi $4 uwanjani, itafuta historia ya matokeo, na kusitisha shindano. Haiwezi kutenduliwa."],
   [/^Court (\d+)$/, "Uwanja $1"],
   /* Participants. The name captures use [^·] so a pattern can never swallow a
      composed "X · Y" line before the per-segment pass gets to it. */
@@ -3629,7 +3668,10 @@ function gedit(ev){
   if (!state.gedit || state.gedit.evId !== ev.id){
     const evE = data.entrants.filter(e => e.event_id === ev.id);
     state.gedit = {
-      evId: ev.id, dirty: false, unallocated: [],
+      /* baseIds is the roster this board was built from: at Save it is how a
+         team added on another phone since then is told apart from a team the
+         desk removed here on purpose. */
+      evId: ev.id, dirty: false, unallocated: [], baseIds: evE.map(e => e.id),
       groups: groupsOfEvent(ev).map(n => ({
         name: n,
         members: evE.filter(e => e.group_name === n)
@@ -3757,6 +3799,16 @@ async function gSave(){
   if (groupsLocked(ev)){
     toast("A result came in while this was open, so the groups are locked. Nothing was changed.");
     gClear(); render(); return;
+  }
+  /* Same staleness rule for the roster itself: an entrant added on another
+     phone after this board was opened is not on the board, and a rebuild
+     without them would delete them. Removals made on the board stay allowed:
+     the desk did those here, on purpose. */
+  const knownIds = new Set((ge.baseIds || []).concat(kept.flatMap(g => g.members.map(m => m.id))));
+  const newcomers = data.entrants.filter(e => e.event_id === ev.id && !knownIds.has(e.id)).map(e => e.name);
+  if (newcomers.length){
+    toast(swText("Teams were added while this board was open, so nothing was saved. Close the groups board and open it again.") + " " + newcomers.join(", "));
+    return;
   }
   const entrants = [];
   kept.forEach((g, gi) => g.members.forEach((m, i) =>
@@ -4262,6 +4314,7 @@ function renderScoreModal(){
   } else {
     h += '<div class="score-line"><label for="score1">' + esc(n1) + '</label><input class="score-in" id="score1" type="number" inputmode="numeric" min="0" value="' + (played ? m.score1 : '') + '"></div>';
     h += '<div class="score-line"><label for="score2">' + esc(n2) + '</label><input class="score-in" id="score2" type="number" inputmode="numeric" min="0" value="' + (played ? m.score2 : '') + '"></div>';
+    if (m.retired) h += '<p class="note">' + esc(entrantName(m.retired)) + ' retired. The games they finished stand and count.</p><p class="note">To change this result, clear the score first.</p>';
     h += '<div class="err" id="score-err"></div>';
     if (!isAdmin) h += '<p class="note">Winners report the score. One entry per match: after that, corrections go through the desk.</p>';
     h += '<div class="actions">' + adminExtras() +
@@ -4813,10 +4866,10 @@ function queuePlaceSelect(matchId){
   const lo = Math.max(0, cur - SPAN), hi = Math.min(q.length, cur + SPAN + 1);
   let h = '<select class="mv qplace" onchange="moveQueueTo(\'' + matchId + '\', this.value)">';
   h += '<option value="">Move to…</option>';
-  if (lo > 0) h += '<option value="0">1. the very front</option>';
+  if (lo > 0) h += '<option value="front">1. the very front</option>';
   for(let i = lo; i < hi; i++){
     if (i === cur) continue;
-    h += '<option value="' + i + '">' + (i + 1) + '. before ' + esc(label(q[i])) + '</option>';
+    h += '<option value="' + esc(q[i].id) + '">' + (i + 1) + '. before ' + esc(label(q[i])) + '</option>';
   }
   h += '<option value="end">Last in the queue</option>';
   return h + '</select>';
@@ -4828,17 +4881,19 @@ async function moveQueueTo(matchId, choice){
   if (cur === -1){ toast("That match is not waiting in the queue."); return; }
   const m = q[cur];
   const rest = q.filter(x => x.id !== matchId);
-  /* The chosen index is into the queue as displayed, which still contains the
-     match being moved; once it is pulled out, everything after it shifts down
-     one. Ordering is then resolved inside the match's own event, because
-     across events the court rotation decides, so the anchor is the first
-     match of this event at or after the chosen place. */
+  /* Options carry MATCH IDS, not queue positions. The queue shifts under an
+     open picker whenever a score lands and the board re-renders, and a stale
+     position silently sent the match somewhere the desk never chose; a stale
+     id either still names the same neighbour or is caught right here.
+     Ordering is then resolved inside the match's own event, because across
+     events the court rotation decides, so the anchor is the first match of
+     this event at or after the chosen neighbour. */
   let from;
   if (choice === "end") from = rest.length;
+  else if (choice === "front") from = 0;
   else {
-    const i = parseInt(choice, 10);
-    if (!Number.isFinite(i)) return;
-    from = i > cur ? i - 1 : i;
+    from = rest.findIndex(x => x.id === choice);
+    if (from === -1){ toast("That spot in the queue just changed. Pick the place again."); render(); return; }
   }
   const anchor = rest.slice(from).find(x => x.event_id === m.event_id);
   const beforeId = anchor ? anchor.id : null;
@@ -5406,6 +5461,13 @@ async function loadParticipants(force){
     did: p.dupr_id || "", entries: p.entries || {}
   }));
   state.pRows = rows.concat(Array.from({ length: P_CHUNK }, blankParticipant));
+  /* What this desk has actually seen: the save sends pSeenAt back so the
+     server can tell "removed on this screen" from "never loaded here", and
+     pLoadedNames is how a save that removes people can say who by name. */
+  state.pSeenAt = (r.data || []).reduce((mx, p) =>
+    (p.updated_at && String(p.updated_at) > mx) ? String(p.updated_at) : mx, "1970-01-01T00:00:00Z");
+  state.pLoadedNames = {};
+  (r.data || []).forEach(p => { if (p.id) state.pLoadedNames[p.id] = p.name || ""; });
   state.pLoaded = true;
   state.pDirty = false;
 }
@@ -5513,11 +5575,19 @@ function parseParticipants(){
   }).filter(Boolean);
 }
 async function saveParticipants(){
+  /* The tab paints blank rows the instant it opens while the real roster is
+     still on the wire; saving that blank screen used to delete everyone. */
+  if (!state.pLoaded){ toast("The roster is still loading."); return; }
   const rows = parseParticipants();
   const names = rows.map(r => r.name.toLowerCase());
   const dupes = [...new Set(names.filter((n, i) => names.indexOf(n) !== i))];
   if (dupes.length){ toast("Two people share a name: " + dupes.join(", ") + ". Make them different first."); return; }
-  const r = await store.adminSaveParticipants(state.adminPin, rows);
+  /* Removing people has to be meant. Name who this save deletes. */
+  const ids = new Set(rows.map(r => r.id).filter(Boolean));
+  const removed = Object.entries(state.pLoadedNames || {}).filter(([id]) => !ids.has(id)).map(([, n]) => n);
+  if (removed.length &&
+      !confirm(swText("This save removes " + removed.length + (removed.length === 1 ? " person" : " people") + " from the roster. Save anyway?") + "\n" + removed.join(", "))) return;
+  const r = await store.adminSaveParticipants(state.adminPin, rows, state.pSeenAt || null);
   if (!r.ok){ toast(r.error || "Could not save."); return; }
   state.pDirty = false;
   toast(rows.length + " participants saved");
@@ -5721,9 +5791,16 @@ async function applySetup(){
   const check = readEventSettings(ev);
   if (check.error){ state.setupPreview = check.error; render(); return; }
   const hasMatches = data.matches.some(m => m.event_id === ev.id);
-  const msg = hasMatches
-    ? 'Draw new groups for "' + ev.name + '" with ' + names.length + ' entrants? This wipes its current groups, matches, and scores, and pauses it.'
-    : 'Draw groups for "' + ev.name + '" with ' + names.length + ' entrants?';
+  /* A division with results or matches on court is not being set up, it is
+     being wiped. The server refuses that unless it is explicitly forced, so
+     the confirm here says exactly what the force will cost. */
+  const played = data.matches.filter(m => m.event_id === ev.id && m.status === "played").length;
+  const onCourt = data.matches.filter(m => m.event_id === ev.id && m.court != null).length;
+  const msg = played || onCourt
+    ? 'Draw new groups for "' + ev.name + '" with ' + names.length + ' entrants? This deletes ' + played + ' played results and takes ' + onCourt + ' matches off court, wipes the score history, and pauses the event. It cannot be undone.'
+    : hasMatches
+      ? 'Draw new groups for "' + ev.name + '" with ' + names.length + ' entrants? This wipes its current groups, matches, and scores, and pauses it.'
+      : 'Draw groups for "' + ev.name + '" with ' + names.length + ' entrants?';
   if (!confirm(swText(msg))) return;
   /* This one replaces the whole event, so it does carry the untouched keys. */
   const settings = Object.assign({}, ev.settings, check);
@@ -5739,7 +5816,7 @@ async function applySetup(){
                     meta: entrantMetaFor(byName.get(name)) })));
   const idsByGroup = g => entrants.filter(e => e.group_name === g).map(e => e.id);
   const matches = buildEventMatches(ev.id, groups.map(g => ({ name: g.name, entrantIds: idsByGroup(g.name) })), 0);
-  const r = await store.adminReplaceEvent(state.adminPin, ev.id, { name: ev.name, sort_order: ev.sort_order, settings }, entrants, matches);
+  const r = await store.adminReplaceEvent(state.adminPin, ev.id, { name: ev.name, sort_order: ev.sort_order, settings }, entrants, matches, !!(played || onCourt));
   if (!r.ok){ toast(r.error); return; }
   state.setupPreview = null;
   state.showRedraw = false;
