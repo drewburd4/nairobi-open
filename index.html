@@ -851,7 +851,7 @@ const dbIsAmericano = ev => !!(ev && ev.settings && ev.settings.format === "amer
 /* The main-draw queue (non-Americano), woven so events alternate. Americano is
    a separate pool handled on its own below. */
 function weavePending(db){
-  const act = db.events.filter(e => e.active && !dbIsAmericano(e)).sort((a, b) => a.sort_order - b.sort_order);
+  const act = db.events.filter(e => e.active && !dbIsAmericano(e)).sort((a, b) => a.sort_order - b.sort_order || String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id)));
   const lists = act.map(ev => db.matches
     .filter(m => m.event_id === ev.id && m.status === "scheduled" && m.court == null && !m.held && m.entrant1_id && m.entrant2_id)
     .sort((a, b) => a.play_order - b.play_order));
@@ -1648,8 +1648,17 @@ function liveStore(){
     });
   }
 
+  let clientPromise = null;
   async function ensureClient(){
-    if (client) return client;
+    /* Memoize the PROMISE, not the client: two concurrent callers during boot
+       both saw `client` still null and each built a client with its own
+       realtime subscription and its own 3-minute poll, doubling every
+       phone's egress against the shared free-tier cap. */
+    if (clientPromise) return clientPromise;
+    clientPromise = buildClient();
+    return clientPromise;
+  }
+  async function buildClient(){
     await loadScript("https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js");
     client = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
     /* Subscribe per table: the shared project also holds the Dispatch app's
@@ -1665,6 +1674,11 @@ function liveStore(){
         try{
           const eid = p && ((p.new && p.new.event_id) || (p.old && p.old.event_id));
           if (eid && data && data.events && !data.events.some(e => e.id === eid && e.active)) needFullReload = true;
+          /* A DELETE payload carries only the row's id (replica identity), so
+             eid is null and the paused-event test above can never fire: pull
+             everything, or a match deleted on a paused event lives forever on
+             the other phones. */
+          if (p && p.eventType === "DELETE" && !eid) needFullReload = true;
         }catch(_){}
         debouncedNotify();
       })
@@ -1697,7 +1711,7 @@ function liveStore(){
            so the public read policy would hand admin_pin_hash to every visitor,
            and a 4 digit PIN behind a readable hash cracks offline in no time. */
         c.from("nairobi_tournaments").select("id,name,settings,created_at").limit(1),
-        c.from("nairobi_events").select("*").order("sort_order"),
+        c.from("nairobi_events").select("*").order("sort_order").order("id"),
         c.from("nairobi_entrants").select("*").order("group_name").order("seed")
       ]);
       /* Background refreshes pull matches only for the running events (the bulk
@@ -1837,6 +1851,7 @@ const SW_EXACT = {
   "Courts": "Viwanja", "Schedule": "Ratiba", "Standings": "Msimamo", "Bracket": "Mchujo",
   "On court": "Uwanjani sasa", "Up next": "Zinazofuata", "Then": "Kisha", "Coming up": "Zinazokuja",
   "Postponed": "Imeahirishwa", "Free": "Wazi", "In use": "Unatumika",
+  "Reserved for another event": "Umehifadhiwa kwa shindano jingine", "paused": "limesitishwa",
   "All": "Zote", "Knockout": "Mtoano", "Print": "Chapisha", "Find a name": "Tafuta jina",
   "Loading…": "Inapakia…", "Retry": "Jaribu tena",
   "Could not load tournament data.": "Imeshindwa kupakia data ya mashindano.",
@@ -1954,6 +1969,8 @@ const SW_EXACT = {
     "Shindano hili sasa linachukua washiriki kutoka visanduku vilivyo hapa chini.",
   "Tick people for this event on the Participants tab first.":
     "Chagua watu wa shindano hili kwenye ukurasa wa Washiriki kwanza.",
+  "Still to sort out:": "Bado kuna cha kutatua:",
+  "No complete pairs yet.": "Hakuna jozi zilizokamilika bado.",
   "The participants list has changes you have not saved. Save them before drawing?":
     "Orodha ya washiriki ina mabadiliko ambayo hayajahifadhiwa. Yahifadhi kabla ya kuchora?",
   "Take entries from the Participants tab": "Chukua washiriki kutoka ukurasa wa Washiriki",
@@ -2361,6 +2378,11 @@ const SW_PATTERNS = [
     "Imepangwa kwa DUPR, imegawanywa A, B, C, kisha mzunguko tena (zenye kiwango $1, zisizo na kiwango $2)"],
   [/^(\d+) ticked for this event, ready to draw$/, "Wamechaguliwa $1 kwa shindano hili, tayari kuchorwa"],
   [/^([^·]+): (\d+) ticked, ready to draw$/, "$1: wamechaguliwa $2, tayari kuchorwa"],
+  [/^(\d+) ticked for this event, (\d+) complete pairs?$/, "Wamechaguliwa $1 kwa shindano hili, jozi $2 zimekamilika"],
+  [/^([^·]+): (\d+) ticked, (\d+) complete pairs?$/, "$1: wamechaguliwa $2, jozi $3 zimekamilika"],
+  [/^([^·;]+) has no partner$/, "$1 hana mwenzi"],
+  [/^([^·;]+)['’]s partner [“"]([^·;”"]+)[”"] is not ticked for this event$/, "Mwenzi wa $1, \"$2\", hajachaguliwa kwa shindano hili"],
+  [/^([^·;]+) and ([^·;]+) do not name each other$/, "$1 na $2 hawajataja wenzao"],
   [/^(\d+) (?:person is|people are) not ready and would be left out of the draw\. Draw without them\?$/,
     "Watu $1 hawajakamilika na wataachwa nje ya mchoro. Uchore bila wao?"],
   [/^(.+) added to Group (\S+)$/, "$1 ameongezwa kwenye Kundi $2"],
@@ -2492,7 +2514,7 @@ function dropArchived(d){
   return d;
 }
 const publicEvents = () => data.events.filter(e => !isHidden(e));
-const activeEvents = () => data.events.filter(e => e.active && !isHidden(e)).sort((a, b) => a.sort_order - b.sort_order);
+const activeEvents = () => data.events.filter(e => e.active && !isHidden(e)).sort((a, b) => a.sort_order - b.sort_order || String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id)));
 const courtsCount = () => (data.tournament && data.tournament.settings && data.tournament.settings.courts) || 4;
 const evSetting = (ev, key, dflt) => (ev && ev.settings && ev.settings[key] != null) ? ev.settings[key] : dflt;
 const matchPts = m => {
@@ -2656,6 +2678,17 @@ function onCourtMatches(){
     .filter(m => { const ev = eventById(m.event_id); return ev && ev.active && !isHidden(ev); })
     .sort((a, b) => a.court - b.court);
 }
+/* Every occupied court, hidden events included: hiding an event hides it from
+   players, it does not free its courts (the server keeps them occupied). Used
+   wherever OCCUPANCY is the question: the board's In use cards, wait
+   estimates, and the busy-player gates. The announced list above stays
+   hidden-free so banners never call people to invisible matches. */
+function onCourtMatchesAll(){
+  return data.matches
+    .filter(m => m.status === "scheduled" && m.court != null && m.entrant1_id && m.entrant2_id)
+    .filter(m => { const ev = eventById(m.event_id); return ev && ev.active; })
+    .sort((a, b) => a.court - b.court);
+}
 /* The main-draw queue. Americano is a self-managing separate pool (its board
    shows its own courts), so it is never part of this queue, the "up next" list,
    the manual court-assign picker, or the wait estimates. */
@@ -2744,7 +2777,7 @@ const WAIT_TURNOVER_MIN = 5;
 /* Players on a main-pool court right now, by name, mirroring the assigner. */
 function busyPlayerNames(){
   const set = new Set();
-  onCourtMatches().filter(x => !isAmericano(eventById(x.event_id))).forEach(x => {
+  onCourtMatchesAll().filter(x => !isAmericano(eventById(x.event_id))).forEach(x => {
     splitPair(entrantName(x.entrant1_id)).concat(splitPair(entrantName(x.entrant2_id)))
       .forEach(n => { if (n) set.add(n); });
   });
@@ -2767,7 +2800,7 @@ function estimatedWaitMinutes(m){
     const a = ev2 && ev2.settings && Array.isArray(ev2.settings.courts) ? ev2.settings.courts : [];
     return a.length ? a : null;
   };
-  const mainOn = onCourtMatches().filter(x => !isAmericano(eventById(x.event_id)));
+  const mainOn = onCourtMatchesAll().filter(x => !isAmericano(eventById(x.event_id)));
   const freeAt = [];
   for(let c = 1; c <= courtsCount(); c++){
     const on = mainOn.find(x => x.court === c);
@@ -3101,7 +3134,7 @@ function renderCallouts(){
 
 function renderEventTabs(){
   const cur = currentEvent();
-  let evs = publicEvents().slice().sort((a, b) => a.sort_order - b.sort_order);
+  let evs = publicEvents().slice().sort((a, b) => a.sort_order - b.sort_order || String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id)));
   /* Americano has no knockout, it is decided on total points, so it never
      appears as an option under the Bracket tab. */
   if (state.view === "bracket") evs = evs.filter(e => !isAmericano(e));
@@ -3270,6 +3303,29 @@ function renderCourtsPreview(soon){
   h += '<p class="note" style="margin-top:10px">A look ahead: this is how the courts will stand when play starts (the event turns itself on 5 minutes before). Tap a match for its estimated time; the full order is on the Schedule tab.</p>';
   return h;
 }
+/* Held matches are out of the queue entirely, so they need somewhere to be
+   seen or they are simply lost. Rendered on the courts board in BOTH states,
+   something running or not, and regardless of their event being paused: a
+   held match whose event got rained off used to vanish from every screen,
+   put-back button included. Event names always shown, since a held match can
+   belong to an event that is not otherwise on the board. */
+function heldBlockHtml(){
+  const list = heldMatches().filter(m => { const ev = eventById(m.event_id); return ev && !isAmericano(ev); });
+  if (!list.length) return '';
+  let h = '<div class="section-h"><h2>Held</h2><span class="hint">Off court until the desk puts them back</span></div>' +
+    '<div class="roundblock" style="padding-top:2px">';
+  h += list.map(m => {
+    let r = '<div class="queue-row click" onclick="openMatch(\'' + m.id + '\')">' +
+      '<span class="qnames">' + esc(entrantName(m.entrant1_id)) + ' <span class="qv">vs</span> ' +
+      esc(entrantName(m.entrant2_id)) + '</span>';
+    const ev = eventById(m.event_id);
+    if (ev) r += '<span class="qtag">' + esc(ev.name) + (ev.active ? '' : ' · paused') + '</span>';
+    if (state.adminPin) r += '<span class="queue-actions"><button class="btn small secondary" ' +
+      'onclick="event.stopPropagation();releaseMatch(\'' + m.id + '\')">Put back in the queue</button></span>';
+    return r + '</div>';
+  }).join("");
+  return h + '</div>';
+}
 function renderBoard(){
   const amer = americanoEvent();
   if (state.division === "americano" && amer){
@@ -3292,6 +3348,9 @@ function renderBoard(){
       }
       h += '</div>';
     }
+    /* Held matches used to disappear entirely the moment their event was
+       paused, put-back button and all; a held match must stay findable. */
+    h += heldBlockHtml();
     return h;
   }
 
@@ -3301,7 +3360,18 @@ function renderBoard(){
      pendingQueue both already drop Americano. */
   const inView = m => act.some(e => e.id === m.event_id);
   const on = onCourtMatches().filter(inView);
+  /* Courts held by matches this board cannot show (a hidden event, the other
+     division) are In use, never Free: drawing them Free invited the desk to
+     place a match onto them and be refused with "was just filled". */
+  const inUseCourts = new Set(onCourtMatchesAll().filter(x => !on.some(y => y.id === x.id)).map(x => x.court));
   const q = pendingQueue().filter(inView);
+  /* Which of the waiting matches may use court c at all: an event pinned to
+     courts 1-2 must not make court 3 say "Tap to place a match". */
+  const allowedOn = (x, c) => {
+    const ev2 = eventById(x.event_id);
+    const a = ev2 && ev2.settings && Array.isArray(ev2.settings.courts) ? ev2.settings.courts : [];
+    return !a.length || a.indexOf(c) !== -1;
+  };
   h += '<div class="section-h"><h2>On court</h2></div>';
   h += '<div class="courtgrid">';
   for(let c = 1; c <= courtsCount(); c++){
@@ -3315,17 +3385,25 @@ function renderBoard(){
         '<div class="vs">vs</div>' +
         '<div class="team">' + esc(entrantName(m.entrant2_id)) + '</div>' +
         '<div class="cta">Tap to enter the score</div></button>';
+    } else if (inUseCourts.has(c)){
+      /* Held by a match this board cannot show: a hidden event, or the other
+         division. The server treats it as occupied, so must the board. */
+      h += '<div class="courtcard idle"><div class="chead"><span class="cnum">Court ' + c + '</span></div>' +
+        '<div class="team">In use</div></div>';
     } else {
       /* A queue that is not empty but entirely blocked by teams still on court
          used to read "Tap to place a match", then answer "No match is waiting
          right now" when tapped, with the header shouting 24 waiting. Say the
-         real reason instead. */
+         real reason instead. Per court: an event pinned to other courts must
+         not make this one promise a placement it will refuse. */
       const busyNow = busyPlayerNames();
-      const callable = q.filter(x => !blockedByCourt(x, busyNow));
+      const callable = q.filter(x => !blockedByCourt(x, busyNow) && allowedOn(x, c));
       const canPlace = state.adminPin && callable.length > 0;
       const reason = callable.length > 0
         ? (state.adminPin ? 'Tap to place a match' : 'Waiting for a free court')
-        : (q.length > 0 ? 'Next match starts once its players are off court' : 'No match ready yet');
+        : (q.length > 0
+            ? (q.some(x => allowedOn(x, c)) ? 'Next match starts once its players are off court' : 'Reserved for another event')
+            : 'No match ready yet');
       if (canPlace){
         h += '<button class="courtcard idle" onclick="openCourtAssign(' + c + ')">' +
           '<div class="chead"><span class="cnum">Court ' + c + '</span></div>' +
@@ -3354,25 +3432,7 @@ function renderBoard(){
     }
   }
 
-  /* Held matches are out of the queue entirely, so they need somewhere to be
-     seen or they are simply lost. Shown to everyone: a player whose match was
-     held should be able to find out that it was, rather than watch the queue
-     go past without them. */
-  const heldList = heldMatches().filter(inView);
-  if (heldList.length){
-    h += '<div class="section-h"><h2>Held</h2><span class="hint">Off court until the desk puts them back</span></div>' +
-      '<div class="roundblock" style="padding-top:2px">';
-    h += heldList.map(m => {
-      let r = '<div class="queue-row click" onclick="openMatch(\'' + m.id + '\')">' +
-        '<span class="qnames">' + esc(entrantName(m.entrant1_id)) + ' <span class="qv">vs</span> ' +
-        esc(entrantName(m.entrant2_id)) + '</span>';
-      if (multi && eventById(m.event_id)) r += '<span class="qtag">' + esc(eventById(m.event_id).name) + '</span>';
-      if (state.adminPin) r += '<span class="queue-actions"><button class="btn small secondary" ' +
-        'onclick="event.stopPropagation();releaseMatch(\'' + m.id + '\')">Put back in the queue</button></span>';
-      return r + '</div>';
-    }).join("");
-    h += '</div>';
-  }
+  h += heldBlockHtml();
 
   const postponedList = data.matches.filter(m => m.status === "scheduled" && m.postponed &&
     (eventById(m.event_id) || {}).active && inView(m));
@@ -3997,7 +4057,7 @@ function renderAdmin(){
 
   let h = '<div class="panel"><h3>Events</h3>' +
     '<div class="subtabs evtabs" role="tablist">' +
-    data.events.slice().sort((a, b) => a.sort_order - b.sort_order).map(e =>
+    data.events.slice().sort((a, b) => a.sort_order - b.sort_order || String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id))).map(e =>
       '<button class="subtab" aria-current="' + (ev && e.id === ev.id) + '" onclick="setAdminEvent(\'' + e.id + '\')">' +
       esc(e.name) + (e.active ? ' <span class="livedot" aria-hidden="true">●</span>' : '') + '</button>').join("") +
     '</div>' +
@@ -4071,7 +4131,7 @@ function renderAdmin(){
             (pp.singles
               ? pp.ticked + ' ticked for this event, ready to draw'
               : pp.ticked + ' ticked for this event, ' + pp.pairs.length + ' complete ' + (pp.pairs.length === 1 ? 'pair' : 'pairs')) +
-            (pp.problems.length ? '. Still to sort out: ' + esc(pp.problems.join('; ')) : '.') + '</p>';
+            (pp.problems.length ? '. ' + swText('Still to sort out:') + ' ' + pp.problems.map(x => esc(swText(x))).join('; ') : '.') + '</p>';
         }
       } else {
         h += '<p class="note">One row per entrant. Fill in what you have: the DUPR rating drives the seeding, the DUPR ID is only stored for submitting results later, and blank rows are ignored.</p>';
@@ -4082,10 +4142,10 @@ function renderAdmin(){
         h += renderEntryGrid(ev);
       }
       h += '<div class="fieldrow" style="margin-top:12px"><div class="field"><label for="adm-gsize">Target group size</label><input id="adm-gsize" type="number" min="3" max="10" oninput="repriceEstimate();updateDrawSummary()" value="' + esc(String(evSetting(ev, "group_size", 6))) + '"></div>' +
-        '<div class="field"><label for="adm-seed">How to split them up</label><select id="adm-seed" onchange="updateDrawSummary()">' +
-        '<option value="dupr" selected>By DUPR (seeds dealt A, B, C, then round again)</option>' +
-        '<option value="random">Random draw</option>' +
-        '<option value="order">Keep the order above</option></select></div></div>' +
+        '<div class="field"><label for="adm-seed">How to split them up</label><select id="adm-seed" onchange="setSeedMode(this.value)">' +
+        '<option value="dupr"' + (seedMode() === "dupr" ? ' selected' : '') + '>By DUPR (seeds dealt A, B, C, then round again)</option>' +
+        '<option value="random"' + (seedMode() === "random" ? ' selected' : '') + '>Random draw</option>' +
+        '<option value="order"' + (seedMode() === "order" ? ' selected' : '') + '>Keep the order above</option></select></div></div>' +
         '<div class="esum" id="adm-summary">' + esc(drawSummaryText(ev)) + '</div>' +
         (hasMatches
           ? '<button class="btn small danger" onclick="' + (fromP ? 'drawFromParticipants()' : 'applySetup()') + '">Draw new groups (wipes this event)</button> <button class="btn small secondary" onclick="toggleRedraw()">Cancel</button>'
@@ -4128,9 +4188,15 @@ function renderAdmin(){
               '<button class="btn small secondary" onclick="renameEntrant(\'' + e.id + '\')">Rename</button></span></div>';
           });
         });
-        h += '<div class="addteam"><input id="add-team-name" type="text" placeholder="New team or player">' +
-          '<select id="add-team-group">' + groups.map(g => '<option value="' + esc(g) + '">Group ' + esc(g) + '</option>').join("") + '</select>' +
+        /* adm- prefixed on purpose: admCapture/admRestore carries adm-* fields
+           across background renders, and these used to be wiped by the 60ms
+           focusout flush mid-typing. DUPR fields so a late entrant can seed
+           and export properly instead of always landing last and id-less. */
+        h += '<div class="addteam"><input id="adm-addteam-name" type="text" placeholder="New team or player">' +
+          '<select id="adm-addteam-group">' + groups.map(g => '<option value="' + esc(g) + '">Group ' + esc(g) + '</option>').join("") + '</select>' +
           '<button class="btn small secondary" onclick="addTeamToGroup()">Add</button></div>' +
+          '<div class="addteam" style="margin-top:6px"><input id="adm-addteam-dupr" type="text" inputmode="decimal" placeholder="DUPR (one per player)">' +
+          '<input id="adm-addteam-did" type="text" inputmode="numeric" placeholder="DUPR ID (one per player)"></div>' +
           '<p class="note" style="margin-top:6px">A team added now plays catch-up matches against its group at the end of the queue.</p></details>';
       }
       if (hasMatches && !state.showRedraw){
@@ -4476,12 +4542,17 @@ function renderSlotModal(){
 function renderCourtAssignModal(){
   if (state.assignCourt == null) return "";
   const c = state.assignCourt;
-  /* only offer matches whose PLAYERS are free right now; the server enforces
-     the same rule by name, this just keeps the picker honest for a person
-     entered in two events */
-  const busyNames = new Set(onCourtMatches().flatMap(m =>
+  /* only offer matches whose PLAYERS are free right now (hidden events'
+     matches count as busy) AND whose event may use this court; the server
+     enforces both, this keeps the picker honest */
+  const busyNames = new Set(onCourtMatchesAll().flatMap(m =>
     splitPair(entrantName(m.entrant1_id)).concat(splitPair(entrantName(m.entrant2_id)))));
-  const q = pendingQueue().filter(m =>
+  const mayUse = m => {
+    const ev2 = eventById(m.event_id);
+    const a = ev2 && ev2.settings && Array.isArray(ev2.settings.courts) ? ev2.settings.courts : [];
+    return !a.length || a.indexOf(c) !== -1;
+  };
+  const q = pendingQueue().filter(m => mayUse(m) &&
     !splitPair(entrantName(m.entrant1_id)).concat(splitPair(entrantName(m.entrant2_id))).some(p => busyNames.has(p)));
   const multi = activeEvents().length > 1;
   let h = '<div class="overlay" onclick="if(event.target===this)closeCourtAssign()"><div class="modal" role="dialog" aria-modal="true">';
@@ -4515,8 +4586,9 @@ function renderOffCourtModal(){
   const m = data.matches.find(x => x.id === state.offCourtId);
   if (!m) return "";
   /* the off match's own players are leaving, so they do not count as busy;
-     everyone else is matched by name, the same rule the server enforces */
-  const busyNames = new Set(onCourtMatches().filter(x => x.id !== m.id).flatMap(x =>
+     everyone else is matched by name (hidden events included), the same rule
+     the server enforces */
+  const busyNames = new Set(onCourtMatchesAll().filter(x => x.id !== m.id).flatMap(x =>
     splitPair(entrantName(x.entrant1_id)).concat(splitPair(entrantName(x.entrant2_id)))));
   const q = pendingQueue().filter(x =>
     !splitPair(entrantName(x.entrant1_id)).concat(splitPair(entrantName(x.entrant2_id))).some(p => busyNames.has(p)));
@@ -4606,9 +4678,14 @@ function toggleRedraw(){ state.showRedraw = !state.showRedraw; state.setupPrevie
 let searchT = null;
 function setSearch(v){ state.search = v; clearTimeout(searchT); searchT = setTimeout(render, 150); }
 function openMatch(id){
+  /* What this screen believed when it OPENED: a background refresh can land
+     while the modal sits deferred, and reading m.status at save time would
+     then claim the desk had seen the fresh score it is about to overwrite. */
+  const mm = data.matches.find(x => x.id === id);
+  state.modalHadScore = mm ? mm.status === "played" : null;
   state.modalMatchId = id; render();
 }
-function closeModal(){ state.modalMatchId = null; render(); }
+function closeModal(){ state.modalMatchId = null; state.modalHadScore = null; render(); }
 function openTeam(id){ state.teamModalId = id; render(); }
 function closeTeam(){ state.teamModalId = null; render(); }
 function openSlotEditor(id){ state.slotEditId = id; render(); }
@@ -4681,6 +4758,10 @@ async function reload(background){
       }catch(e){}
     }
   }catch(e){
+    /* A superseded slow reload that FAILS must not poison the state a newer
+       successful one just wrote: the "Trying to reconnect" bar was appearing
+       over data that was perfectly fresh. */
+    if (gen !== loadGen) return;
     let msg = e.message || String(e);
     if (/does not exist|schema cache/i.test(msg)){
       msg = "The database tables aren't set up yet. Run supabase-schema.sql once in the Supabase SQL editor, then refresh.";
@@ -4749,11 +4830,10 @@ async function saveScore(matchId){
   const bo = m ? matchBestOf(m) : 1;
   const pts = m ? matchPts(m) : 21;
   const wb2 = m ? matchWinBy2(m) : false;
-  /* What this screen believed when saving: if it thought the match was
-     unscored but a score has just arrived from the court, the server refuses
-     rather than silently overwriting someone's fresh entry. */
-  const had = m ? m.status === "played" : null;
-  const errEl = document.getElementById("score-err");
+  /* What this screen believed when the modal OPENED (captured in openMatch):
+     if it thought the match was unscored but a score has arrived since, the
+     server refuses rather than silently overwriting someone's fresh entry. */
+  const had = state.modalHadScore != null ? state.modalHadScore : (m ? m.status === "played" : null);
   let r;
   if (bo > 1){
     const games = collectGames(bo);
@@ -4780,7 +4860,15 @@ async function saveScore(matchId){
       ? await store.adminSubmitScore(state.adminPin, matchId, s1, s2, null, false, had)
       : await store.submitScore(matchId, s1, s2);
   }
-  if (!r.ok){ errEl.textContent = swText(r.error || "Something went wrong."); return; }
+  if (!r.ok){
+    /* Re-query at response time: a render during the round trip replaces the
+       modal's nodes, and writing into the detached old element showed nothing
+       at all. If the error box is gone entirely, say it as a toast. */
+    const errNow = document.getElementById("score-err");
+    if (errNow) errNow.textContent = swText(r.error || "Something went wrong.");
+    else toast(r.error || "Something went wrong.");
+    return;
+  }
   state.modalMatchId = null;
   toast("Score saved");
   await reload();
@@ -4793,7 +4881,8 @@ async function walkover(matchId, side){
   const bo = matchBestOf(m);
   const pts = bo > 1 ? Math.floor(bo / 2) + 1 : matchPts(m);
   const s1 = side === 1 ? pts : 0, s2 = side === 1 ? 0 : pts;
-  const r = await store.adminSubmitScore(state.adminPin, matchId, s1, s2, null, true, m.status === "played");
+  const r = await store.adminSubmitScore(state.adminPin, matchId, s1, s2, null, true,
+    state.modalHadScore != null ? state.modalHadScore : m.status === "played");
   if (!r.ok){ const errEl = document.getElementById("score-err"); if (errEl) errEl.textContent = swText(r.error); else toast(r.error); return; }
   state.modalMatchId = null;
   toast("Walkover recorded");
@@ -5223,11 +5312,14 @@ function entrantsCsvPicked(input){
        "DUPR", or every ID column reads as a rating column. */
     const roleOf = h => {
       const t = h.toLowerCase();
-      if (/\bid\b|duprid/.test(t)) return "id";
+      /* "Ids" and "IdNo" are id columns too: \bid\b missed both and their
+         DUPR IDs landed in the partner-name field. */
+      if (/\bids?\b|duprid|idno/.test(t)) return "id";
       if (/dupr|rating/.test(t)) return "dupr";
       return "name";
     };
     const out = [];
+    let extraNames = 0;
     for(const cs of rows){
       const r = blankEntryRow();
       const names = [], duprs = [], ids = [];
@@ -5247,11 +5339,15 @@ function entrantsCsvPicked(input){
         });
       }
       if (!names.length) continue;
+      if (names.length > 2) extraNames++;
       r.n1 = names[0] || ""; r.n2 = names[1] || "";
       r.d1 = duprs[0] || "";  r.d2 = duprs[1] || "";
       r.i1 = ids[0] || "";    r.i2 = ids[1] || "";
       out.push(r);
     }
+    /* A first/middle/last export has three name columns; dropping the extras
+       silently turned "Mary Jane Otieno" into "Mary". Say so. */
+    if (extraNames) toast(extraNames + (extraNames === 1 ? " row" : " rows") + " had more than two name columns; only the first two were used. Check those rows.");
     if (!out.length){ toast("No names found in that file."); return; }
     const filled = entryRows().filter(r => String(r.n1 || "").trim() || String(r.n2 || "").trim()).length;
     if (filled && !confirm(swText("Replace the " + filled + " entrants already entered with the " + out.length + " rows from the file?"))) return;
@@ -5354,7 +5450,7 @@ async function deleteEvent(){
 async function addEvent(){
   const name = prompt(swText("Name for the new event:"));
   if (!name || !name.trim()) return;
-  const meta = { name: name.trim(), sort_order: data.events.length, settings: defaultEventSettings() };
+  const meta = { name: name.trim(), sort_order: Math.max(0, ...data.events.map(e => e.sort_order || 0)) + 1, settings: defaultEventSettings() };
   /* Singles are more tiring per point, so their group games run to 15, not 21. */
   if (/singles/i.test(meta.name)) meta.settings.points_to_group = 15;
   const r = await store.adminReplaceEvent(state.adminPin, null, meta, [], []);
@@ -5409,13 +5505,18 @@ async function editContacts(id){
 async function addTeamToGroup(){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
-  const name = document.getElementById("add-team-name").value.trim();
-  const group = document.getElementById("add-team-group").value;
+  const name = document.getElementById("adm-addteam-name").value.trim();
+  const group = document.getElementById("adm-addteam-group").value;
   if (!name){ toast("Type a name first."); return; }
   if (data.entrants.some(e => e.event_id === ev.id && e.name === name)){ toast("That name is already entered."); return; }
   const members = data.entrants.filter(e => e.event_id === ev.id && e.group_name === group);
   const maxSeed = Math.max(0, ...members.map(e => e.seed || 0));
-  const entrant = { id: uid(), event_id: ev.id, name, group_name: group, seed: maxSeed + 1 };
+  const duprs = ((document.getElementById("adm-addteam-dupr") || {}).value || "").split(/[\s,;\/]+/).map(s => pNum(s)).filter(v => v != null);
+  const dids = ((document.getElementById("adm-addteam-did") || {}).value || "").split(/[\s,;\/]+/).map(s => s.trim()).filter(Boolean);
+  const meta = {};
+  if (duprs.length){ meta.dupr = Math.round(duprs.reduce((a, b) => a + b, 0) / duprs.length * 100) / 100; meta.duprs = duprs; }
+  if (dids.length) meta.duprIds = dids;
+  const entrant = { id: uid(), event_id: ev.id, name, group_name: group, seed: maxSeed + 1, meta };
   const groupMs = data.matches.filter(m => m.event_id === ev.id && m.stage === "group" && m.group_name === group);
   const startRound = Math.max(0, ...groupMs.map(m => m.round || 0)) + 1;
   const maxOrder = Math.max(0, ...data.matches.filter(m => m.event_id === ev.id).map(m => m.play_order || 0));
@@ -5798,7 +5899,7 @@ function renderParticipants(){
         (singles
           ? ticked + ' ticked, ready to draw'
           : ticked + ' ticked, ' + pairs.length + ' complete ' + (pairs.length === 1 ? 'pair' : 'pairs')) +
-        (problems.length ? '\nStill to sort out: ' + problems.map(esc).join('; ') : '') +
+        (problems.length ? '\n' + swText('Still to sort out:') + ' ' + problems.map(x => esc(swText(x))).join('; ') : '') +
         (state.adminPin ? '\n<button class="btn small secondary" style="margin-top:4px" onclick="goDrawEvent(\'' + jsAttr(ev.id) + '\')">Draw groups</button>' : '') +
         '</div>';
     });
@@ -5823,10 +5924,10 @@ async function seedFromParticipants(){
   await loadParticipants(true);
   const pp = participantPairs(ev);
   if (!pp.ticked){ toast('Nobody is ticked for "' + ev.name + '" on the Participants tab yet.'); return false; }
-  if (!pp.pairs.length){ toast("No complete pairs yet. " + pp.problems.join("; ")); return false; }
+  if (!pp.pairs.length){ toast(swText("No complete pairs yet.") + " " + pp.problems.map(x => swText(x)).join("; ")); return false; }
   if (pp.problems.length &&
       !confirm(swText(pp.problems.length + (pp.problems.length === 1 ? " person is" : " people are") +
-        " not ready and would be left out of the draw. Draw without them?") + "\n" + pp.problems.join("\n"))) return false;
+        " not ready and would be left out of the draw. Draw without them?") + "\n" + pp.problems.map(x => swText(x)).join("\n"))) return false;
   const dbl = evIsDoubles(ev);
   state.entryDoubles = dbl;
   state.entryRows = pp.pairs.map(pr => dbl
@@ -5865,10 +5966,18 @@ function entrantMetaFor(e){
 }
 /* One choice instead of two checkboxes that quietly fought each other: the
    old pair let "seed by DUPR" and "random draw" both be ticked, and DUPR won
-   silently whenever any rating existed. */
+   silently whenever any rating existed. STATE-BACKED since the audit: the
+   select used to hardcode `selected` on DUPR and be read straight off the
+   DOM, so any re-render (Save settings above all) silently turned a chosen
+   Random draw back into a DUPR draw. */
+function setSeedMode(v){
+  state.seedModes = state.seedModes || {};
+  state.seedModes[state.adminEventId] = v;
+  updateDrawSummary();
+}
 function seedMode(){
-  const sel = document.getElementById("adm-seed");
-  return sel ? sel.value : "dupr";
+  const v = state.seedModes && state.seedModes[state.adminEventId];
+  return v || "dupr";
 }
 function seedByDuprWanted(entries, mode){
   return (mode || seedMode()) === "dupr" && entries.some(e => e.dupr != null);
@@ -6085,7 +6194,7 @@ function csvCell(v){
    per-game score column pairs. Copies cleanly into DUPR's club CSV template. */
 function downloadResults(allEvents){
   const evs = allEvents
-    ? data.events.slice().sort((a, b) => a.sort_order - b.sort_order)
+    ? data.events.slice().sort((a, b) => a.sort_order - b.sort_order || String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id)))
     : [eventById(state.adminEventId)].filter(Boolean);
   const played = [];
   evs.forEach(ev => {
@@ -6115,7 +6224,8 @@ function downloadResults(allEvents){
     const split = id => {
       const name = entrantName(id) || "";
       const parts = name.split(" & ");
-      if (parts.length < 2 && name) unsplit.push(name);
+      /* a singles entrant has no " & " by design; only doubles rows are wrong */
+      if (parts.length < 2 && name && evIsDoubles(ev)) unsplit.push(name);
       return [parts[0] || "", parts.slice(1).join(" & ") || ""];
     };
     const [a1, a2] = split(m.entrant1_id), [b1, b2] = split(m.entrant2_id);
