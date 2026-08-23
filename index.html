@@ -890,26 +890,30 @@ function assignCourtsGlobal(db){
   const takenMain = new Set(db.matches.filter(m => m.status === "scheduled" && m.court != null && !dbIsAmericano(evOf(m))).map(m => m.court));
   const freeMain = [];
   for(let c = 1; c <= total; c++) if (!takenMain.has(c)) freeMain.push(c);
-  /* Teams already mid-game on a main court can't be called to a second one
+  /* PEOPLE already mid-game on a main court can't be called to a second one
      (their next match can reach the queue front at round boundaries); skip
-     them and take the next eligible match. Mirrors the SQL. */
+     them and take the next eligible match. By player name, not entrant id,
+     mirroring the SQL: a person entered in two events has a separate entrant
+     row in each, and the id-level test used to call them to two courts. */
+  const nameOf = new Map(db.entrants.map(e => [e.id, e.name]));
+  const pnames = id => String(nameOf.get(id) || "").split(" & ").map(s => s.trim()).filter(Boolean);
   const busy = new Set();
   db.matches.forEach(m => {
     if (m.status === "scheduled" && m.court != null && !dbIsAmericano(evOf(m))){
-      if (m.entrant1_id) busy.add(m.entrant1_id);
-      if (m.entrant2_id) busy.add(m.entrant2_id);
+      pnames(m.entrant1_id).forEach(p => busy.add(p));
+      pnames(m.entrant2_id).forEach(p => busy.add(p));
     }
   });
   for(const next of weavePending(db)){
     if (!freeMain.length) break;
-    if (busy.has(next.entrant1_id) || busy.has(next.entrant2_id)) continue;
+    if (pnames(next.entrant1_id).concat(pnames(next.entrant2_id)).some(p => busy.has(p))) continue;
     const ev = evOf(next);
     const allowed = ev && ev.settings && Array.isArray(ev.settings.courts) && ev.settings.courts.length ? ev.settings.courts : null;
     let idx = -1;
     for(let k = 0; k < freeMain.length; k++){ if (!allowed || allowed.includes(freeMain[k])){ idx = k; break; } }
     if (idx === -1) continue;
     place(next, freeMain[idx]); freeMain.splice(idx, 1);
-    busy.add(next.entrant1_id); busy.add(next.entrant2_id);
+    pnames(next.entrant1_id).concat(pnames(next.entrant2_id)).forEach(p => busy.add(p));
   }
 
   // one independent pool per active Americano event
@@ -1062,6 +1066,14 @@ function demoStore(){
   const fail = msg => ({ ok: false, error: msg });
   const findMatch = id => db.matches.find(m => m.id === id);
   const eventOf = m => db.events.find(e => e.id === m.event_id);
+  /* Busy test by PLAYER NAME, mirroring the SQL: a person entered in two
+     events has an entrant row in each, so an id test never fires for them. */
+  const pNames = id => { const e = db.entrants.find(x => x.id === id); return String((e && e.name) || "").split(" & ").map(s => s.trim()).filter(Boolean); };
+  const sharesBusyPlayer = (e1, e2, excludeMatchId) => {
+    const mine = pNames(e1).concat(pNames(e2));
+    return db.matches.some(x => x.status === "scheduled" && x.court != null && x.id !== excludeMatchId &&
+      pNames(x.entrant1_id).concat(pNames(x.entrant2_id)).some(p => mine.includes(p)));
+  };
   const settingFor = (m, base) => {
     const ev = eventOf(m);
     const key = base + (m.stage === "knockout" ? "_knockout" : "_group");
@@ -1087,7 +1099,13 @@ function demoStore(){
      the same history the live one does. */
   function scoreText(m){
     if (!m || m.status !== "played" || m.score1 == null) return null;
-    if (m.walkover) return "walkover";
+    /* winner's name on purpose, mirroring the SQL: flipping a walkover to the
+       other team must read as a change or the log's dedupe skips the line */
+    if (m.walkover){
+      const wId = m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id;
+      const we = db.entrants.find(x => x.id === wId);
+      return "walkover · " + ((we && we.name) || "?");
+    }
     if (Array.isArray(m.games) && m.games.length) return m.games.map(g => g[0] + "-" + g[1]).join(", ");
     return m.score1 + "-" + m.score2;
   }
@@ -1246,6 +1264,8 @@ function demoStore(){
       if (!m.entrant1_id || !m.entrant2_id) return fail("Teams for this match aren't decided yet.");
       if (m.retired)
         return fail("This match ended by retirement. Clear the score first if it needs changing.");
+      if (m.status === "played")
+        return fail("This match already has a score. Clear it first if it actually ended by retirement.");
       const oldW = m.status === "played" ? (m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id) : null;
       const was = scoreText(m);
       const err = applyRetire(m, retireeId, s1, s2, games);
@@ -1317,12 +1337,13 @@ function demoStore(){
       if (!m) return fail("Match not found.");
       if (m.status !== "scheduled" || m.court == null) return fail("That match is not on a court.");
       if (dbIsAmericano(eventOf(m))) return fail("Americano rounds rotate on their own; enter the score or pause the event instead.");
-      /* Same gate as court assignment: never bring on a team that is already
-         mid-game on another main court. Mirrors the SQL. */
+      /* Same gate as court assignment: never bring on a PERSON who is already
+         mid-game on another main court. By player name, mirroring the SQL. */
       const busyNow = new Set();
       db.matches.forEach(x => {
         if (x.status === "scheduled" && x.court != null && x.id !== m.id && !dbIsAmericano(eventOf(x))){
-          busyNow.add(x.entrant1_id); busyNow.add(x.entrant2_id);
+          pNames(x.entrant1_id).forEach(p => busyNow.add(p));
+          pNames(x.entrant2_id).forEach(p => busyNow.add(p));
         }
       });
       /* Also honour the replacement event's court restriction, the way the SQL
@@ -1333,7 +1354,7 @@ function demoStore(){
         return !a.length || a.indexOf(m.court) !== -1;
       };
       const repl = weavePending(db).find(x =>
-        !busyNow.has(x.entrant1_id) && !busyNow.has(x.entrant2_id) && allowedFor(x));
+        !pNames(x.entrant1_id).concat(pNames(x.entrant2_id)).some(p => busyNow.has(p)) && allowedFor(x));
       if (!repl) return fail("No other match is waiting, so it stays on court.");
       repl.court = m.court; repl.postponed = false; repl.held = false;
       repl.called_at = new Date().toISOString(); repl.called_ack = false;
@@ -1355,8 +1376,7 @@ function demoStore(){
       if (!m) return fail("Match not found.");
       if (m.status !== "scheduled" || m.court != null) return fail("That match is not waiting for a court.");
       if (!m.entrant1_id || !m.entrant2_id) return fail("This match's teams aren't set yet.");
-      if (db.matches.some(x => x.status === "scheduled" && x.court != null &&
-          [x.entrant1_id, x.entrant2_id].some(id => id === m.entrant1_id || id === m.entrant2_id)))
+      if (sharesBusyPlayer(m.entrant1_id, m.entrant2_id, m.id))
         return fail("That team is already mid-game on another court.");
       const total = (db.tournament && db.tournament.settings && db.tournament.settings.courts) || 4;
       if (!(court >= 1 && court <= total)) return fail("No such court.");
@@ -1407,10 +1427,9 @@ function demoStore(){
       if (!onm.entrant1_id || !onm.entrant2_id) return fail("That match's teams aren't set yet.");
       if (dbIsAmericano(eventOf(offm)) || dbIsAmericano(eventOf(onm)))
         return fail("Americano rounds rotate on their own; enter the score or pause the event instead.");
-      /* never call a team that is mid-game on another court (the off match's
+      /* never call a PERSON who is mid-game on another court (the off match's
          own players are the ones leaving, so it does not count) */
-      if (db.matches.some(x => x.status === "scheduled" && x.court != null && x.id !== offm.id &&
-          [x.entrant1_id, x.entrant2_id].some(id => id === onm.entrant1_id || id === onm.entrant2_id)))
+      if (sharesBusyPlayer(onm.entrant1_id, onm.entrant2_id, offm.id))
         return fail("That team is already mid-game on another court.");
       const c = offm.court;
       onm.court = c; onm.postponed = false; onm.called_at = new Date().toISOString(); onm.called_ack = false;
@@ -1576,6 +1595,8 @@ function demoStore(){
       if (m.stage !== "knockout") return fail("Only knockout matches can be edited here.");
       if (m.status === "played") return fail("This match already has a score. Clear it first.");
       m.entrant1_id = e1 || null; m.entrant2_id = e2 || null;
+      /* a match with an emptied slot cannot be played: free its court */
+      if (!m.entrant1_id || !m.entrant2_id){ m.court = null; m.called_at = null; m.called_ack = false; }
       assignCourtsGlobal(db);
       notify(); return ok();
     },
@@ -1595,6 +1616,9 @@ function demoStore(){
       if (!ev) return fail("Event not found.");
       db.matches = db.matches.filter(m => !(m.event_id === eventId && m.stage === "knockout"));
       ev.stage = "group";
+      /* mirrors the SQL: a deliberate reset arms no_autobracket on the event
+         itself, so another phone's auto-draw cannot put the bracket back */
+      ev.settings = Object.assign({}, ev.settings, { no_autobracket: true });
       assignCourtsGlobal(db);
       notify(); return ok();
     }
@@ -2168,6 +2192,10 @@ const SW_EXACT = {
   "Bad walkover score.": "Alama ya walkover si sahihi.",
   "This match ended by retirement. Clear the score first if it needs changing.":
     "Mechi hii ilimalizika kwa kujitoa. Futa matokeo kwanza kama yanahitaji kubadilishwa.",
+  "This match already has a score. Clear it first if it actually ended by retirement.":
+    "Mechi hii tayari ina matokeo. Yafute kwanza kama kweli ilimalizika kwa kujitoa.",
+  "Could not switch the auto-draw off; the bracket may redraw itself.":
+    "Imeshindwa kuzima uchoraji wa kiotomatiki; huenda bango likajichora tena.",
   "To change this result, clear the score first.": "Ili kubadilisha matokeo haya, yafute kwanza.",
   "The roster is still loading.": "Orodha ya washiriki bado inapakiwa.",
   "The roster cannot be saved empty. Add at least one person first.":
@@ -3632,9 +3660,9 @@ function renderBracket(){
       : (n === 1 ? m.score1 : m.score2);
     const rows =
       bkTeamRow(n1 ? esc(n1) : 'TBD', bkSideCls(!!n1, w1, played), played ? side(1) : null,
-                m.walkover && w1 ? wo : (m.retired && w1 ? ret : '')) +
+                m.walkover && w1 ? wo : (m.retired === m.entrant1_id ? ret : '')) +
       bkTeamRow(n2 ? esc(n2) : (bye ? 'BYE' : 'TBD'), bkSideCls(!!n2, w2, played), played ? side(2) : null,
-                m.walkover && w2 ? wo : (m.retired && w2 ? ret : ''));
+                m.walkover && w2 ? wo : (m.retired === m.entrant2_id ? ret : ''));
     const top = bkCenter(r, j) - BK_HALF;
     const clickable = !bye && m.entrant1_id && m.entrant2_id;
     const editable = !!(state.adminPin && m.status === "scheduled" && !bye);
@@ -4448,10 +4476,13 @@ function renderSlotModal(){
 function renderCourtAssignModal(){
   if (state.assignCourt == null) return "";
   const c = state.assignCourt;
-  /* only offer matches whose teams are free right now; the server enforces
-     the same rule, this just keeps the picker honest */
-  const busyIds = new Set(onCourtMatches().flatMap(m => [m.entrant1_id, m.entrant2_id]));
-  const q = pendingQueue().filter(m => !busyIds.has(m.entrant1_id) && !busyIds.has(m.entrant2_id));
+  /* only offer matches whose PLAYERS are free right now; the server enforces
+     the same rule by name, this just keeps the picker honest for a person
+     entered in two events */
+  const busyNames = new Set(onCourtMatches().flatMap(m =>
+    splitPair(entrantName(m.entrant1_id)).concat(splitPair(entrantName(m.entrant2_id)))));
+  const q = pendingQueue().filter(m =>
+    !splitPair(entrantName(m.entrant1_id)).concat(splitPair(entrantName(m.entrant2_id))).some(p => busyNames.has(p)));
   const multi = activeEvents().length > 1;
   let h = '<div class="overlay" onclick="if(event.target===this)closeCourtAssign()"><div class="modal" role="dialog" aria-modal="true">';
   h += '<h3>Put a match on Court ' + c + '</h3>';
@@ -4483,9 +4514,12 @@ function renderOffCourtModal(){
   if (!state.offCourtId) return "";
   const m = data.matches.find(x => x.id === state.offCourtId);
   if (!m) return "";
-  /* the off match's own players are leaving, so they do not count as busy */
-  const busyIds = new Set(onCourtMatches().filter(x => x.id !== m.id).flatMap(x => [x.entrant1_id, x.entrant2_id]));
-  const q = pendingQueue().filter(x => !busyIds.has(x.entrant1_id) && !busyIds.has(x.entrant2_id));
+  /* the off match's own players are leaving, so they do not count as busy;
+     everyone else is matched by name, the same rule the server enforces */
+  const busyNames = new Set(onCourtMatches().filter(x => x.id !== m.id).flatMap(x =>
+    splitPair(entrantName(x.entrant1_id)).concat(splitPair(entrantName(x.entrant2_id)))));
+  const q = pendingQueue().filter(x =>
+    !splitPair(entrantName(x.entrant1_id)).concat(splitPair(entrantName(x.entrant2_id))).some(p => busyNames.has(p)));
   const multi = activeEvents().length > 1;
   let h = '<div class="overlay" onclick="if(event.target===this)closeOffCourt()"><div class="modal" role="dialog" aria-modal="true">';
   h += '<h3>Take this match off Court ' + m.court + '</h3>';
@@ -6032,7 +6066,11 @@ async function resetBracket(){
   autoBracketTried.add(ev.id);
   const r = await store.adminResetBracket(state.adminPin, ev.id);
   if (!r.ok){ toast(r.error); return; }
-  await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, { no_autobracket: true });
+  /* The server now arms no_autobracket itself; this write is belt and braces
+     for older deployments, and a failure must be SEEN, not shrugged off: an
+     unarmed flag means another phone re-seeds the bracket within seconds. */
+  const rf = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, { no_autobracket: true });
+  if (!rf.ok) toast(rf.error || "Could not switch the auto-draw off; the bracket may redraw itself.");
   toast("Back to group stage");
   await reload();
 }

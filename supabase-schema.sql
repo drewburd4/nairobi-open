@@ -474,11 +474,20 @@ begin
   if m.held then return 'That match is held. Put it back in the queue first.'; end if;
   if m.entrant1_id is null or m.entrant2_id is null then return 'This match''s teams are not set yet.'; end if;
   if p_court < 1 or p_court > total then return 'No such court.'; end if;
-  -- never call a team that is mid-game on another court
-  if exists (select 1 from nairobi_matches oc
-             where oc.status = 'scheduled' and oc.court is not null
-               and (oc.entrant1_id in (m.entrant1_id, m.entrant2_id)
-                 or oc.entrant2_id in (m.entrant1_id, m.entrant2_id))) then
+  -- Never call a PERSON who is mid-game on another court. By player name, the
+  -- same test the assigner uses: someone entered in two events has a separate
+  -- entrant row in each, so the old id-level test never fired for them and the
+  -- desk's manual placement put one human on two courts at once.
+  if exists (
+    select 1 from nairobi_matches oc
+    join nairobi_entrants b1 on b1.id = oc.entrant1_id
+    join nairobi_entrants b2 on b2.id = oc.entrant2_id
+    join nairobi_entrants a1 on a1.id = m.entrant1_id
+    join nairobi_entrants a2 on a2.id = m.entrant2_id
+    where oc.status = 'scheduled' and oc.court is not null and oc.id <> m.id
+      and (string_to_array(b1.name, ' & ') || string_to_array(b2.name, ' & '))
+          && (string_to_array(a1.name, ' & ') || string_to_array(a2.name, ' & '))
+  ) then
     return 'That team is already mid-game on another court.';
   end if;
   -- Same pool rule as nairobi_assign_courts: an Americano match holding court 1
@@ -592,12 +601,20 @@ begin
              and coalesce(e.settings ->> 'format', '') = 'americano') then
     return 'Americano rounds rotate on their own; enter the score or pause the event instead.';
   end if;
-  -- never call a team that is mid-game on another court (the match being
-  -- taken off does not count: its players are the ones leaving)
-  if exists (select 1 from nairobi_matches oc
-             where oc.status = 'scheduled' and oc.court is not null and oc.id <> p_off_match
-               and (oc.entrant1_id in (onm.entrant1_id, onm.entrant2_id)
-                 or oc.entrant2_id in (onm.entrant1_id, onm.entrant2_id))) then
+  -- Never call a PERSON who is mid-game on another court (the match being
+  -- taken off does not count: its players are the ones leaving). By player
+  -- name, the same test the assigner uses, so a double-entered human cannot
+  -- be hand-placed onto two courts.
+  if exists (
+    select 1 from nairobi_matches oc
+    join nairobi_entrants b1 on b1.id = oc.entrant1_id
+    join nairobi_entrants b2 on b2.id = oc.entrant2_id
+    join nairobi_entrants a1 on a1.id = onm.entrant1_id
+    join nairobi_entrants a2 on a2.id = onm.entrant2_id
+    where oc.status = 'scheduled' and oc.court is not null and oc.id <> p_off_match
+      and (string_to_array(b1.name, ' & ') || string_to_array(b2.name, ' & '))
+          && (string_to_array(a1.name, ' & ') || string_to_array(a2.name, ' & '))
+  ) then
     return 'That team is already mid-game on another court.';
   end if;
   c := offm.court;
@@ -723,7 +740,11 @@ language sql stable security definer set search_path = public
 as $$
   select case
     when m.status <> 'played' or m.score1 is null then null
-    when m.walkover then 'walkover'
+    -- the winner's name is part of the text on purpose: flipping a walkover to
+    -- the other team must read as a change, or the score log skips the line
+    when m.walkover then 'walkover · ' || coalesce(
+      (select en.name from nairobi_entrants en
+       where en.id = case when m.score1 > m.score2 then m.entrant1_id else m.entrant2_id end), '?')
     when m.games is not null and jsonb_typeof(m.games) = 'array' and jsonb_array_length(m.games) > 0
       then (select string_agg((g ->> 0) || '-' || (g ->> 1), ', ')
             from jsonb_array_elements(m.games) with ordinality t(g, i))
@@ -1185,6 +1206,8 @@ language plpgsql security definer set search_path = public
 as $$
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- Advisory lock BEFORE the row deletes (same order rule as everywhere).
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   if not exists (select 1 from nairobi_events where id = p_event_id) then return 'Event not found.'; end if;
   delete from nairobi_matches where event_id = p_event_id;
   delete from nairobi_entrants where event_id = p_event_id;
@@ -1271,6 +1294,7 @@ begin
   where not e.active
     and coalesce(e.settings ->> 'autostarted', '') <> 'true'
     and coalesce(e.settings ->> 'hidden', '') <> 'true'
+    and coalesce(e.settings ->> 'archived', '') <> 'true'
     and coalesce(e.settings ->> 'start_time', '') <> ''
     and exists (select 1 from nairobi_matches m where m.event_id = e.id)
     -- Never restart an event that has already been played in. A multi-day event
@@ -1386,6 +1410,8 @@ declare
   e nairobi_entrants;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- Advisory lock BEFORE the row deletes (same order rule as everywhere).
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into e from nairobi_entrants where id = p_entrant_id;
   if not found then return 'Team not found.'; end if;
   if exists (select 1 from nairobi_matches where stage = 'knockout' and (entrant1_id = p_entrant_id or entrant2_id = p_entrant_id)) then
@@ -1441,6 +1467,8 @@ declare
   e nairobi_entrants;
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- Advisory lock BEFORE the row deletes (same order rule as everywhere).
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   select * into e from nairobi_entrants where id = p_entrant_id;
   if not found then return 'Team not found.'; end if;
   if exists (select 1 from nairobi_matches where stage = 'knockout' and (entrant1_id = p_entrant_id or entrant2_id = p_entrant_id)) then
@@ -1496,7 +1524,13 @@ begin
   ) then
     return 'Pick teams from this event.';
   end if;
-  update nairobi_matches set entrant1_id = p_entrant1_id, entrant2_id = p_entrant2_id, updated_at = now()
+  update nairobi_matches set entrant1_id = p_entrant1_id, entrant2_id = p_entrant2_id,
+      -- a match with an emptied slot cannot be played: release its court and
+      -- banner, or the board draws that court Free while every placement is
+      -- refused with "was just filled"
+      court = case when p_entrant1_id is null or p_entrant2_id is null then null else court end,
+      called_at = case when p_entrant1_id is null or p_entrant2_id is null then null else called_at end,
+      updated_at = now()
   where id = p_match_id;
   perform nairobi_assign_courts();
   return 'OK';
@@ -1511,6 +1545,9 @@ language plpgsql security definer set search_path = public
 as $$
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- Advisory lock BEFORE the row deletes: the trailing assign_courts otherwise
+  -- reaches this lock after rows are already held (the banned AB-BA order).
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   if not exists (select 1 from nairobi_events where id = p_event_id) then return 'Event not found.'; end if;
 
   delete from nairobi_matches where event_id = p_event_id and stage = 'knockout';
@@ -1538,9 +1575,17 @@ language plpgsql security definer set search_path = public
 as $$
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- Advisory lock BEFORE the row deletes (same order rule as everywhere).
+  perform pg_advisory_xact_lock(hashtext('nairobi_courts'));
   if not exists (select 1 from nairobi_events where id = p_event_id) then return 'Event not found.'; end if;
   delete from nairobi_matches where event_id = p_event_id and stage = 'knockout';
-  update nairobi_events set stage = 'group' where id = p_event_id;
+  -- The flag rides on the event, server-side: a deliberate reset must not be
+  -- undone seconds later by another phone's auto-draw, and the client's own
+  -- follow-up write can fail on venue wifi.
+  update nairobi_events
+  set stage = 'group',
+      settings = coalesce(settings, '{}'::jsonb) || '{"no_autobracket": true}'::jsonb
+  where id = p_event_id;
   perform nairobi_assign_courts();
   return 'OK';
 end;
@@ -1596,6 +1641,13 @@ begin
   -- retirement is only ever changed by clearing it first.
   if m.retired is not null then
     return 'This match ended by retirement. Clear the score first if it needs changing.';
+  end if;
+  -- And the mirror image: a match with a normal score is corrected through
+  -- Clear score, never overwritten by a retirement. A score that landed while
+  -- the desk's modal sat open would otherwise vanish under the retirement
+  -- without a trace (retire has no stale-screen flag of its own).
+  if m.status = 'played' then
+    return 'This match already has a score. Clear it first if it actually ended by retirement.';
   end if;
   win_slot := case when p_retiree_id = m.entrant1_id then 2 else 1 end;
 
