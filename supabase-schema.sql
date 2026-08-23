@@ -134,6 +134,8 @@ create table if not exists nairobi_match_log (
 );
 
 create index if not exists nairobi_match_log_match_idx on nairobi_match_log (match_id, at);
+-- The five-minute burst check on public score entry scans by time alone.
+create index if not exists nairobi_match_log_at_idx on nairobi_match_log (at);
 
 -- ---------- row level security: public read, no direct writes ----------
 
@@ -782,6 +784,8 @@ as $$
 declare
   m nairobi_matches;
   chk record;
+  v_courts int;
+  v_recent int;
 begin
   -- Advisory lock BEFORE any row lock: this function locks match rows and
   -- then reaches the same advisory lock inside nairobi_assign_courts, so
@@ -792,6 +796,28 @@ begin
   if m.status = 'played' then return 'A score is already in. Ask the desk to change it.'; end if;
   if m.entrant1_id is null or m.entrant2_id is null then return 'Teams for this match are not decided yet.'; end if;
   if m.court is null then return 'This match is not on a court yet. Scores are entered from the Courts tab once it is called; otherwise ask the desk.'; end if;
+
+  -- The desk can switch player entry off for the rest of the day and take
+  -- every result at the table instead.
+  if exists (select 1 from nairobi_tournaments
+             where coalesce(settings ->> 'player_scores', 'true') = 'false') then
+    return 'The desk is entering all scores today. Please report your result at the desk.';
+  end if;
+
+  -- A result can only come from a match on a court, and there are only so many
+  -- courts, and a game takes longer than five minutes to play. So more entries
+  -- than there are courts inside five minutes is nobody finishing a match: it
+  -- is somebody working down the board for fun. Only successful public entries
+  -- count, the desk is never counted and never blocked, and the window slides
+  -- so a genuine backlog clears itself within minutes.
+  select case when coalesce(settings ->> 'courts', '') ~ '^[0-9]+$'
+              then (settings ->> 'courts')::int else 4 end
+    into v_courts from nairobi_tournaments limit 1;
+  select count(*) into v_recent from nairobi_match_log
+   where not by_desk and action = 'score' and at > now() - interval '5 minutes';
+  if v_recent >= greatest(4, coalesce(v_courts, 4)) then
+    return 'That is more scores than the courts can have finished. Wait a few minutes or ask the desk to enter it.';
+  end if;
 
   select * into chk from nairobi_check_score(m.event_id, m.stage, p_score1, p_score2, p_games, false);
   if chk.o_err is not null then return chk.o_err; end if;
@@ -894,6 +920,20 @@ end;
 $$;
 
 -- Dismiss the "go to court" banner for everyone: desk confirms players are on court.
+-- The desk can take score entry back off the players entirely.
+create or replace function nairobi_admin_set_player_scores(p_pin text, p_on boolean)
+returns text
+language plpgsql security definer set search_path = public
+as $$
+begin
+  if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  update nairobi_tournaments
+  set settings = coalesce(settings, '{}'::jsonb)
+                 || jsonb_build_object('player_scores', coalesce(p_on, true));
+  return 'OK';
+end;
+$$;
+
 create or replace function nairobi_admin_ack_called(p_pin text, p_match_id uuid)
 returns text
 language plpgsql security definer set search_path = public
@@ -1257,7 +1297,8 @@ begin
 end;
 $$;
 
--- Events with an admin-set start time turn themselves on 5 minutes early, so
+-- Events with an admin-set start time turn themselves on an hour and a
+-- quarter early, unless settings.autostart is false, so
 -- the desk does not have to be watching the clock. Any phone's refresh calls
 -- this (anon-safe: it only enacts the stored schedule). Fires once per set
 -- start time: activation stamps settings.autostarted, manual Start/Pause also
@@ -1302,6 +1343,11 @@ begin
     and coalesce(e.settings ->> 'autostarted', '') <> 'true'
     and coalesce(e.settings ->> 'hidden', '') <> 'true'
     and coalesce(e.settings ->> 'archived', '') <> 'true'
+    -- An event can refuse to start itself. The afternoon batch is set this
+    -- way: left to a timer it would come on top of a morning still being
+    -- played, and four events splitting four courts finishes neither. The
+    -- desk gets asked instead, by the bar the client puts up.
+    and coalesce(e.settings ->> 'autostart', '') <> 'false'
     and coalesce(e.settings ->> 'start_time', '') <> ''
     and exists (select 1 from nairobi_matches m where m.event_id = e.id)
     -- Never restart an event that has already been played in. A multi-day event
@@ -1309,8 +1355,10 @@ begin
     -- begins, and the stored start time belongs to day one.
     and not exists (select 1 from nairobi_matches m2
                     where m2.event_id = e.id and m2.status = 'played')
+    -- An hour and a quarter before the printed start, so the first matches are
+    -- already up and the board is worth reading when people walk in.
     and nairobi_ts_or_null(e.settings ->> 'start_time')
-        between now() - interval '12 hours' and now() + interval '5 minutes';
+        between now() - interval '12 hours' and now() + interval '75 minutes';
   get diagnostics n = row_count;
   if n > 0 then perform nairobi_assign_courts(); end if;
 exception when others then
@@ -1825,6 +1873,7 @@ revoke execute on function nairobi_ev_int_setting(uuid, text, int) from public, 
 revoke execute on function nairobi_ev_bool_setting(uuid, text, boolean) from public, anon, authenticated;
 
 grant execute on function nairobi_verify_pin(text) to anon, authenticated;
+grant execute on function nairobi_admin_set_player_scores(text, boolean) to anon, authenticated;
 grant execute on function nairobi_change_admin_pin(text, text) to anon, authenticated;
 grant execute on function nairobi_submit_score(uuid, int, int, jsonb) to anon, authenticated;
 grant execute on function nairobi_admin_submit_score(text, uuid, int, int, jsonb, boolean, boolean) to anon, authenticated;

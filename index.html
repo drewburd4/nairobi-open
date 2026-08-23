@@ -118,6 +118,13 @@ button.mast-left:hover,button.mast-left:focus-visible{background:var(--accent-so
 .note{font-size:12.5px; color:var(--muted)}
 .empty{padding:36px 16px; text-align:center; color:var(--muted); font-size:14px}
 .err{color:var(--danger); font-size:13px; font-weight:600; margin-top:8px}
+.check{display:flex; align-items:center; gap:7px; font-weight:600; margin:8px 0; cursor:pointer}
+.check input{flex:none}
+.startbar{background:var(--warn); color:#fff; font-size:13px; font-weight:700; padding:8px 12px;
+  display:flex; gap:8px; align-items:center; flex-wrap:wrap; justify-content:center; text-align:center}
+.startbar .sbwhat{flex:1 1 100%; font-weight:600; font-size:12px; opacity:.92}
+.startbar .btn{background:#fff; color:var(--warn); border-color:#fff}
+.startbar .btn.secondary{background:transparent; color:#fff; border-color:rgba(255,255,255,.6)}
 .stalebar{background:var(--warn-soft); color:var(--warn); font-size:12.5px; font-weight:700;
   padding:5px 14px; text-align:center; border-top:1px solid var(--line)}
 
@@ -1181,7 +1188,8 @@ function demoStore(){
   }
 
   /* Mirror of nairobi_autostart_due: an admin-set start time flips the event
-     on 5 minutes early, once. Manual Start/Pause consumes the flag, so a
+     on an hour and a quarter early, once, and only if the event has not
+     opted out. Manual Start/Pause consumes the flag, so a
      deliberately paused event stays paused; saving a new start time re-arms. */
   function autostartDue(){
     let hit = false;
@@ -1220,6 +1228,14 @@ function demoStore(){
       if (m.status === "played") return fail("A score is already in. Ask the desk to change it.");
       if (!m.entrant1_id || !m.entrant2_id) return fail("Teams for this match aren't decided yet.");
       if (m.court == null) return fail("This match isn't on a court yet. The score is entered from the Courts tab once it's called; corrections go through the desk.");
+      if ((db.tournament.settings || {}).player_scores === false)
+        return fail("The desk is entering all scores today. Please report your result at the desk.");
+      /* Mirrors the server: more public entries in five minutes than there are
+         courts is nobody finishing a match. */
+      const cap = Math.max(4, (db.tournament.settings || {}).courts || 4);
+      const since = Date.now() - 5 * 60 * 1000;
+      if ((db.log || []).filter(l => !l.by_desk && l.action === "score" && new Date(l.at).getTime() > since).length >= cap)
+        return fail("That is more scores than the courts can have finished. Wait a few minutes or ask the desk to enter it.");
       const was = scoreText(m);
       const err = applyScore(m, s1, s2, games, false, false);
       if (err) return fail(err);
@@ -1502,6 +1518,11 @@ function demoStore(){
         e.settings = Object.assign({}, e.settings, { autostarted: true });
       });
       assignCourtsGlobal(db);
+      notify(); return ok();
+    },
+    async adminSetPlayerScores(pin, on){
+      if (!checkPin(pin)) return fail("Wrong PIN.");
+      db.tournament.settings = Object.assign({}, db.tournament.settings, { player_scores: !!on });
       notify(); return ok();
     },
     async adminDeleteEvent(pin, eventId){
@@ -1790,7 +1811,8 @@ function liveStore(){
     adminGenerateBracket: (pin, eventId, rows) => rpc("nairobi_admin_generate_bracket", { p_pin: pin, p_event_id: eventId, p_matches: rows }),
     adminResetBracket: (pin, eventId) => rpc("nairobi_admin_reset_bracket", { p_pin: pin, p_event_id: eventId }),
     adminListParticipants: pin => rpc("nairobi_admin_list_participants", { p_pin: pin }),
-    adminSaveParticipants: (pin, rows, seen) => rpc("nairobi_admin_save_participants", { p_pin: pin, p_rows: rows, p_seen: seen || null })
+    adminSaveParticipants: (pin, rows, seen) => rpc("nairobi_admin_save_participants", { p_pin: pin, p_rows: rows, p_seen: seen || null }),
+    adminSetPlayerScores: (pin, on) => rpc("nairobi_admin_set_player_scores", { p_pin: pin, p_on: !!on })
   };
 }
 </script>
@@ -1806,6 +1828,7 @@ const state = {
   view: "board", eventId: null, search: "", roundFilter: "all",
   standingsFilter: "all",
   adminPin: null, modalMatchId: null, teamModalId: null, slotEditId: null, assignCourt: null, offCourtId: null,
+  startSnooze: 0, tiesForced: false,
   setupPreview: null, adminEventId: null, loadError: null,
   entryRows: null, entryDoubles: null, gedit: null, dragId: null,
   pRows: null, pLoaded: false, pDirty: false,
@@ -1892,6 +1915,8 @@ const SW_EXACT = {
   "Champion": "Bingwa", "To be decided": "Bado hajajulikana",
   "TBD": "Itajulikana", "Opponent TBD": "Mpinzani atajulikana", "To play": "Bado haijachezwa",
   "No events yet.": "Hakuna mashindano bado.",
+  "The draw is published when play starts. The Courts tab has the schedule.":
+    "Droo inatangazwa mchezo unapoanza. Kichupo cha Viwanja kina ratiba.",
   "No matches found.": "Hakuna mechi zilizopatikana.",
   "No knockout matches yet.": "Hakuna mechi za mtoano bado.",
   "No players yet.": "Hakuna wachezaji bado.",
@@ -1992,6 +2017,33 @@ const SW_EXACT = {
     "Orodha ya washiriki ina mabadiliko ambayo hayajahifadhiwa. Yahifadhi kabla ya kuchora?",
   "Take entries from the Participants tab": "Chukua washiriki kutoka ukurasa wa Washiriki",
   "Pick a partner": "Chagua mwenzako", "Nobody else yet": "Hakuna mwingine bado",
+  "Nobody free yet": "Hakuna aliye huru bado",
+  /* The manual-start bar. */
+  "Due to start now": "Yanapaswa kuanza sasa",
+  "Start it": "Anzisha", "Start them": "Anzisha", "Not yet": "Bado",
+  "Matches still to play in what is running": "Mechi zilizobaki katika yanayoendelea",
+  "Starting now splits the courts between them.": "Kuanzisha sasa kunagawa viwanja kati yao.",
+  "Nothing else is running.": "Hakuna kingine kinachoendelea.",
+  "Start automatically, an hour and a quarter before the planned time":
+    "Anza wenyewe, saa moja na robo kabla ya muda uliopangwa",
+  "Unticked, the desk is asked instead: a bar appears from five minutes before, with a Start button and a count of what is still being played.":
+    "Bila alama, meza ndiyo inaulizwa: ujumbe unatokea dakika tano kabla, wenye kitufe cha Anzisha na idadi ya mechi zinazoendelea.",
+  /* Score entry: the desk switch and the burst cap. */
+  "Score entry": "Kuweka matokeo",
+  "Report at the desk": "Ripoti mezani",
+  "Let players enter their own scores": "Ruhusu wachezaji kuweka matokeo yao wenyewe",
+  "Players can enter their own scores": "Wachezaji wanaweza kuweka matokeo yao wenyewe",
+  "All scores now go through the desk": "Matokeo yote sasa yanapitia mezani",
+  "The desk is entering all scores today. Play the match and report the result at the desk.":
+    "Meza ndiyo inaweka matokeo yote leo. Cheza mechi kisha ripoti matokeo mezani.",
+  "The desk is entering all scores today. Please report your result at the desk.":
+    "Meza ndiyo inaweka matokeo yote leo. Tafadhali ripoti matokeo yako mezani.",
+  "That is more scores than the courts can have finished. Wait a few minutes or ask the desk to enter it.":
+    "Hayo ni matokeo mengi kuliko viwanja vinavyoweza kuwa vimemaliza. Subiri dakika chache au omba meza iyaweke.",
+  "Off: players are told to report at the desk. Every score comes through an unlocked admin phone.":
+    "Imezimwa: wachezaji wanaambiwa waripoti mezani. Kila matokeo yanapitia simu ya msimamizi iliyofunguliwa.",
+  "Players enter their own result from the Courts tab while their match is on a court, once per match. The server already refuses anything not on a court, refuses a second entry, and refuses more entries in five minutes than there are courts. If that is not enough on the day, take it off them entirely and run every score through the desk.":
+    "Wachezaji huweka matokeo yao kutoka ukurasa wa Viwanja mechi yao ikiwa uwanjani, mara moja kwa kila mechi. Seva tayari inakataa chochote kisicho uwanjani, inakataa uwekaji wa pili, na inakataa matokeo mengi ndani ya dakika tano kuliko idadi ya viwanja. Kama haitoshi siku hiyo, waondolee kabisa na kila matokeo yapitie mezani.",
   "Fill the rows from Participants": "Jaza mistari kutoka kwa Washiriki",
   "Save participants": "Hifadhi washiriki",
   "Entries so far": "Waliojiandikisha hadi sasa",
@@ -2539,6 +2591,14 @@ function dropArchived(d){
   return d;
 }
 const publicEvents = () => data.events.filter(e => !isHidden(e));
+/* Schedule, standings and bracket all answer "who plays who", and a draw that
+   has not started is still allowed to change: a late entry, a withdrawal, a
+   group rearranged at the desk. Publishing one early turns every one of those
+   into an argument, so a drawn-but-not-started event stays off the player tabs
+   until it is running or has a result in. The desk sees all of them. */
+const eventStarted = ev => !!(ev && (ev.active ||
+  data.matches.some(m => m.event_id === ev.id && m.status === "played")));
+const visibleEvents = () => state.adminPin ? publicEvents() : publicEvents().filter(eventStarted);
 const activeEvents = () => data.events.filter(e => e.active && !isHidden(e)).sort((a, b) => a.sort_order - b.sort_order || String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id)));
 const courtsCount = () => (data.tournament && data.tournament.settings && data.tournament.settings.courts) || 4;
 const evSetting = (ev, key, dflt) => (ev && ev.settings && ev.settings[key] != null) ? ev.settings[key] : dflt;
@@ -2556,12 +2616,22 @@ const matchWinBy2 = m => m.stage === "knockout" || !!evSetting(eventById(m.event
 /* Americano games are rally-scored to a fixed total: the two scores must add
    up to the event's points target, so this returns that total or null. */
 const matchSumTo = m => isAmericano(eventById(m.event_id)) ? matchPts(m) : null;
+/* Two different things to whoever is reading: a tournament with nothing in it
+   at all, versus draws that exist but are not published until play starts. */
+function noEventHtml(){
+  return '<div class="empty">' + swText(publicEvents().length
+    ? 'The draw is published when play starts. The Courts tab has the schedule.'
+    : 'No events yet.') + '</div>';
+}
 function currentEvent(){
-  if (state.eventId && eventById(state.eventId)) return eventById(state.eventId);
+  const sel = state.eventId ? eventById(state.eventId) : null;
+  if (sel && (state.adminPin || eventStarted(sel))) return sel;
   const act = activeEvents();
-  /* publicEvents before data.events: the raw fallback showed a hidden event's
-     name, groups and schedule to anyone who opened the page before play. */
-  return act[0] || publicEvents()[0] || data.events[0] || null;
+  if (act[0]) return act[0];
+  /* visibleEvents before data.events: the raw fallback showed a hidden event's
+     name, groups and schedule to anyone who opened the page before play, and
+     the same is true of one that is merely drawn and not started yet. */
+  return visibleEvents()[0] || (state.adminPin ? data.events[0] : null) || null;
 }
 /* ---------- americano ---------- */
 /* An Americano division is scored per player, not per team: partners rotate
@@ -3119,12 +3189,13 @@ function render(){
   html += '<nav class="tabs">' + tabs.map(([id, label]) =>
     '<button class="tab" aria-current="' + (state.view === id) + '" onclick="setView(\'' + id + '\')">' + label + '</button>'
   ).join("") + '</nav>';
+  html += renderStartDue();
   html += renderCallouts();
   if (state.loadError) html += '<div class="stalebar">Showing the last update. Trying to reconnect…</div>';
   html += '</div>';
 
   html += '<main class="wrap">';
-  if (["schedule", "standings", "bracket"].includes(state.view) && data.events.length > 1){
+  if (["schedule", "standings", "bracket"].includes(state.view) && visibleEvents().length > 1){
     html += renderEventTabs();
   }
   if (state.view === "board") html += renderBoard();
@@ -3171,6 +3242,58 @@ function inDivision(m){
   if (state.division === "americano" && !americanoEvent()) return !isAmericano(ev);
   return state.division === "americano" ? isAmericano(ev) : !isAmericano(ev);
 }
+/* Events the desk has told never to start themselves. The afternoon batch is
+   set this way: left to autostart it would come on top of a morning that is
+   still playing, and with the courts split between four events neither batch
+   would finish. So the desk is asked instead of told. */
+const manualStart = ev => evSetting(ev, "autostart", true) === false;
+function manualStartDue(){
+  const now = Date.now();
+  return publicEvents().filter(ev => {
+    if (ev.active || !manualStart(ev)) return false;
+    const d = eventStartDate(ev);
+    if (!d) return false;
+    /* From five minutes before the printed time until twelve hours after, the
+       same window autostart uses, so a bar that was ignored is still there
+       when somebody picks the phone up. */
+    if (d.getTime() - now > 5 * 60 * 1000 || now - d.getTime() > 12 * 3600 * 1000) return false;
+    const ms = data.matches.filter(m => m.event_id === ev.id);
+    /* Nothing to start, or already played in: a paused half-finished event is
+       the desk's to resume by hand, not something to nag about. */
+    return ms.length > 0 && !ms.some(m => m.status === "played");
+  }).sort((a, b) => a.sort_order - b.sort_order);
+}
+function renderStartDue(){
+  if (!state.adminPin) return "";
+  if (state.startSnooze && Date.now() < state.startSnooze) return "";
+  const due = manualStartDue();
+  if (!due.length) return "";
+  const left = data.matches.filter(m => m.status !== "played" &&
+    (eventById(m.event_id) || {}).active).length;
+  const names = due.map(e => e.name).join(", ");
+  let h = '<div class="startbar">';
+  h += '<span>' + swText("Due to start now") + ': ' + esc(names) + '</span>';
+  h += '<button class="btn small" onclick="startDueEvents()">' +
+    swText(due.length === 1 ? "Start it" : "Start them") + '</button>';
+  h += '<button class="btn small secondary" onclick="snoozeStartDue()">' + swText("Not yet") + '</button>';
+  /* The whole reason this is a question and not an autostart: say how much of
+     what is already running would now be sharing the courts. */
+  h += '<span class="sbwhat">' + (left
+    ? swText("Matches still to play in what is running") + ': ' + left + '. ' +
+      swText("Starting now splits the courts between them.")
+    : swText("Nothing else is running.")) + '</span>';
+  return h + '</div>';
+}
+function snoozeStartDue(){ state.startSnooze = Date.now() + 10 * 60 * 1000; render(); }
+async function startDueEvents(){
+  const due = manualStartDue();
+  if (!due.length) return;
+  const r = await store.adminSetActiveMany(state.adminPin, due.map(e => e.id), true);
+  if (!r.ok){ toast(r.error); return; }
+  toast(due.map(e => e.name).join(", ") + " started");
+  await reload();
+}
+
 function renderCallouts(){
   const called = calledMatches().filter(inDivision);
   if (!called.length) return "";
@@ -3192,7 +3315,7 @@ function renderCallouts(){
 
 function renderEventTabs(){
   const cur = currentEvent();
-  let evs = publicEvents().slice().sort((a, b) => a.sort_order - b.sort_order || String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id)));
+  let evs = visibleEvents().slice().sort((a, b) => a.sort_order - b.sort_order || String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id)));
   /* Americano has no knockout, it is decided on total points, so it never
      appears as an option under the Bracket tab. */
   if (state.view === "bracket") evs = evs.filter(e => !isAmericano(e));
@@ -3550,7 +3673,7 @@ function termFilterFor(){
 
 function renderSchedule(){
   const ev = currentEvent();
-  if (!ev) return '<div class="empty">No events yet.</div>';
+  if (!ev) return noEventHtml();
   const evMatches = data.matches.filter(m => m.event_id === ev.id);
   if (!evMatches.length){
     const note = evSetting(ev, "schedule_note", "");
@@ -3618,7 +3741,7 @@ function renderSchedule(){
 
 function renderStandings(){
   const ev = currentEvent();
-  if (!ev) return '<div class="empty">No events yet.</div>';
+  if (!ev) return noEventHtml();
   /* Americano is scored per player across rotating partners, so the group
      table would be 28 one-match "teams" and tell nobody anything. */
   if (isAmericano(ev)){
@@ -3653,25 +3776,36 @@ function renderStandings(){
     const rows = standingsFor(ev, g);
     const left = data.matches.filter(m => m.event_id === ev.id && m.stage === "group" && m.group_name === g && m.status === "scheduled").length;
     h += '<div class="group-card"><h3><span>Group ' + esc(g) + '</span>' + (left ? '<span class="tag plain">' + left + ' left</span>' : '<span class="tag plain">Complete</span>') + '</h3>';
+    /* A tie is only a fact once the group has finished. With matches still to
+       play the table is a snapshot, and "tied" against a group nobody has
+       played in reads as a problem rather than as nothing having separated
+       them yet. Desk only as well, since drawing the lots is the desk's job
+       and there is nothing a player can do about it. */
+    const showTies = !!state.adminPin && !left;
     h += '<table class="standings"><thead><tr><th></th><th class="tname">Team</th><th>P</th><th>W</th><th>L</th><th>+/-</th></tr></thead><tbody>';
     rows.forEach((r, i) => {
       h += '<tr onclick="openTeam(\'' + r.id + '\')"><td class="pos">' + (i + 1) + '</td><td class="tname">' + esc(r.name) +
-        (r.unresolvedTie ? ' <span class="tag warn">tied</span>' : '') + '</td>' +
+        (showTies && r.unresolvedTie ? ' <span class="tag warn">tied</span>' : '') + '</td>' +
         '<td>' + r.p + '</td><td>' + r.w + '</td><td>' + r.l + '</td><td>' + (r.diff > 0 ? '+' : '') + r.diff + '</td></tr>';
     });
     h += '</tbody></table>';
     /* Alphabetical order is what actually decides these, which is no way to
        send someone home, so it is said out loud rather than left to look
        like a ranking. */
-    const stuck = rows.filter(r => r.unresolvedTie).length;
+    const stuck = showTies ? rows.filter(r => r.unresolvedTie).length : 0;
     if (stuck) h += '<p class="note" style="color:var(--warn);font-weight:700;margin:6px 0 0">' +
       stuck + ' teams are level on every tiebreaker. The order shown is alphabetical, not earned. ' +
       'Draw lots at the desk and enter the result as a correction if it decides who goes through.</p>';
     h += '</div>';
   }
-  h += '<p class="note">Tiebreakers follow the USA Pickleball order: wins, then head to head between the tied teams, ' +
-    'then point difference, then head to head point difference. Teams still level after that are split on points scored. ' +
-    'A walkover counts as a win but adds no points either way. Teams level on all of it are flagged: nothing has separated them and the desk must draw lots.</p>';
+  /* The rulebook footer only earns its place once the group stage is over and
+     the order in the table is the one people go home on. Before that it is a
+     wall of tiebreaker rules under tables where nobody has played a match. */
+  const groupLeft = data.matches.filter(m => m.event_id === ev.id && m.stage === "group" && m.status === "scheduled").length;
+  if (!groupLeft)
+    h += '<p class="note">Tiebreakers follow the USA Pickleball order: wins, then head to head between the tied teams, ' +
+      'then point difference, then head to head point difference. Teams still level after that are split on points scored. ' +
+      'A walkover counts as a win but adds no points either way. Teams level on all of it are flagged: nothing has separated them and the desk must draw lots.</p>';
   return h;
 }
 
@@ -3716,7 +3850,7 @@ const bkChampTbd = '<div class="bkchamp-card tbd"><div class="bkchamp-trophy">�
 
 function renderBracket(){
   const ev = currentEvent();
-  if (!ev) return '<div class="empty">No events yet.</div>';
+  if (!ev) return noEventHtml();
   if (isAmericano(ev)){
     return '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + '</span>' +
       '<div class="empty">' + esc(ev.name) + ' has no bracket. It is decided on total points won, so the Standings tab is the result.</div>';
@@ -4267,6 +4401,14 @@ function renderAdmin(){
       '<input id="adm-note" type="text" value="' + esc(evSetting(ev, "schedule_note", "")) + '"></div>';
     h += '<div class="field" style="margin-top:6px"><label for="adm-start">Planned start (drives the wait estimates players see; the event turns itself on 5 minutes before this time)</label>' +
       '<input id="adm-start" type="datetime-local" value="' + esc(evSetting(ev, "start_time", "")) + '"></div>';
+    /* An afternoon event that starts itself lands on top of a morning still
+       being played and the courts split four ways, so it is worth being able
+       to say "ask me". Unticked, the desk gets a bar from five minutes before
+       the planned time instead. */
+    h += '<label class="check"><input type="checkbox" id="adm-autostart"' +
+      (evSetting(ev, "autostart", true) === false ? '' : ' checked') +
+      '> Start automatically, an hour and a quarter before the planned time</label>' +
+      '<p class="note">Unticked, the desk is asked instead: a bar appears from five minutes before, with a Start button and a count of what is still being played.</p>';
     h += '<button class="btn small secondary" onclick="saveNote()">Save schedule</button>';
     /* Start and pause is the control the desk reaches for most and it used to
        sit in a row of same-sized secondary buttons, so nobody could find it.
@@ -4303,7 +4445,15 @@ function renderAdmin(){
     /* Nothing separated these teams and only some of them go through, so the
        bracket cannot be seeded until the desk draws. Left to itself the order
        would be alphabetical, which is not a result. */
-    const cutTies = isAmericano(ev) ? [] : unresolvedTiesAtCut(ev);
+    /* Same rule as the standings: a group still playing has not tied anything
+       yet, so its warning waits until its last match is in. */
+    const groupFinished = g => !data.matches.some(m => m.event_id === ev.id && m.stage === "group" &&
+                                                 m.group_name === g && m.status === "scheduled");
+    /* Unless seeding has just been refused over a tie: then the desk needs the
+       Draw lots button for exactly the group it was stopped on, finished or
+       not, or the refusal sends them to a panel with nothing on it. */
+    const cutTies = (isAmericano(ev) ? [] : unresolvedTiesAtCut(ev))
+      .filter(t => state.tiesForced || groupFinished(t.group));
     cutTies.forEach(t => {
       h += '<div class="gwarn">Group ' + esc(t.group) + ': ' + esc(t.names.join(", ")) +
         ' are level on wins, head to head, point difference and points scored' +
@@ -4371,6 +4521,18 @@ function renderAdmin(){
     h += '</div>';
   }
 
+  /* Kept as its own panel rather than buried in an event's settings: it is a
+     tournament-wide decision the desk makes once, usually in a hurry. */
+  h += '<div class="panel"><h3>Score entry</h3>';
+  h += '<p class="note">Players enter their own result from the Courts tab while their match is on a court, once per match. ' +
+    'The server already refuses anything not on a court, refuses a second entry, and refuses more entries in five minutes than there are courts. ' +
+    'If that is not enough on the day, take it off them entirely and run every score through the desk.</p>';
+  h += '<label class="check"><input type="checkbox" id="adm-playerscores"' + (playerScoresOn() ? ' checked' : '') +
+    ' onchange="setPlayerScores(this.checked)"> Let players enter their own scores</label>';
+  if (!playerScoresOn())
+    h += '<p class="note" style="color:var(--warn);font-weight:700">Off: players are told to report at the desk. Every score comes through an unlocked admin phone.</p>';
+  h += '</div>';
+
   h += '<div class="panel"><h3>Admin powers on the other tabs</h3><p class="note">' +
     'While unlocked: tap any match anywhere (Courts, Schedule, a team in Standings, or the Bracket) to fix or clear its score, enter a walkover, or postpone. ' +
     'Players can only enter a score while a match is on a court; admins can score anything from anywhere. ' +
@@ -4392,6 +4554,11 @@ function renderAdmin(){
 }
 
 /* ---------- modals ---------- */
+/* Off only when the desk has deliberately switched it off; anything missing or
+   malformed means players enter their own scores, which is the normal day. */
+const playerScoresOn = () => !(data.tournament && data.tournament.settings &&
+  data.tournament.settings.player_scores === false);
+
 function renderScoreModal(){
   if (!state.modalMatchId) return "";
   const m = data.matches.find(x => x.id === state.modalMatchId);
@@ -4402,13 +4569,18 @@ function renderScoreModal(){
   /* Players can only enter scores for matches currently on a court; everything
      else is read-only for them (admins can score any match from anywhere). */
   const onCourt = m.status === "scheduled" && m.court != null;
-  const infoOnly = !isAdmin && !played && !onCourt;
+  /* The desk can take score entry back off the players for the rest of the
+     day. An on-court match is still worth opening then, to see who is on and
+     what it is played to, but the boxes go away rather than sitting there
+     collecting a result the server is going to refuse. */
+  const deskOnly = !isAdmin && !played && onCourt && !playerScoresOn();
+  const infoOnly = !isAdmin && !played && (!onCourt || deskOnly);
   const pts = matchPts(m);
   const bo = matchBestOf(m);
   const ev = eventById(m.event_id);
 
   let h = '<div class="overlay" onclick="if(event.target===this)closeModal()"><div class="modal" role="dialog" aria-modal="true">';
-  h += '<h3>' + (played ? 'Match result' : infoOnly ? 'Upcoming match' : 'Enter score') + '</h3>';
+  h += '<h3>' + (played ? 'Match result' : deskOnly ? 'Report at the desk' : infoOnly ? 'Upcoming match' : 'Enter score') + '</h3>';
   h += '<div class="sub">' + esc(ev ? ev.name : '') + ' · ' + esc(roundName(m)) + (m.court != null && !played ? ' · Court ' + m.court : '') +
     ' · ' + (matchSumTo(m)
       ? 'scores add up to ' + matchSumTo(m)
@@ -4480,6 +4652,13 @@ function renderScoreModal(){
   } else if (infoOnly){
     h += '<div class="score-line"><label>' + esc(n1) + '</label></div>';
     h += '<div class="score-line"><label>' + esc(n2) + '</label></div>';
+    if (deskOnly){
+      h += '<p class="note" style="font-weight:700">The desk is entering all scores today. ' +
+        'Play the match and report the result at the desk.</p>';
+      h += '<div class="actions"><span class="spacer"></span><button class="btn secondary" onclick="closeModal()">Close</button></div>';
+      h += '</div></div>';
+      return h;
+    }
     if (ev){
       let est = '';
       if (ev.active){
@@ -4722,7 +4901,7 @@ function setView(v){
   if (v === "bracket"){
     const cur = currentEvent();
     if (cur && isAmericano(cur)){
-      const other = publicEvents().find(e => !isAmericano(e));
+      const other = visibleEvents().find(e => !isAmericano(e));
       if (other) state.eventId = other.id;
     }
   }
@@ -4796,7 +4975,8 @@ let loadGen = 0;
 async function reload(background){
   const gen = ++loadGen;
   try{
-    /* Let scheduled events turn themselves on (5 minutes early). Any phone's
+    /* Let scheduled events turn themselves on (an hour and a quarter early,
+       unless they have opted out). Any phone's
        refresh can trigger it; once a minute per phone is plenty. */
     if (store.autostartDue && Date.now() - lastAutostartPing > 60000){
       lastAutostartPing = Date.now();
@@ -5482,11 +5662,19 @@ async function saveNote(){
   /* Re-arm the 5-minutes-early auto-start ONLY when the start time actually
      changed: blanket re-arming meant that editing just the note on a paused
      event (rain delay) let the old start time fire again within a minute. */
-  const payload = { schedule_note: note, start_time: start || "" };
+  const autoEl = document.getElementById("adm-autostart");
+  const payload = { schedule_note: note, start_time: start || "",
+    autostart: autoEl ? !!autoEl.checked : evSetting(ev, "autostart", true) !== false };
   if ((start || "") !== evSetting(ev, "start_time", "")) payload.autostarted = false;
   const r = await store.adminUpdateEvent(state.adminPin, ev.id, ev.name, payload);
   if (!r.ok){ toast(r.error); return; }
   toast("Schedule saved"); await reload();
+}
+async function setPlayerScores(on){
+  const r = await store.adminSetPlayerScores(state.adminPin, on);
+  if (!r.ok){ toast(r.error); render(); return; }
+  toast(on ? "Players can enter their own scores" : "All scores now go through the desk");
+  await reload();
 }
 async function setActive(active){
   const ev = eventById(state.adminEventId);
@@ -5953,22 +6141,27 @@ function renderParticipants(){
         const partner = on ? String(r.entries[ev.id].partner || "") : "";
         let pick = '';
         if (on && evIsDoubles(ev)){
-          /* Everyone else already ticked for this event. Empty for the first
-             person in, which is the honest answer: there is nobody to pair
-             with yet. Anyone already taken says who by, and picking them moves
-             them, so a mis-pairing is one tap to fix rather than four edits. */
-          const mates = rows.filter((x, j) => j !== i && String(x.name || "").trim() &&
-                                    x.entries && x.entries[ev.id]);
+          /* Only people nobody has claimed, plus whoever this row is already
+             with so the current pairing still shows. Someone else's partner is
+             off the list until that pair is broken up deliberately: picking a
+             taken name used to split the other pair silently, which is close to
+             impossible to spot on a roster of sixty. */
+          const pkey = n => String(n || "").trim().toLowerCase();
+          const mine = pkey(r.name);
+          const mates = rows.filter((x, j) => {
+            if (j === i || !String(x.name || "").trim()) return false;
+            if (!x.entries || !x.entries[ev.id]) return false;
+            const theirs = pkey((x.entries[ev.id] || {}).partner);
+            return !theirs || theirs === mine;
+          });
           pick = '<select class="ppartner" onchange="setPPartner(' + i + ',\'' + jsAttr(ev.id) + '\',this.value)">' +
             '<option value=""' + (partner ? '' : ' selected') + '>' +
-            (mates.length ? 'Pick a partner' : 'Nobody else yet') + '</option>' +
-            mates.map(x => {
-              const theirs = String((x.entries[ev.id] || {}).partner || "").trim();
-              const taken = theirs && theirs.toLowerCase() !== String(r.name || "").trim().toLowerCase();
-              return '<option value="' + esc(x.name) + '"' +
-                (partner.toLowerCase() === String(x.name).trim().toLowerCase() ? ' selected' : '') + '>' +
-                esc(x.name) + (taken ? ' — with ' + esc(theirs) : '') + '</option>';
-            }).join("") + '</select>';
+            (mates.length ? 'Pick a partner' : 'Nobody free yet') + '</option>' +
+            mates.map(x =>
+              '<option value="' + esc(x.name) + '"' +
+                (pkey(partner) === pkey(x.name) ? ' selected' : '') + '>' +
+                esc(x.name) + '</option>'
+            ).join("") + '</select>';
         }
         return '<div class="pentry' + (on ? ' on' : '') + '">' +
           '<label><input type="checkbox"' + (on ? ' checked' : '') + (has ? '' : ' disabled') +
@@ -6196,6 +6389,10 @@ async function confirmGroupStage(){
   const hadKo = data.matches.some(m => m.event_id === ev.id && m.stage === "knockout");
   const ties = unresolvedTiesAtCut(ev);
   if (ties.length){
+    /* The standings only flag a tie once a group has finished, so this can be
+       the first the desk hears of it. Unlock the warning blocks on the way
+       through, or the panel it lands on has no Draw lots button. */
+    state.tiesForced = true;
     toast(ties.map(t => "Group " + t.group + ": " + t.names.join(", ")).join(" · ") +
       " are level on every tiebreaker. Draw lots first.");
     state.view = "admin";
