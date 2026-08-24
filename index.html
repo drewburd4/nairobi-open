@@ -327,6 +327,27 @@ select.qplace{max-width:170px}
 .pentry .ppartner{width:auto; max-width:200px; padding:5px 7px; font-size:13px; font-weight:400}
 .pbar{display:flex; flex-wrap:wrap; gap:8px; align-items:center; position:sticky; bottom:0; background:var(--bg); border-top:1px solid var(--line); padding:10px 0; margin-top:4px; z-index:5}
 .punsaved{font-size:12.5px; font-weight:700; color:var(--warn)}
+/* The public players list. Same roster, but PIN free and read only, so a row
+   is a name and a tap rather than a grid of fields: everything else the desk
+   knows about a person stays on the Participants tab. */
+.plist{display:flex; flex-direction:column; gap:6px; margin:10px 0 4px}
+.prow{background:var(--card); border:1px solid var(--line); border-radius:10px; overflow:hidden}
+.prow > button{display:flex; width:100%; align-items:center; gap:10px; padding:11px 12px; text-align:left; font:inherit; font-weight:700; font-size:14.5px; color:inherit}
+.prow > button:hover,.prow > button:focus-visible{background:var(--accent-soft)}
+.prow.open{border-color:var(--accent)}
+.prow.open > button{background:var(--accent-soft)}
+.prow .pcount{margin-left:auto; font-size:12px; font-weight:700; color:var(--muted); white-space:nowrap}
+.prow .pchev{color:var(--muted); font-size:10px; flex:none}
+.pwhat{padding:0 12px 11px; display:flex; flex-direction:column; gap:6px}
+.pwhat .pev{font-size:13.5px; font-weight:600; padding:7px 9px; background:var(--bg); border:1px solid var(--line); border-radius:8px}
+.pwhat .pwith{color:var(--muted); font-weight:600}
+.pwhat .pnone{font-size:13px; color:var(--muted); padding:2px 0}
+.psearch{width:100%; padding:9px 11px; border-radius:9px; border:1px solid var(--line); background:var(--card); color:inherit; font:inherit; font-size:14.5px; margin-top:10px}
+/* Says when the other tabs fill in. Players ask this constantly before a
+   tournament and the honest answer has two halves, so it lives in one place
+   and is printed on every tab where somebody is looking at an empty page. */
+.livenote{background:var(--court-soft); border:1px solid var(--line); border-radius:9px; padding:11px 13px; font-size:13px; color:var(--muted); line-height:1.55; margin:12px 0; text-align:left}
+.livenote b{color:var(--ink); font-weight:800; display:block; margin-bottom:3px}
 .gboard{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; margin-top:4px}
 .gcol{background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:8px; min-height:70px}
 .gcol.target{outline:2px dashed var(--accent); outline-offset:2px; cursor:pointer}
@@ -1133,7 +1154,33 @@ function buildMockData(){
   playInOrder(matchesD, matchesD.length, 21);
   playInOrder(matchesS, 20, 21);
 
-  const db = { tournament, events, entrants, matches: matchesD.concat(matchesS, allOther) };
+  /* The people behind those entrants, so the offline demo has a Players tab
+     worth looking at. Doubles names split on the documented " & ", singles
+     stand alone, and everyone carries the events they were entered in. */
+  const participants = (function(){
+    const byName = new Map();
+    const person = name => {
+      const key = String(name).trim();
+      if (!byName.has(key))
+        byName.set(key, { id: "pp" + (byName.size + 1), name: key, gender: "",
+          dupr_singles: null, dupr_doubles: null, dupr_id: "", entries: {},
+          sort_order: byName.size, updated_at: "2026-01-01T00:00:00.000Z" });
+      return byName.get(key);
+    };
+    entrants.forEach(e => {
+      const parts = String(e.name).split(" & ").map(x => x.trim()).filter(Boolean);
+      if (parts.length === 2){
+        const a = person(parts[0]), b = person(parts[1]);
+        a.entries[e.event_id] = { partner: b.name };
+        b.entries[e.event_id] = { partner: a.name };
+      } else if (parts.length === 1){
+        person(parts[0]).entries[e.event_id] = { partner: "" };
+      }
+    });
+    return Array.from(byName.values());
+  })();
+
+  const db = { tournament, events, entrants, matches: matchesD.concat(matchesS, allOther), participants };
 
   const pendingS = matchesS.filter(m => m.status === "scheduled")
     .sort((a, b) => a.play_order - b.play_order);
@@ -1697,6 +1744,18 @@ function demoStore(){
     },
     async adminSetContacts(){ return fail("Phone numbers only work on the live site."); },
     async adminListContacts(){ return { ok: true, data: [] }; },
+    async publicParticipants(){
+      /* The same three columns the SQL function publishes, and no more: names,
+         which non-hidden events each person is in, and the partner. */
+      const vis = new Set((db.events || []).filter(e => !isHidden(e) && !isArchived(e)).map(e => e.id));
+      return { ok: true, data: (db.participants || []).map(p => {
+        const out = {};
+        Object.keys(p.entries || {}).forEach(k => {
+          if (vis.has(k)) out[k] = { partner: String((p.entries[k] || {}).partner || "") };
+        });
+        return { id: p.id, name: p.name, entries: out };
+      }) };
+    },
     async adminListParticipants(pin){
       /* A stale PIN must say so: an ok-but-empty answer reads as a deleted
          roster and arms a save that would make it true. Deep copy on the way
@@ -1906,6 +1965,10 @@ function liveStore(){
     adminSetBracketTeams: (pin, matchId, e1, e2) => rpc("nairobi_admin_set_bracket_teams", { p_pin: pin, p_match_id: matchId, p_entrant1_id: e1 || null, p_entrant2_id: e2 || null }),
     adminGenerateBracket: (pin, eventId, rows) => rpc("nairobi_admin_generate_bracket", { p_pin: pin, p_event_id: eventId, p_matches: rows }),
     adminResetBracket: (pin, eventId) => rpc("nairobi_admin_reset_bracket", { p_pin: pin, p_event_id: eventId }),
+    /* No PIN: this is the one window into the roster that anyone may open. The
+       function itself decides what is publishable, so the client cannot widen
+       it by asking for more columns. */
+    publicParticipants: () => rpc("nairobi_public_participants", {}),
     adminListParticipants: pin => rpc("nairobi_admin_list_participants", { p_pin: pin }),
     adminSaveParticipants: (pin, rows, seen) => rpc("nairobi_admin_save_participants", { p_pin: pin, p_rows: rows, p_seen: seen || null }),
     adminSetPlayerScores: (pin, on) => rpc("nairobi_admin_set_player_scores", { p_pin: pin, p_on: !!on }),
@@ -1929,6 +1992,10 @@ const state = {
   setupPreview: null, adminEventId: null, loadError: null,
   entryRows: null, entryDoubles: null, gedit: null, dragId: null,
   pRows: null, pLoaded: false, pDirty: false,
+  /* The public roster is a separate copy from the desk's: it holds different
+     columns, it is loaded without a PIN, and it must not be the thing a Save
+     writes back. pubOpen is the one name expanded on the list. */
+  pubRows: null, pubLoaded: false, pubBusy: false, pubOpen: null, pubSearch: "",
   showAllQueue: false, showRedraw: false, pendingRender: false, division: "main",
   movePick: null,
   lang: safeLocal("pb_lang") === "sw" ? "sw" : "en",
@@ -2090,6 +2157,24 @@ const SW_EXACT = {
   "This score was changed.": "Matokeo haya yalibadilishwa.",
   /* ---- participants ---- */
   "Participants": "Washiriki",
+  /* The public players list and the note about when the rest of the site
+     fills in. The desk runs in Swahili, and so do the players reading it. */
+  "Everyone entered in the tournament. Tap a name to see what they are playing.":
+    "Kila aliyeandikishwa kwenye mashindano. Gusa jina kuona anachocheza.",
+  "Nobody is entered yet.": "Bado hakuna aliyeandikishwa.",
+  "No name matches that.": "Hakuna jina linalolingana na hilo.",
+  "Not entered in anything yet.": "Bado hajaandikishwa kwenye chochote.",
+  "Could not load the players.": "Imeshindwa kupakia wachezaji.",
+  "Search names": "Tafuta majina",
+  "When the rest of this fills in": "Sehemu zilizosalia zitakapojaa",
+  "The schedule, standings and bracket for an event are published when that event starts. Until then its draw can still change: a late entry, a withdrawal, a group rearranged at the desk.":
+    "Ratiba, msimamo na mtoano wa shindano huchapishwa shindano hilo linapoanza. Hadi wakati huo droo yake bado inaweza kubadilika: mshiriki wa dakika za mwisho, aliyejitoa, au kundi lililopangwa upya mezani.",
+  "The Courts tab fills in earlier. The first events of the tournament appear there 24 hours ahead, and every later batch 12 hours before its own start time.":
+    "Kichupo cha Viwanja hujaa mapema zaidi. Mashindano ya kwanza huonekana hapo saa 24 kabla, na kila kundi linalofuata saa 12 kabla ya muda wake wa kuanza.",
+  "Clear backup": "Futa nakala rudufu",
+  "Delete the offline backup saved on this phone? Other phones keep theirs.":
+    "Ufute nakala rudufu iliyohifadhiwa kwenye simu hii? Simu nyingine zitabaki na zao.",
+  "Offline backup cleared.": "Nakala rudufu imefutwa.",
   "Unlock the Admin tab to see the participants.": "Fungua ukurasa wa Msimamizi ili kuona washiriki.",
   "Everyone playing the tournament, entered once. Tick the events each person is in and name their partner; the Admin tab then seeds those events straight from this list. Only the desk can see this tab.":
     "Kila anayecheza shindano, ameandikishwa mara moja. Weka alama kwenye mashindano ambayo kila mtu yumo na uandike mwenzake; kisha ukurasa wa Msimamizi hupanga mashindano hayo moja kwa moja kutoka orodha hii. Meza pekee ndiyo inaweza kuona ukurasa huu.",
@@ -2431,6 +2516,14 @@ const SW_PATTERNS = [
   [/^([^·]+) retired, so ([^·]+) wins\? The games already finished stand and their points count\.$/,
    "$1 amejitoa, kwa hiyo $2 anashinda? Michezo iliyokwisha malizika inabaki na alama zake zinahesabika."],
   [/^(\d+) person$/, "mtu $1"],
+  /* The public players list. [^·] on the partner so a composed line is never
+     swallowed before the per-segment pass reaches it. */
+  [/^(\d+) player$/, "mchezaji $1"],
+  [/^(\d+) players$/, "wachezaji $1"],
+  [/^(\d+) shown$/, "$1 wameonyeshwa"],
+  [/^(\d+) event$/, "shindano $1"],
+  [/^(\d+) events$/, "mashindano $1"],
+  [/^with ([^·]+)$/, "na $1"],
   [/^(\d+) people$/, "watu $1"],
   [/^Two people share a name: ([^·]+)\. Make them different first\.$/,
    "Watu wawili wana jina moja: $1. Yatofautishe kwanza."],
@@ -2742,7 +2835,8 @@ const matchSumTo = m => isAmericano(eventById(m.event_id)) ? matchPts(m) : null;
 function noEventHtml(){
   return '<div class="empty">' + swText(publicEvents().length
     ? 'The draw is published when play starts. The Courts tab has the schedule.'
-    : 'No events yet.') + '</div>';
+    : 'No events yet.') + '</div>' +
+    (publicEvents().length ? publishNoteHtml() : '');
 }
 function currentEvent(){
   const sel = state.eventId ? eventById(state.eventId) : null;
@@ -3325,6 +3419,9 @@ function render(){
     ["board", "Courts"], ["schedule", "Schedule"],
     ["standings", "Standings"], ["bracket", "Bracket"]
   ];
+  /* Players is the public half of the roster and stays on the bar for
+     everyone; Participants is the desk's editing grid for the same people. */
+  tabs.push(["players", "Players"]);
   if (state.adminPin) tabs.push(["participants", "Participants"]);
   tabs.push(["admin", "Admin"]);
   let html = '<div class="topbar">';
@@ -3359,6 +3456,7 @@ function render(){
   else if (state.view === "schedule") html += renderSchedule();
   else if (state.view === "standings") html += renderStandings();
   else if (state.view === "bracket") html += renderBracket();
+  else if (state.view === "players") html += renderPlayers();
   else if (state.view === "participants") html += renderParticipants();
   else if (state.view === "admin") html += renderAdmin();
   html += '</main>';
@@ -3732,6 +3830,7 @@ function renderBoard(){
         h += '<br><br>' + upcoming.slice(0, 8).map(e => esc(e.name) + ' · ' + esc(evSetting(e, "schedule_note", ""))).join('<br>');
       }
       h += '</div>';
+      if (moreToCome()) h += publishNoteHtml();
     }
     /* Held matches used to disappear entirely the moment their event was
        paused, put-back button and all; a held match must stay findable. */
@@ -3940,6 +4039,9 @@ function renderSchedule(){
     }
   }
   h += '<p class="note">Matches run in this order, group A first, so everyone plays round 1 before round 2 starts. Played matches show their scores; tap a match for details. A score can be entered while the match is on a court, and corrections go through the desk.</p>';
+  /* Only while something is still to come: once every event has started this
+     is just a paragraph nobody needs under a schedule they are reading. */
+  if (moreToCome()) h += publishNoteHtml();
   return h;
 }
 
@@ -4768,12 +4870,12 @@ function renderAdmin(){
     h += '<button class="btn small secondary" onclick="downloadResults(false)">Download this event (CSV)</button> ' +
       '<button class="btn small secondary" onclick="downloadResults(true)">Download all events (CSV)</button>';
     h += (function(){
-      let bk = null;
-      try{ bk = JSON.parse(safeLocal("pb_backup") || "null"); }catch(_){}
+      const bk = readBackup();
       return '<p class="note" style="margin-top:10px">Offline backup on this phone: ' +
         (bk ? bk.played + ' played matches, saved ' +
           new Date(bk.taken_at).toLocaleString(state.lang === "sw" ? "sw" : [], { weekday: 'short', hour: 'numeric', minute: '2-digit' }) +
-          '. <button class="btn small secondary" onclick="downloadBackup()">Download backup (JSON)</button>'
+          '. <button class="btn small secondary" onclick="downloadBackup()">Download backup (JSON)</button> ' +
+          '<button class="btn small secondary" onclick="clearBackup()">Clear backup</button>'
         : 'none yet (a snapshot is kept automatically every 25 played matches).') +
         '<br>Every phone with the page open keeps its own copy, so a wiped database can be rebuilt from any of them.</p>';
     })();
@@ -5162,6 +5264,10 @@ function setView(v){
   /* Pulled on arrival rather than on every reload: the roster is desk-only and
      changes far less often than the board does. */
   if (v === "participants" && !state.pLoaded) loadParticipants().then(render);
+  /* Same idea for the public list, minus the PIN. Re-pulled on every arrival
+     rather than cached for the session: a player who was just added wants to
+     see themselves without reloading the page, and the payload is names. */
+  if (v === "players") loadPublicPlayers().then(render);
   /* Americano is never an option under Bracket (it has none), so switching to
      Bracket while it is selected would land on a dead end; jump to the first
      event that does have a bracket instead. */
@@ -5308,11 +5414,26 @@ let autoBracketBusy = false;
    If the database is ever wiped or broken, any phone that had the page open
    still holds the last snapshot (Admin has a download button for it). Never
    overwritten by a suddenly emptier database: that is the moment it is for. */
+/* Bump this to throw away every device's snapshot at once. A backup lives in
+   each phone's own browser storage, so there is no server-side way to clear
+   one; stamping the epoch on the way in and refusing to read a snapshot that
+   does not carry the current one retires them all without anyone tapping
+   anything. Bumped 2026-08-24 (Drew): the stored copies held test rosters and
+   test draws from before the real entries went in. */
+const BACKUP_EPOCH = "2026-08-24";
+/* The only way in. A snapshot from an earlier epoch is deleted rather than
+   returned, so nothing downstream has to remember to check. */
+function readBackup(){
+  let bk = null;
+  try{ bk = JSON.parse(safeLocal("pb_backup") || "null"); }catch(_){}
+  if (!bk || typeof bk !== "object") return null;
+  if (bk.v !== BACKUP_EPOCH){ safeLocal("pb_backup", null); return null; }
+  return bk;
+}
 function maybeBackup(rosterChanged){
   try{
     const played = (data.matches || []).filter(m => m.status === "played").length;
-    let prev = null;
-    try{ prev = JSON.parse(safeLocal("pb_backup") || "null"); }catch(_){}
+    const prev = readBackup();
     const prevPlayed = (prev && prev.played) || 0;
     /* Archiving events legitimately shrinks the played count (their matches
        leave data entirely), and the wipe guard used to read that as a
@@ -5324,12 +5445,18 @@ function maybeBackup(rosterChanged){
     const setShrank = prevEvIds && prevEvIds.some(id => !evIds.includes(id));
     if (played < prevPlayed - 5 && !setShrank) return;   /* looks like a wipe: keep the old copy */
     /* A roster save is worth a snapshot on its own: before any match is
-       played the roster IS the tournament, and it lives nowhere else. */
-    if (!rosterChanged){
+       played the roster IS the tournament, and it lives nowhere else.
+       setShrank writes too, and that is the whole point of it: the chunk gate
+       below compares against the OLD baseline, so an archived event that took
+       40 played matches with it left every later count failing the gate and no
+       new baseline ever being written. The snapshot froze for the rest of the
+       tournament, which is the opposite of what the guard above intends. */
+    if (!rosterChanged && !setShrank){
       if (!played) return;
       if (prev && Math.floor(played / 25) <= Math.floor(prevPlayed / 25)) return;
     }
     safeLocal("pb_backup", JSON.stringify({
+      v: BACKUP_EPOCH,
       taken_at: new Date().toISOString(), played, eventIds: evIds,
       tournament: data.tournament && data.tournament.name,
       events: data.events, entrants: data.entrants, matches: data.matches,
@@ -5340,14 +5467,22 @@ function maybeBackup(rosterChanged){
   }catch(_){}
 }
 function downloadBackup(){
-  const raw = safeLocal("pb_backup");
-  if (!raw){ toast("No backup saved on this device yet."); return; }
-  const blob = new Blob([raw], { type: "application/json" });
+  const bk = readBackup();
+  if (!bk){ toast("No backup saved on this device yet."); return; }
+  const blob = new Blob([JSON.stringify(bk)], { type: "application/json" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
   a.download = "nairobi-open-backup.json";
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+/* Throws away this phone's copy only. Every other phone that has had the page
+   open still holds its own, which is the point of keeping them everywhere. */
+function clearBackup(){
+  if (!confirm(swText("Delete the offline backup saved on this phone? Other phones keep theirs."))) return;
+  safeLocal("pb_backup", null);
+  toast(swText("Offline backup cleared."));
+  render();
 }
 function collectGames(bo){
   const games = [];
@@ -6173,6 +6308,115 @@ function renderEntryGrid(ev){
   h += '<button class="btn small secondary" onclick="addEntryRows()">Add ' + ENTRY_CHUNK + ' more rows</button>';
   return h;
 }
+/* ---------- players: the roster, in public ----------
+   The same people as the Participants tab, minus the PIN and minus every
+   column that carries a gender or a DUPR id. It gets its own store call rather
+   than filtering the desk's rows, because what is publishable is decided in
+   the database: nothing on this side can widen it by accident, and a column
+   added to the table later cannot ride along. */
+async function loadPublicPlayers(){
+  if (state.pubBusy) return;
+  state.pubBusy = true;
+  try{
+    const r = await store.publicParticipants();
+    if (r && r.ok){
+      state.pubRows = (r.data || [])
+        .map(x => ({ id: x.id, name: String(x.name || "").trim(), entries: x.entries || {} }))
+        .filter(x => x.name);
+      state.pubLoaded = true;
+      state.pubError = null;
+    } else if (!state.pubLoaded){
+      /* To somebody checking whether they are entered, an empty roster and a
+         failed call look exactly alike. Say which it was. */
+      state.pubError = (r && r.error) || "Could not load the players.";
+    }
+  } catch(e){
+    if (!state.pubLoaded) state.pubError = "Could not load the players.";
+  } finally { state.pubBusy = false; }
+}
+function togglePlayer(id){ state.pubOpen = state.pubOpen === id ? null : id; render(); }
+let plSearchT = null;
+function setPlayerSearch(v){ state.pubSearch = v; clearTimeout(plSearchT); plSearchT = setTimeout(render, 150); }
+
+/* What one person is entered in. The event's real name comes from the board
+   rather than the roster, so a renamed event reads correctly here; an entry
+   whose event has since been deleted is dropped rather than rendered as a bare
+   id, and hidden and archived ones never arrive in the first place. */
+function playerEntries(pl){
+  const byId = {};
+  publicEvents().forEach(e => { byId[e.id] = e; });
+  return Object.keys(pl.entries || {})
+    .map(id => ({ ev: byId[id], partner: String((pl.entries[id] || {}).partner || "").trim() }))
+    .filter(x => x.ev)
+    .sort((a, b) => (a.ev.sort_order || 0) - (b.ev.sort_order || 0) ||
+      String(a.ev.name).localeCompare(String(b.ev.name)));
+}
+
+/* Asked constantly before a tournament and between batches: when does the rest
+   of this fill in? The honest answer has two halves, so it is written once and
+   printed wherever somebody is looking at a page that is still empty. */
+function publishNoteHtml(){
+  return '<div class="livenote"><b>When the rest of this fills in</b>' +
+    'The schedule, standings and bracket for an event are published when that event starts. ' +
+    'Until then its draw can still change: a late entry, a withdrawal, a group rearranged at the desk.<br>' +
+    'The Courts tab fills in earlier. The first events of the tournament appear there 24 hours ahead, ' +
+    'and every later batch 12 hours before its own start time.</div>';
+}
+/* True while any published event is still waiting to start, which is exactly
+   when the note above is worth the space it takes. */
+const moreToCome = () => publicEvents().some(e => !eventStarted(e));
+
+function renderPlayers(){
+  let h = '<span class="print-title">' + esc(data.tournament.name) + ' · Players</span>';
+  h += '<section class="card"><h2>Players</h2>' +
+    '<p class="note">Everyone entered in the tournament. Tap a name to see what they are playing.</p>';
+
+  if (!state.pubLoaded)
+    return h + '<div class="empty">' + (state.pubError ? esc(swText(state.pubError)) : 'Loading…') + '</div></section>';
+
+  /* Display order only. Sorting the list by name decides nothing competitive,
+     which is the one thing a name is never allowed to decide here. */
+  const rows = (state.pubRows || []).slice().sort((a, b) => a.name.localeCompare(b.name));
+  if (!rows.length)
+    return h + '<div class="empty">Nobody is entered yet.</div>' + publishNoteHtml() + '</section>';
+
+  const term = String(state.pubSearch || "").trim().toLowerCase();
+  const shown = term ? rows.filter(x => x.name.toLowerCase().indexOf(term) >= 0) : rows;
+
+  h += '<input class="psearch" id="pl-search" type="text" placeholder="Search names" value="' +
+    esc(state.pubSearch || "") + '" oninput="setPlayerSearch(this.value)">';
+  h += '<p class="note" style="margin:8px 0 2px">' + rows.length + ' ' +
+    (rows.length === 1 ? 'player' : 'players') + (term ? ' · ' + shown.length + ' shown' : '') + '</p>';
+
+  if (!shown.length){
+    h += '<div class="empty">No name matches that.</div>';
+  } else {
+    h += '<div class="plist">';
+    shown.forEach(pl => {
+      const evs = playerEntries(pl);
+      const open = state.pubOpen === pl.id;
+      h += '<div class="prow' + (open ? ' open' : '') + '">' +
+        '<button aria-expanded="' + open + '" onclick="togglePlayer(\'' + jsAttr(pl.id) + '\')">' +
+        '<span class="pchev">' + (open ? '▼' : '▶') + '</span>' +
+        '<span>' + esc(pl.name) + '</span>' +
+        '<span class="pcount">' + evs.length + ' ' + (evs.length === 1 ? 'event' : 'events') + '</span></button>';
+      if (open){
+        h += '<div class="pwhat">';
+        if (!evs.length) h += '<div class="pnone">Not entered in anything yet.</div>';
+        else evs.forEach(x => {
+          h += '<div class="pev">' + esc(x.ev.name) +
+            (x.partner ? ' <span class="pwith">with ' + esc(x.partner) + '</span>' : '') + '</div>';
+        });
+        h += '</div>';
+      }
+      h += '</div>';
+    });
+    h += '</div>';
+  }
+  h += publishNoteHtml() + '</section>';
+  return h;
+}
+
 /* ---------- participants ----------
    The desk's roster of people. An entrant is whatever plays a given event, and
    in doubles that is a pair; a participant is a human, so their ratings and

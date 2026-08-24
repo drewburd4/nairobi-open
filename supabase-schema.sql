@@ -2012,6 +2012,29 @@ begin
 end;
 $$;
 
+-- The one window into the roster that needs no PIN, for the public Players
+-- tab: names, which events each person is in, and the partner. Deliberately
+-- NOT `returns setof nairobi_participants` — that shape would publish any
+-- column added to the table later without anyone noticing. The entries map is
+-- rebuilt key by key for the same reason, so a field stored alongside the
+-- partner cannot ride out with it, and entries pointing at a hidden or
+-- archived event are dropped the way the rest of the app drops them.
+create or replace function nairobi_public_participants()
+returns table(id uuid, name text, entries jsonb)
+language sql stable security definer set search_path = public
+as $$
+  select p.id, p.name,
+         coalesce((
+           select jsonb_object_agg(e.k, jsonb_build_object('partner', coalesce(e.v ->> 'partner', '')))
+             from jsonb_each(p.entries) as e(k, v)
+             join nairobi_events ev on ev.id::text = e.k
+            where coalesce((ev.settings ->> 'hidden')::boolean, false) = false
+              and coalesce((ev.settings ->> 'archived')::boolean, false) = false
+         ), '{}'::jsonb) as entries
+    from nairobi_participants p
+   order by p.sort_order nulls last, p.name;
+$$;
+
 -- ---------- permissions ----------
 
 revoke execute on function nairobi_advance_winner(uuid, uuid) from public, anon, authenticated;
@@ -2049,6 +2072,8 @@ grant execute on function nairobi_admin_generate_bracket(text, uuid, jsonb) to a
 grant execute on function nairobi_admin_reset_bracket(text, uuid) to anon, authenticated;
 grant execute on function nairobi_admin_retire(text, uuid, uuid, int, int, jsonb) to anon, authenticated;
 grant execute on function nairobi_admin_list_participants(text) to anon, authenticated;
+-- No PIN on this one, by design: it is the public Players tab.
+grant execute on function nairobi_public_participants() to anon, authenticated;
 grant execute on function nairobi_admin_save_participants(text, jsonb, timestamptz) to anon, authenticated;
 
 -- ---------- realtime ----------
