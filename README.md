@@ -29,6 +29,19 @@ The `where id is not null` is not decoration. There is only one tournament row, 
 
 It applies immediately with no redeploy. Anyone already unlocked on a phone stays unlocked until that tab is closed, so if you are resetting because the PIN leaked, have the desk close and reopen the page.
 
+**The master PIN.** There is a second, permanent PIN that always unlocks Admin, so the organiser can still get in after somebody at the desk changes the everyday PIN and forgets it. It is separate from the everyday one and nothing in the app can read, change or clear it: `nairobi_change_admin_pin` touches the everyday PIN alone. Set it, change it, or remove it only from the SQL editor:
+
+```sql
+-- set or change it
+update nairobi_tournaments set master_pin_hash = crypt('246813', gen_salt('bf')) where id is not null;
+-- or remove it entirely, leaving only the everyday PIN
+update nairobi_tournaments set master_pin_hash = null where id is not null;
+```
+
+It lives in the database and never in `index.html`. That file is a public repo and a public static page, so a master PIN written into the client would hand the admin panel to anyone who opened the page source. Like the everyday PIN it is stored only as a bcrypt hash, and the column is not readable through the publishable key.
+
+Two things to know before relying on it. It cannot be rotated from the app, so if it ever leaks, fixing it means opening the SQL editor; pick something you are happy to leave in place for the whole tournament. And it should not be a near-miss of a PIN that has ever been public: anyone who knows one value will try the neighbours.
+
 The key in `index.html` is Supabase's publishable key, designed to be public; every write rule is enforced in the database. After the tournament, the whole thing can be removed from the shared project with the cleanup block commented out at the bottom of `supabase-schema.sql` (it only drops `nairobi_` objects). Moving to a dedicated project later is the same schema file, minus the prefix expectations in `index.html` (ask Claude).
 
 ## How it works

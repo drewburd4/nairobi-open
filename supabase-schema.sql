@@ -206,6 +206,21 @@ drop function if exists nairobi_courts_conflict(uuid, jsonb);  -- per-event cour
 
 -- ---------- helpers ----------
 
+-- A second, permanent PIN that always unlocks the desk, so the organiser can
+-- get back in after somebody changes the everyday PIN and forgets it. Null on
+-- a fresh install: no master, no second way in, until one is set deliberately.
+--
+-- Server side only, on purpose. index.html is a public repo and a public static
+-- page, so a master PIN written into the client would hand the admin panel to
+-- anyone who opened the page source. It is not set here either, because this
+-- file is public too: setting it is a statement the organiser runs themselves,
+-- documented in the README and repeated at the bottom of this file.
+--
+-- Nothing in the app can read, set or clear it. nairobi_change_admin_pin
+-- touches admin_pin_hash alone, so the desk changing its own PIN can never
+-- overwrite the way back in.
+alter table nairobi_tournaments add column if not exists master_pin_hash text;
+
 create or replace function nairobi_verify_pin(p_pin text)
 returns boolean
 language sql stable security definer set search_path = public, extensions
@@ -214,6 +229,11 @@ as $$
     select 1 from nairobi_tournaments
     where admin_pin_hash is not null
       and admin_pin_hash = crypt(p_pin, admin_pin_hash)
+  ) or exists (
+    -- The master, when one is set. Null means there is no second way in.
+    select 1 from nairobi_tournaments
+    where master_pin_hash is not null
+      and master_pin_hash = crypt(p_pin, master_pin_hash)
   );
 $$;
 
@@ -2133,6 +2153,10 @@ revoke execute on function nairobi_seed_pin() from public, anon, authenticated;
 -- line in the SQL editor, with your own PIN in place of 246813:
 --
 --   update nairobi_tournaments set admin_pin_hash = crypt('246813', gen_salt('bf')) where id is not null;
+--
+-- Set (or change, or remove) the permanent master PIN. Only ever from here:
+--   update nairobi_tournaments set master_pin_hash = crypt('246813', gen_salt('bf')) where id is not null;
+--   update nairobi_tournaments set master_pin_hash = null where id is not null;   -- no master at all
 --
 -- It takes effect immediately, no redeploy. Anyone already unlocked on a
 -- phone stays unlocked until that tab is closed, so if you are resetting
