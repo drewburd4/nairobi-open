@@ -1145,14 +1145,17 @@ function buildMockData(){
       const p1 = s1 / (s1 + s2);
       const oneWins = rand() < p1;
       const spread = Math.abs(s1 - s2);
-      const loserPts = Math.max(2, Math.min(pts - 1, Math.round((pts - 2) * (1 - spread) * (0.55 + rand() * 0.5))));
+      /* pts - 2, not pts - 1: win-by-2 is on by default now, so a mock that
+         generated 15-14 would be showing the offline demo a score the app
+         itself refuses. */
+      const loserPts = Math.max(2, Math.min(pts - 2, Math.round((pts - 2) * (1 - spread) * (0.55 + rand() * 0.5))));
       m.score1 = oneWins ? pts : loserPts;
       m.score2 = oneWins ? loserPts : pts;
       m.status = "played";
     });
   };
-  playInOrder(matchesD, matchesD.length, 21);
-  playInOrder(matchesS, 20, 21);
+  playInOrder(matchesD, matchesD.length, 15);
+  playInOrder(matchesS, 20, 15);
 
   /* The people behind those entrants, so the offline demo has a Players tab
      worth looking at. Doubles names split on the documented " & ", singles
