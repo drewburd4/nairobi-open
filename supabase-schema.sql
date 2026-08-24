@@ -224,7 +224,12 @@ as $$
 begin
   if not nairobi_verify_pin(p_old) then return 'Wrong PIN.'; end if;
   if length(coalesce(p_new, '')) < 4 then return 'New PIN needs at least 4 characters.'; end if;
-  update nairobi_tournaments set admin_pin_hash = crypt(p_new, gen_salt('bf'));
+  -- Qualified deliberately. There is one tournament row, so the WHERE changes
+  -- nothing here, but this is the same statement the README hands the organiser
+  -- to paste into the Supabase SQL editor, and its safe mode refuses any
+  -- UPDATE without a WHERE clause. Keep the two spellings identical.
+  update nairobi_tournaments set admin_pin_hash = crypt(p_new, gen_salt('bf'))
+   where id is not null;
   return 'OK';
 end;
 $$;
@@ -2127,7 +2132,7 @@ revoke execute on function nairobi_seed_pin() from public, anon, authenticated;
 -- You own this database, so you can always set a new one. Run this single
 -- line in the SQL editor, with your own PIN in place of 246813:
 --
---   update nairobi_tournaments set admin_pin_hash = crypt('246813', gen_salt('bf'));
+--   update nairobi_tournaments set admin_pin_hash = crypt('246813', gen_salt('bf')) where id is not null;
 --
 -- It takes effect immediately, no redeploy. Anyone already unlocked on a
 -- phone stays unlocked until that tab is closed, so if you are resetting

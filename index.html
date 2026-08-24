@@ -325,6 +325,10 @@ select.qplace{max-width:170px}
 .pentry label{display:flex; align-items:center; gap:6px; font-size:12.5px; font-weight:700; white-space:nowrap; cursor:pointer}
 .pentry input[type=checkbox]{width:auto; padding:0; margin:0}
 .pentry .ppartner{width:auto; max-width:200px; padding:5px 7px; font-size:13px; font-weight:400}
+/* A tab whose draw is not up yet still belongs on the strip, but it should not
+   look like it has something to read. */
+.subtab.notyet{opacity:.62}
+.subtab.notyet[aria-current="true"]{opacity:1}
 .pbar{display:flex; flex-wrap:wrap; gap:8px; align-items:center; position:sticky; bottom:0; background:var(--bg); border-top:1px solid var(--line); padding:10px 0; margin-top:4px; z-index:5}
 .punsaved{font-size:12.5px; font-weight:700; color:var(--warn)}
 /* The public players list. Same roster, but PIN free and read only, so a row
@@ -2533,6 +2537,8 @@ const SW_PATTERNS = [
   [/^This page will activate ([^·]+)\.$/, "Ukurasa huu utaanza $1."],
   [/^([^·]+)'s schedule will be released ([^·]+)\.$/, "Ratiba ya $1 itatolewa $2."],
   [/^([^·]+)'s standings will be released ([^·]+)\.$/, "Msimamo wa $1 utatolewa $2."],
+  [/^([^·]+)'s schedule will be released when it starts\.$/, "Ratiba ya $1 itatolewa itakapoanza."],
+  [/^([^·]+)'s standings will be released when it starts\.$/, "Msimamo wa $1 utatolewa itakapoanza."],
   [/^(\d+) people$/, "watu $1"],
   [/^Two people share a name: ([^·]+)\. Make them different first\.$/,
    "Watu wawili wana jina moja: $1. Yatofautishe kwanza."],
@@ -2839,6 +2845,12 @@ const eventPublished = ev => {
   return !!d && Date.now() >= d.getTime() - PUBLISH_LEAD_MS;
 };
 const visibleEvents = () => state.adminPin ? publicEvents() : publicEvents().filter(eventPublished);
+/* What the event strip on Schedule, Standings and Bracket offers: everything
+   that is not hidden, whether or not its draw is up yet. Picking one that is
+   not up is how you find out when it will be, so the strip is the answer to
+   "when is mine" rather than a list of what happens to be ready. */
+const tabEvents = () => publicEvents().slice().sort((a, b) =>
+  a.sort_order - b.sort_order || String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id)));
 const activeEvents = () => data.events.filter(e => e.active && !isHidden(e)).sort((a, b) => a.sort_order - b.sort_order || String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id)));
 const courtsCount = () => (data.tournament && data.tournament.settings && data.tournament.settings.courts) || 4;
 const evSetting = (ev, key, dflt) => (ev && ev.settings && ev.settings[key] != null) ? ev.settings[key] : dflt;
@@ -2870,6 +2882,24 @@ function whenText(d){
   h = h % 12 || 12;
   return day + ", " + h + (mn ? ":" + String(mn).padStart(2, "0") : "") + ap;
 }
+/* The schedule note is free text the desk types, and every one of them used
+   to spell the start time out again ("Thu 27 Aug, 8am"). Two copies of the
+   same fact drift the moment somebody moves an event, and the person moving it
+   should not have to remember to retype thirteen notes. So the TIME always
+   comes from start_time, and only whatever else the note says is kept. */
+const TIMEISH = /^\s*(mon|tue|wed|thu|fri|sat|sun)[a-z]*\.?,?\s+\d{1,2}\s*[a-z]{3,}[a-z.]*,?(\s+(at\s+)?\d{1,2}([:.]\d{2})?\s*(am|pm)?)?\s*$|^\s*\d{1,2}([:.]\d{2})?\s*(am|pm)\s*$|^\s*(mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+\d{1,2}([:.]\d{2})?\s*(am|pm)\s*$/i;
+function noteExtra(note){
+  return String(note || "").split(" · ").map(x => x.trim())
+    .filter(x => x && !TIMEISH.test(x)).join(" · ");
+}
+/* What players are told about when an event runs: the real start time when
+   there is one, plus anything the note adds that is not just the time again. */
+function eventWhenLabel(ev){
+  const d = eventStartDate(ev);
+  const extra = noteExtra(evSetting(ev, "schedule_note", ""));
+  if (!d) return extra || String(evSetting(ev, "schedule_note", "") || "");
+  return whenText(d) + (extra ? " · " + extra : "");
+}
 /* When an event's own pages go up: a day before it starts. */
 const publishTime = ev => {
   const d = eventStartDate(ev);
@@ -2890,6 +2920,18 @@ function nextToStart(){
     .filter(e => !e.active && eventStartDate(e) && eventStartDate(e).getTime() > now - 3600000)
     .sort((a, b) => eventStartDate(a) - eventStartDate(b))[0] || null;
 }
+/* One event's own page, before it is due. The strip lists every event now, so
+   this is the answer to "I tapped mine and it is empty": which event, and
+   when. Derived from start_time, so moving the time moves this line too. */
+function notYetHtml(ev, kind){
+  const at = publishTime(ev);
+  const what = kind === "standings" ? "standings" : "schedule";
+  const line = at
+    ? esc(ev.name) + "'s " + what + ' will be released ' + esc(whenText(at)) + '.'
+    : esc(ev.name) + "'s " + what + ' will be released when it starts.';
+  return '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + '</span>' +
+    '<div class="empty">' + line + '</div>';
+}
 /* Three different things to whoever is reading: a tournament with nothing in
    it at all, a draw that has not been published yet (say which one and when),
    and a bracket, which waits on the group stage rather than on the clock. */
@@ -2906,13 +2948,17 @@ function noEventHtml(kind){
 }
 function currentEvent(){
   const sel = state.eventId ? eventById(state.eventId) : null;
-  if (sel && (state.adminPin || eventPublished(sel))) return sel;
+  /* A deliberately chosen tab wins even before its draw is published. What an
+     unpublished event is allowed to SHOW is decided by the three render
+     functions, which give it a release date instead of a draw; hidden events
+     are still nobody's business. */
+  if (sel && (state.adminPin || !isHidden(sel))) return sel;
   const act = activeEvents();
   if (act[0]) return act[0];
-  /* visibleEvents before data.events: the raw fallback showed a hidden event's
-     name, groups and schedule to anyone who opened the page before play, and
-     the same is true of one that is merely drawn and not started yet. */
-  return visibleEvents()[0] || (state.adminPin ? data.events[0] : null) || null;
+  /* A published one first, so the default lands on something with content;
+     failing that the first event on the strip, which at least tells the reader
+     when it is due. Never data.events, which would name a hidden event. */
+  return visibleEvents()[0] || tabEvents()[0] || (state.adminPin ? data.events[0] : null) || null;
 }
 /* ---------- americano ---------- */
 /* An Americano division is scored per player, not per team: partners rotate
@@ -3515,7 +3561,7 @@ function render(){
   html += '</div>';
 
   html += '<main class="wrap">';
-  if (["schedule", "standings", "bracket"].includes(state.view) && visibleEvents().length > 1){
+  if (["schedule", "standings", "bracket"].includes(state.view) && tabEvents().length > 1){
     html += renderEventTabs();
   }
   if (state.view === "board") html += renderBoard();
@@ -3677,12 +3723,13 @@ function renderCallouts(){
 
 function renderEventTabs(){
   const cur = currentEvent();
-  let evs = visibleEvents().slice().sort((a, b) => a.sort_order - b.sort_order || String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id)));
+  let evs = tabEvents();
   /* Americano has no knockout, it is decided on total points, so it never
      appears as an option under the Bracket tab. */
   if (state.view === "bracket") evs = evs.filter(e => !isAmericano(e));
   return '<div class="subtabs evtabs" role="tablist">' + evs.map(ev =>
-    '<button class="subtab" aria-current="' + (cur && ev.id === cur.id) + '" onclick="setEvent(\'' + ev.id + '\')">' +
+    '<button class="subtab' + (eventPublished(ev) ? '' : ' notyet') + '" aria-current="' + (cur && ev.id === cur.id) +
+    '" onclick="setEvent(\'' + ev.id + '\')">' +
     esc(ev.name) + (ev.active ? ' <span class="livedot" aria-hidden="true">●</span>' : '') + '</button>').join("") +
     '</div>';
 }
@@ -3895,9 +3942,9 @@ function renderBoard(){
          know when to turn up, not how the preview window works. */
       const nxt = nextToStart();
       if (nxt) h += '<br>This page will activate ' + esc(whenText(eventStartDate(nxt))) + '.';
-      const upcoming = publicEvents().filter(e => !e.active && evSetting(e, "schedule_note", ""));
+      const upcoming = publicEvents().filter(e => !e.active && eventWhenLabel(e));
       if (upcoming.length){
-        h += '<br><br>' + upcoming.slice(0, 8).map(e => esc(e.name) + ' · ' + esc(evSetting(e, "schedule_note", ""))).join('<br>');
+        h += '<br><br>' + upcoming.slice(0, 8).map(e => esc(e.name) + ' · ' + esc(eventWhenLabel(e))).join('<br>');
       }
       h += '</div>';
     }
@@ -4046,9 +4093,10 @@ function termFilterFor(){
 function renderSchedule(){
   const ev = currentEvent();
   if (!ev) return noEventHtml("schedule");
+  if (!state.adminPin && !eventPublished(ev)) return notYetHtml(ev, "schedule");
   const evMatches = data.matches.filter(m => m.event_id === ev.id);
   if (!evMatches.length){
-    const note = evSetting(ev, "schedule_note", "");
+    const note = eventWhenLabel(ev);
     return '<div class="empty">' + esc(ev.name) + ' has no schedule yet.' + (note ? '<br>Planned: ' + esc(note) : '') + '</div>';
   }
   const groupMs = evMatches.filter(m => m.stage === "group");
@@ -4114,6 +4162,7 @@ function renderSchedule(){
 function renderStandings(){
   const ev = currentEvent();
   if (!ev) return noEventHtml("standings");
+  if (!state.adminPin && !eventPublished(ev)) return notYetHtml(ev, "standings");
   /* Americano is scored per player across rotating partners, so the group
      table would be 28 one-match "teams" and tell nobody anything. */
   if (isAmericano(ev)){
@@ -4803,10 +4852,19 @@ function renderAdmin(){
     }
 
     h += '<div class="divider"></div><h4>3 · Start and pause</h4>';
-    h += '<div class="field" style="margin-top:6px"><label for="adm-note">Schedule note (shown to players, e.g. "Sat 9am")</label>' +
+    h += '<div class="field" style="margin-top:6px"><label for="adm-note">Schedule note (anything to add beyond the time, e.g. "finals day")</label>' +
       '<input id="adm-note" type="text" value="' + esc(evSetting(ev, "schedule_note", "")) + '"></div>';
-    h += '<div class="field" style="margin-top:6px"><label for="adm-start">Planned start (drives the wait estimates players see; the event turns itself on 5 minutes before this time)</label>' +
+    h += '<div class="field" style="margin-top:6px"><label for="adm-start">Planned start (the one place the time is set: every date players are shown is worked out from this)</label>' +
       '<input id="adm-start" type="datetime-local" value="' + esc(evSetting(ev, "start_time", "")) + '"></div>';
+    /* Show the desk exactly what moving this time does, so nobody has to guess
+       whether the labels followed it. */
+    (function(){
+      const d = eventStartDate(ev);
+      if (!d) return;
+      h += '<p class="note" style="margin:2px 0 0">Players see: &ldquo;' + esc(eventWhenLabel(ev)) + '&rdquo; on the Courts tab, and this ' +
+        'event\'s schedule and standings are released ' + esc(whenText(publishTime(ev))) + '. ' +
+        'Change the time above and every one of those follows.</p>';
+    })();
     /* An afternoon event that starts itself lands on top of a morning still
        being played and the courts split four ways, so it is worth being able
        to say "ask me". Unticked, the desk gets a bar from five minutes before
@@ -5354,7 +5412,7 @@ function setView(v){
   if (v === "bracket"){
     const cur = currentEvent();
     if (cur && isAmericano(cur)){
-      const other = visibleEvents().find(e => !isAmericano(e));
+      const other = tabEvents().find(e => !isAmericano(e));
       if (other) state.eventId = other.id;
     }
   }

@@ -16,9 +16,21 @@
 -- event replaces that event's sample data.
 --
 -- To wipe ALL sample data instead (keep events + PIN), run:
---   -- delete from nairobi_matches;
---   -- delete from nairobi_entrants;
---   -- update nairobi_events set active = false, stage = 'group';
+--   -- delete from nairobi_matches where id is not null;
+--   -- delete from nairobi_entrants where id is not null;
+--   -- update nairobi_events set active = false, stage = 'group' where id is not null;
+--
+-- The trailing WHERE clauses are not decoration: the Supabase SQL editor runs
+-- in a safe mode that refuses any UPDATE or DELETE without one, answering
+-- "Update requires a WHERE clause". Anything in this repo meant to be pasted
+-- into that editor has to carry one.
+--
+-- !! STOP BEFORE RUNNING THIS FILE ON THE 2026 TOURNAMENT !!
+-- It deletes every entrant and match and rewrites all 13 events to sample
+-- settings, which would wipe a real roster. It is also stale: it still sets
+-- group games to 21 and knockouts to 21, and since 2026-08-24 the tournament
+-- plays groups to 15 and knockouts best of 3 to 11. Use it on a fresh or
+-- throwaway install only.
 -- ============================================================
 
 -- Guard: the 13 seeded events must exist (run supabase-schema.sql first).
@@ -34,9 +46,10 @@ begin
   end if;
 end $$;
 
--- Reset to a clean sample state.
-delete from nairobi_matches;
-delete from nairobi_entrants;
+-- Reset to a clean sample state. The WHERE clauses satisfy the Supabase SQL
+-- editor's safe mode, which refuses an unqualified DELETE outright.
+delete from nairobi_matches where id is not null;
+delete from nairobi_entrants where id is not null;
 
 -- Event configuration (courts, formats, schedule notes, running state).
 update nairobi_events set active = true, stage = 'group', settings = '{"points_to_group":21,"points_to_knockout":21,"best_of_group":1,"best_of_knockout":1,"advance_per_group":2,"knockout_size":"auto","group_size":6,"schedule_note":"Day 1"}'::jsonb where name = 'Open Doubles (Men)';
