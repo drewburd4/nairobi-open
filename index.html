@@ -343,11 +343,6 @@ select.qplace{max-width:170px}
 .pwhat .pwith{color:var(--muted); font-weight:600}
 .pwhat .pnone{font-size:13px; color:var(--muted); padding:2px 0}
 .psearch{width:100%; padding:9px 11px; border-radius:9px; border:1px solid var(--line); background:var(--card); color:inherit; font:inherit; font-size:14.5px; margin-top:10px}
-/* Says when the other tabs fill in. Players ask this constantly before a
-   tournament and the honest answer has two halves, so it lives in one place
-   and is printed on every tab where somebody is looking at an empty page. */
-.livenote{background:var(--court-soft); border:1px solid var(--line); border-radius:9px; padding:11px 13px; font-size:13px; color:var(--muted); line-height:1.55; margin:12px 0; text-align:left}
-.livenote b{color:var(--ink); font-weight:800; display:block; margin-bottom:3px}
 .gboard{display:grid; grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); gap:10px; margin-top:4px}
 .gcol{background:var(--bg); border:1px solid var(--line); border-radius:10px; padding:8px; min-height:70px}
 .gcol.target{outline:2px dashed var(--accent); outline-offset:2px; cursor:pointer}
@@ -2082,8 +2077,8 @@ const SW_EXACT = {
   "Champion": "Bingwa", "To be decided": "Bado hajajulikana",
   "TBD": "Itajulikana", "Opponent TBD": "Mpinzani atajulikana", "To play": "Bado haijachezwa",
   "No events yet.": "Hakuna mashindano bado.",
-  "The draw is published when play starts. The Courts tab has the schedule.":
-    "Droo inatangazwa mchezo unapoanza. Kichupo cha Viwanja kina ratiba.",
+  "Each draw is published a day before its event. The Courts tab has the schedule.":
+    "Kila droo hutangazwa siku moja kabla ya shindano lake. Kichupo cha Viwanja kina ratiba.",
   "No matches found.": "Hakuna mechi zilizopatikana.",
   "No knockout matches yet.": "Hakuna mechi za mtoano bado.",
   "No players yet.": "Hakuna wachezaji bado.",
@@ -2169,11 +2164,9 @@ const SW_EXACT = {
   "Not entered in anything yet.": "Bado hajaandikishwa kwenye chochote.",
   "Could not load the players.": "Imeshindwa kupakia wachezaji.",
   "Search names": "Tafuta majina",
-  "When the rest of this fills in": "Sehemu zilizosalia zitakapojaa",
-  "The schedule, standings and bracket for an event are published when that event starts. Until then its draw can still change: a late entry, a withdrawal, a group rearranged at the desk.":
-    "Ratiba, msimamo na mtoano wa shindano huchapishwa shindano hilo linapoanza. Hadi wakati huo droo yake bado inaweza kubadilika: mshiriki wa dakika za mwisho, aliyejitoa, au kundi lililopangwa upya mezani.",
-  "The Courts tab fills in earlier. The first events of the tournament appear there 24 hours ahead, and every later batch 12 hours before its own start time.":
-    "Kichupo cha Viwanja hujaa mapema zaidi. Mashindano ya kwanza huonekana hapo saa 24 kabla, na kila kundi linalofuata saa 12 kabla ya muda wake wa kuanza.",
+  "No events are currently active.": "Hakuna shindano linaloendelea kwa sasa.",
+  "The bracket will be released after the group stage is finished.":
+    "Mtoano utatolewa baada ya hatua ya makundi kumalizika.",
   "Clear backup": "Futa nakala rudufu",
   "Delete the offline backup saved on this phone? Other phones keep theirs.":
     "Ufute nakala rudufu iliyohifadhiwa kwenye simu hii? Simu nyingine zitabaki na zao.",
@@ -2466,6 +2459,13 @@ const SW_EXACT = {
   "A player name cannot contain \"&\".": "Jina la mchezaji haliwezi kuwa na \"&\".",
   "Numbers saved": "Namba zimehifadhiwa", "Numbers removed": "Namba zimeondolewa",
   "No backup saved on this device yet.": "Bado hakuna nakala rudufu kwenye simu hii.",
+  "Type the current PIN first.": "Andika PIN ya sasa kwanza.",
+  "That is already the PIN.": "Hiyo tayari ndiyo PIN.",
+  "Could not change the PIN.": "Imeshindwa kubadilisha PIN.",
+  "The PIN boxes are not on screen. Reload the page and try again.":
+    "Visanduku vya PIN havipo kwenye skrini. Pakia ukurasa upya kisha jaribu tena.",
+  "PIN changed. Other phones stay unlocked until their tab is closed.":
+    "PIN imebadilishwa. Simu nyingine zitabaki wazi hadi kichupo chake kifungwe.",
   "No played matches to export yet.": "Bado hakuna mechi zilizochezwa za kupakua.",
   "Tap to dismiss": "Gusa kuondoa",
   "Type the queue place this match should take": "Andika nafasi ya foleni ambayo mechi hii ichukue",
@@ -2527,6 +2527,12 @@ const SW_PATTERNS = [
   [/^(\d+) event$/, "shindano $1"],
   [/^(\d+) events$/, "mashindano $1"],
   [/^with ([^·]+)$/, "na $1"],
+  /* The dated "not up yet" lines. [^·] so a composed line is never swallowed
+     before the per-segment pass reaches it, and the date is passed through
+     untouched: toLocaleDateString has already localised it. */
+  [/^This page will activate ([^·]+)\.$/, "Ukurasa huu utaanza $1."],
+  [/^([^·]+)'s schedule will be released ([^·]+)\.$/, "Ratiba ya $1 itatolewa $2."],
+  [/^([^·]+)'s standings will be released ([^·]+)\.$/, "Msimamo wa $1 utatolewa $2."],
   [/^(\d+) people$/, "watu $1"],
   [/^Two people share a name: ([^·]+)\. Make them different first\.$/,
    "Watu wawili wana jina moja: $1. Yatofautishe kwanza."],
@@ -2808,14 +2814,31 @@ function dropArchived(d){
   return d;
 }
 const publicEvents = () => data.events.filter(e => !isHidden(e));
-/* Schedule, standings and bracket all answer "who plays who", and a draw that
-   has not started is still allowed to change: a late entry, a withdrawal, a
-   group rearranged at the desk. Publishing one early turns every one of those
-   into an argument, so a drawn-but-not-started event stays off the player tabs
-   until it is running or has a result in. The desk sees all of them. */
+/* Whether play has actually begun. Still the thing the courts board and the
+   wind-down rules care about; publication is a separate question below. */
 const eventStarted = ev => !!(ev && (ev.active ||
   data.matches.some(m => m.event_id === ev.id && m.status === "played")));
-const visibleEvents = () => state.adminPin ? publicEvents() : publicEvents().filter(eventStarted);
+/* Schedule, standings and bracket all answer "who plays who", and these used
+   to wait for play to start, because a drawn-but-not-started event is still
+   allowed to change: a late entry, a withdrawal, a group rearranged at the
+   desk. Drew, 2026-08-24: the courts board already previews the opening events
+   a day out, so these may as well go up at the same moment, and EVERY event
+   now publishes its own pages 24 hours before its own start time rather than
+   only the first ones. The trade is the one that comment described: a change
+   made inside that last day is now a change to something players have already
+   read. The courts board keeps its own two windows (24h for the opening
+   events, 12h for a later batch) because that board answers which court to
+   stand at, which is only worth showing when the courts are nearly free.
+   An event with no start time on the books still waits for play to start:
+   there is no day to count back from. */
+const PUBLISH_LEAD_MS = 24 * 3600000;
+const eventPublished = ev => {
+  if (!ev) return false;
+  if (eventStarted(ev)) return true;
+  const d = eventStartDate(ev);
+  return !!d && Date.now() >= d.getTime() - PUBLISH_LEAD_MS;
+};
+const visibleEvents = () => state.adminPin ? publicEvents() : publicEvents().filter(eventPublished);
 const activeEvents = () => data.events.filter(e => e.active && !isHidden(e)).sort((a, b) => a.sort_order - b.sort_order || String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id)));
 const courtsCount = () => (data.tournament && data.tournament.settings && data.tournament.settings.courts) || 4;
 const evSetting = (ev, key, dflt) => (ev && ev.settings && ev.settings[key] != null) ? ev.settings[key] : dflt;
@@ -2833,17 +2856,57 @@ const matchWinBy2 = m => m.stage === "knockout" || !!evSetting(eventById(m.event
 /* Americano games are rally-scored to a fixed total: the two scores must add
    up to the event's points target, so this returns that total or null. */
 const matchSumTo = m => isAmericano(eventById(m.event_id)) ? matchPts(m) : null;
-/* Two different things to whoever is reading: a tournament with nothing in it
-   at all, versus draws that exist but are not published until play starts. */
-function noEventHtml(){
-  return '<div class="empty">' + swText(publicEvents().length
-    ? 'The draw is published when play starts. The Courts tab has the schedule.'
-    : 'No events yet.') + '</div>' +
-    (publicEvents().length ? publishNoteHtml() : '');
+/* "Thu 27 Aug, 8am" — a time written the way the desk would write it on a
+   whiteboard, because these lines are read by people planning a day. */
+function whenText(d){
+  if (!d) return "";
+  const loc = state.lang === "sw" ? "sw" : "en-GB";
+  let day;
+  try{ day = d.toLocaleDateString(loc, { weekday: "short", day: "numeric", month: "short" }); }
+  catch(e){ day = d.toDateString(); }
+  let h = d.getHours();
+  const mn = d.getMinutes();
+  const ap = h < 12 ? "am" : "pm";
+  h = h % 12 || 12;
+  return day + ", " + h + (mn ? ":" + String(mn).padStart(2, "0") : "") + ap;
+}
+/* When an event's own pages go up: a day before it starts. */
+const publishTime = ev => {
+  const d = eventStartDate(ev);
+  return d ? new Date(d.getTime() - PUBLISH_LEAD_MS) : null;
+};
+/* The next event whose pages are still to appear, so a tab with nothing on it
+   can name what it is waiting for and when, instead of shrugging. */
+function nextToPublish(){
+  return publicEvents()
+    .filter(e => !eventPublished(e) && eventStartDate(e))
+    .sort((a, b) => eventStartDate(a) - eventStartDate(b))[0] || null;
+}
+/* What the courts board is waiting for: the next event due to actually play.
+   The hour of grace stops a just-passed start time reading as "next". */
+function nextToStart(){
+  const now = Date.now();
+  return publicEvents()
+    .filter(e => !e.active && eventStartDate(e) && eventStartDate(e).getTime() > now - 3600000)
+    .sort((a, b) => eventStartDate(a) - eventStartDate(b))[0] || null;
+}
+/* Three different things to whoever is reading: a tournament with nothing in
+   it at all, a draw that has not been published yet (say which one and when),
+   and a bracket, which waits on the group stage rather than on the clock. */
+function noEventHtml(kind){
+  if (!publicEvents().length) return '<div class="empty">' + swText('No events yet.') + '</div>';
+  if (kind === "bracket")
+    return '<div class="empty">' + swText('The bracket will be released after the group stage is finished.') + '</div>';
+  const nxt = nextToPublish();
+  const at = nxt && publishTime(nxt);
+  if (nxt && at)
+    return '<div class="empty">' + esc(nxt.name) + "'s " + (kind === "standings" ? 'standings' : 'schedule') +
+      ' will be released ' + esc(whenText(at)) + '.</div>';
+  return '<div class="empty">' + swText('Each draw is published a day before its event. The Courts tab has the schedule.') + '</div>';
 }
 function currentEvent(){
   const sel = state.eventId ? eventById(state.eventId) : null;
-  if (sel && (state.adminPin || eventStarted(sel))) return sel;
+  if (sel && (state.adminPin || eventPublished(sel))) return sel;
   const act = activeEvents();
   if (act[0]) return act[0];
   /* visibleEvents before data.events: the raw fallback showed a hidden event's
@@ -3827,13 +3890,16 @@ function renderBoard(){
     if (soon.length){
       h += renderCourtsPreview(soon);
     } else {
-      h += '<div class="empty">Nothing is running right now.';
+      h += '<div class="empty">No events are currently active.';
+      /* Name the moment rather than the rule: whoever is reading this wants to
+         know when to turn up, not how the preview window works. */
+      const nxt = nextToStart();
+      if (nxt) h += '<br>This page will activate ' + esc(whenText(eventStartDate(nxt))) + '.';
       const upcoming = publicEvents().filter(e => !e.active && evSetting(e, "schedule_note", ""));
       if (upcoming.length){
         h += '<br><br>' + upcoming.slice(0, 8).map(e => esc(e.name) + ' · ' + esc(evSetting(e, "schedule_note", ""))).join('<br>');
       }
       h += '</div>';
-      if (moreToCome()) h += publishNoteHtml();
     }
     /* Held matches used to disappear entirely the moment their event was
        paused, put-back button and all; a held match must stay findable. */
@@ -3979,7 +4045,7 @@ function termFilterFor(){
 
 function renderSchedule(){
   const ev = currentEvent();
-  if (!ev) return noEventHtml();
+  if (!ev) return noEventHtml("schedule");
   const evMatches = data.matches.filter(m => m.event_id === ev.id);
   if (!evMatches.length){
     const note = evSetting(ev, "schedule_note", "");
@@ -4042,15 +4108,12 @@ function renderSchedule(){
     }
   }
   h += '<p class="note">Matches run in this order, group A first, so everyone plays round 1 before round 2 starts. Played matches show their scores; tap a match for details. A score can be entered while the match is on a court, and corrections go through the desk.</p>';
-  /* Only while something is still to come: once every event has started this
-     is just a paragraph nobody needs under a schedule they are reading. */
-  if (moreToCome()) h += publishNoteHtml();
   return h;
 }
 
 function renderStandings(){
   const ev = currentEvent();
-  if (!ev) return noEventHtml();
+  if (!ev) return noEventHtml("standings");
   /* Americano is scored per player across rotating partners, so the group
      table would be 28 one-match "teams" and tell nobody anything. */
   if (isAmericano(ev)){
@@ -4159,14 +4222,20 @@ const bkChampTbd = '<div class="bkchamp-card tbd"><div class="bkchamp-trophy">�
 
 function renderBracket(){
   const ev = currentEvent();
-  if (!ev) return noEventHtml();
+  if (!ev) return noEventHtml("bracket");
   if (isAmericano(ev)){
     return '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + '</span>' +
       '<div class="empty">' + esc(ev.name) + ' has no bracket. It is decided on total points won, so the Standings tab is the result.</div>';
   }
   const ko = data.matches.filter(m => m.event_id === ev.id && m.stage === "knockout");
 
-  /* Projected bracket: before the desk confirms the knockout, show the seeds. */
+  /* Projected bracket: before the desk confirms the knockout, show the seeds.
+     Desk only. It reads as a promise about who plays who, and the seed order
+     it assumes is a per-event choice that can still be changed, so players get
+     the honest sentence instead and the desk keeps the working view. */
+  if (!ko.length && !state.adminPin)
+    return '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + '</span>' +
+      '<div class="empty">' + swText('The bracket will be released after the group stage is finished.') + '</div>';
   if (!ko.length){
     const groups = groupsOfEvent(ev);
     if (!groups.length) return '<div class="empty">' + esc(ev.name) + ' has no groups yet.</div>';
@@ -4916,10 +4985,18 @@ function renderAdmin(){
     'Everything updates live on everyone\'s phone.</p></div>';
 
   if (store.mode === "live"){
+    /* autocomplete and a name on both boxes: two unnamed type=password inputs
+       on one page read to a browser as a change-password form, and a password
+       manager will helpfully fill them with a saved site password, so the desk
+       submits something nobody typed and gets "Wrong PIN." inputmode numeric
+       puts a number pad on a phone, which is what a PIN wants. */
     h += '<div class="panel"><h3>Change PIN</h3><div class="fieldrow">' +
-      '<div class="field"><label for="adm-oldpin">Current PIN</label><input id="adm-oldpin" type="password"></div>' +
-      '<div class="field"><label for="adm-newpin">New PIN</label><input id="adm-newpin" type="password"></div></div>' +
-      '<button class="btn small secondary" onclick="doChangePin()">Change PIN</button></div>';
+      '<div class="field"><label for="adm-oldpin">Current PIN</label>' +
+      '<input id="adm-oldpin" name="nairobi-current-pin" type="password" inputmode="numeric" autocomplete="off" autocorrect="off" spellcheck="false"></div>' +
+      '<div class="field"><label for="adm-newpin">New PIN</label>' +
+      '<input id="adm-newpin" name="nairobi-new-pin" type="password" inputmode="numeric" autocomplete="new-password" autocorrect="off" spellcheck="false"></div></div>' +
+      '<button class="btn small secondary" onclick="doChangePin()">Change PIN</button>' +
+      '<p class="note" id="adm-pinmsg" style="margin:6px 0 0"></p></div>';
   }
   h += '<p style="margin-top:6px"><button class="btn secondary small" onclick="adminSignOut()">Sign out of admin</button></p>';
   return h;
@@ -6355,20 +6432,6 @@ function playerEntries(pl){
       String(a.ev.name).localeCompare(String(b.ev.name)));
 }
 
-/* Asked constantly before a tournament and between batches: when does the rest
-   of this fill in? The honest answer has two halves, so it is written once and
-   printed wherever somebody is looking at a page that is still empty. */
-function publishNoteHtml(){
-  return '<div class="livenote"><b>When the rest of this fills in</b>' +
-    'The schedule, standings and bracket for an event are published when that event starts. ' +
-    'Until then its draw can still change: a late entry, a withdrawal, a group rearranged at the desk.<br>' +
-    'The Courts tab fills in earlier. The first events of the tournament appear there 24 hours ahead, ' +
-    'and every later batch 12 hours before its own start time.</div>';
-}
-/* True while any published event is still waiting to start, which is exactly
-   when the note above is worth the space it takes. */
-const moreToCome = () => publicEvents().some(e => !eventStarted(e));
-
 function renderPlayers(){
   let h = '<span class="print-title">' + esc(data.tournament.name) + ' · Players</span>';
   h += '<section class="card"><h2>Players</h2>' +
@@ -6381,7 +6444,7 @@ function renderPlayers(){
      which is the one thing a name is never allowed to decide here. */
   const rows = (state.pubRows || []).slice().sort((a, b) => a.name.localeCompare(b.name));
   if (!rows.length)
-    return h + '<div class="empty">Nobody is entered yet.</div>' + publishNoteHtml() + '</section>';
+    return h + '<div class="empty">Nobody is entered yet.</div></section>';
 
   const term = String(state.pubSearch || "").trim().toLowerCase();
   const shown = term ? rows.filter(x => x.name.toLowerCase().indexOf(term) >= 0) : rows;
@@ -6416,7 +6479,7 @@ function renderPlayers(){
     });
     h += '</div>';
   }
-  h += publishNoteHtml() + '</section>';
+  h += '</section>';
   return h;
 }
 
@@ -7107,14 +7170,30 @@ function downloadResults(allEvents){
   }
 }
 async function doChangePin(){
-  const oldPin = document.getElementById("adm-oldpin").value.trim();
-  const newPin = document.getElementById("adm-newpin").value.trim();
-  if (newPin.length < 4){ toast("New PIN needs at least 4 characters."); return; }
+  const oldEl = document.getElementById("adm-oldpin");
+  const newEl = document.getElementById("adm-newpin");
+  const msg = document.getElementById("adm-pinmsg");
+  /* A toast is easy to miss on a busy desk phone, and "nothing happened" is
+     exactly how a failed PIN change reads. Say it in the panel as well. */
+  const say = (t, bad) => {
+    toast(swText(t));
+    if (msg){ msg.textContent = swText(t); msg.style.color = bad ? "var(--danger)" : "var(--court)"; msg.style.fontWeight = "700"; }
+  };
+  if (!oldEl || !newEl){ say("The PIN boxes are not on screen. Reload the page and try again.", true); return; }
+  const oldPin = oldEl.value.trim();
+  const newPin = newEl.value.trim();
+  if (!oldPin){ say("Type the current PIN first.", true); return; }
+  if (newPin.length < 4){ say("New PIN needs at least 4 characters.", true); return; }
+  if (oldPin === newPin){ say("That is already the PIN.", true); return; }
   const r = await store.changePin(oldPin, newPin);
-  if (!r.ok){ toast(r.error); return; }
+  if (!r.ok){ say(r.error || "Could not change the PIN.", true); return; }
   state.adminPin = newPin;
   safeSession("pb_admin_pin", newPin);
-  toast("PIN changed");
+  /* Clear the boxes and forget what admRestore captured, or the next render
+     paints the old values straight back in and it looks like nothing took. */
+  oldEl.value = ""; newEl.value = "";
+  if (admShown.vals){ delete admShown.vals["adm-oldpin"]; delete admShown.vals["adm-newpin"]; }
+  say("PIN changed. Other phones stay unlocked until their tab is closed.", false);
 }
 
 /* ---------- init ---------- */
