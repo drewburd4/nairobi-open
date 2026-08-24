@@ -402,8 +402,8 @@ select.qplace{max-width:170px}
 /* ================= CONFIG =================
    Shares the Dispatch app's Supabase project for now: every tournament
    table and function is prefixed nairobi_ so nothing collides with the
-   Dispatch tables. Setup: run supabase-schema.sql once in that project's
-   SQL editor, then supabase-testdata.sql for the sample tournament.
+   Dispatch tables. Setup is one file: run supabase-schema.sql once in that
+   project's SQL editor. It is idempotent, so re-run it after any update here.
    Clearing both values below falls back to local sample data (dev only). */
 const SUPABASE_URL = "https://cutiomcwgicdqfgbdsnc.supabase.co";
 const SUPABASE_ANON_KEY = "sb_publishable_jsoONy5tGwX6y3b2TJaqdA_BSg5DKNR";

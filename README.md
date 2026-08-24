@@ -4,7 +4,6 @@ A one-file tournament app: group stages, court assignments, public score entry, 
 
 - `index.html`: the whole app.
 - `supabase-schema.sql`: database schema plus all server-side rules, and the single source of truth for every `nairobi_` function. Run it in the Supabase SQL editor whenever it changes; it is idempotent and re-running it never touches your data, your PIN, or your rosters.
-- `supabase-testdata.sql`: the sample tournament data (generated). Run after the schema; re-run any time to reset the samples.
 - `supabase-sms.sql` + `sms-function.ts`: the optional SMS add-on (see the SMS section).
 - Live site: https://drewburd4.github.io/nairobi-open/ (GitHub repo: drewburd4/nairobi-open, deploys from `main`).
 
@@ -14,10 +13,11 @@ A one-file tournament app: group stages, court assignments, public score entry, 
 
 Setup, in the **dispatch** project on supabase.com → SQL Editor:
 
-1. Run all of `supabase-schema.sql`. It creates the `nairobi_` tables, all the write rules, and the 13 category events. On a first install it also generates a random admin PIN and prints it in the result of the last statement, which is the only time it is ever shown, so write it down before closing the tab. Run the file again after any update to this repo: the seed inserts are guarded with `where not exists`, so a re-run only refreshes the function definitions and leaves data, rosters, scores, and a changed PIN alone. There are deliberately no separate patch files to apply, so nothing can revert a fix by being run in the wrong order.
-2. Run all of `supabase-testdata.sql`. It loads the sample tournament so there is something real to play with: Open Doubles (Men) with 50 teams and its pools fully played (ready to test "Confirm group stage finished" and the knockout), Open Singles (Women) mid-tournament holding all four courts with one postponed match, and small fields in the other 11 events. Re-run it any time to reset the samples.
+Run all of `supabase-schema.sql`. That is the whole setup: it creates the `nairobi_` tables, all the write rules, and the 13 category events. On a first install it also generates a random admin PIN and prints it in the result of the last statement, which is the only time it is ever shown, so write it down before closing the tab. Run the file again after any update to this repo: the seed inserts are guarded with `where not exists`, so a re-run only refreshes the function definitions and leaves data, rosters, scores, and a changed PIN alone. There are deliberately no separate patch files to apply, so nothing can revert a fix by being run in the wrong order.
 
-Then refresh the site: everyone with the link sees the same sample tournament and every change syncs live. Unlock Admin with the PIN the first run printed, and change it to something memorable from the Admin tab. When real rosters arrive, replace each event's sample data from the Admin tab ("Start over with a new list"); the commented block at the top of `supabase-testdata.sql` wipes all sample data at once.
+Then refresh the site: everyone with the link sees the same tournament and every change syncs live. Unlock Admin with the PIN the first run printed and change it to something memorable from the Admin tab. Enter the people on the Participants tab, then draw each event from there.
+
+There is deliberately no sample-data file any more. It wiped every entrant and match to load its samples, which is one mis-click away from destroying a real roster mid-tournament, and it had drifted out of date besides. For a dry run, blank the two keys at the top of `index.html`: that gives a full offline copy with built-in sample data that cannot touch the live database.
 
 **Forgot the PIN?** Nobody can read it back. Only a bcrypt hash is stored, and the hash is not readable through the public key, so there is no "remind me", only a reset. You own the database, so run this one line in the SQL editor with your own PIN in place of 246813:
 
@@ -87,4 +87,4 @@ Texts come from Africa's Talking's default shared sender; a branded sender name 
 
 ## Development
 
-No build step. Open `index.html` in a browser; with the keys wired in it talks to the live database. Blanking the two keys at the top of the file gives a local, offline, non-syncing copy with built-in sample data (dev convenience only). `supabase-testdata.sql` is generated from the app's own mock data builder, so the seeded database matches that built-in sample exactly. Tournament logic (grouping, round robin, standings, seeding, brackets, court assignment) lives in a marked pure-logic script block that can be unit tested in node.
+No build step. Open `index.html` in a browser; with the keys wired in it talks to the live database. Blanking the two keys at the top of the file gives a local, offline, non-syncing copy with built-in sample data (dev convenience only). Tournament logic (grouping, round robin, standings, seeding, brackets, court assignment) lives in a marked pure-logic script block that can be unit tested in node.

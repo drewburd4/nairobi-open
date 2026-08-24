@@ -1,0 +1,16 @@
+Nairobi Open
+
+
+instead of snake draw, make it so that once 
+make dupr into seeds (maybe list their seeds)
+
+or maybe make your ten best seeded in that way and then randomize the rest
+
+make sure the bracket can be edited
+
+top is A1, bottom B1, c1 also on top, d2 on bottom kind of like a tennis bracket
+
+
+participants tab
+okay I have 50 participants. and can see what they are participating in from there and then create seeds?
+have name, dupr, dupr id, gender, and events they registered for
