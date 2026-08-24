@@ -592,10 +592,24 @@ function matchPoints(m){
    just themselves. Head to head applies to a tie of any size, not only a pair.
    Points scored and then name settle anything the official chain leaves level,
    so the order is always deterministic. */
+/* A team can be in more than one drawn tie: a group tie, and later a seeding
+   dead heat across groups. meta.lot / meta.lotFor was ONE slot, so the second
+   draw overwrote the first, the group standings stopped recognising their own
+   lot, and a settled group tie sprang back to life, which sent the desk round
+   in circles between Draw lots and Finish group stage. Lots are keyed by the
+   block they settle now, so the two draws stop fighting over one field. The
+   old single slot is still read, so anything drawn before this keeps counting. */
+const blockKey = ids => ids.slice().sort().join(",");
+function lotsOf(e){
+  const m = (e && e.meta) || {};
+  const out = (m.lots && typeof m.lots === "object" && !Array.isArray(m.lots))
+    ? Object.assign({}, m.lots) : {};
+  if (m.lotFor && m.lot != null && out[m.lotFor] == null) out[m.lotFor] = +m.lot;
+  return out;
+}
 function computeStandings(entrants, matches){
   const rows = entrants.map(e => ({ id: e.id, name: e.name, p: 0, w: 0, l: 0, pf: 0, pa: 0, diff: 0,
-    lot: (e.meta && e.meta.lot != null) ? +e.meta.lot : null,
-    lotFor: (e.meta && e.meta.lotFor) || null }));
+    lots: lotsOf(e) }));
   const byId = {};
   rows.forEach(r => byId[r.id] = r);
   const played = matches.filter(m => m.status === "played" && m.score1 != null && m.score2 != null);
@@ -638,8 +652,8 @@ function computeStandings(entrants, matches){
      a half-finished draw or a lot left over from an earlier tie decided who
      went through, silently and usually wrongly. */
   const lotOf = tied => {
-    const key = tied.map(r => r.id).slice().sort().join(",");
-    return tied.every(r => r.lot != null && r.lotFor === key) ? (r => -r.lot) : (() => 0);
+    const key = blockKey(tied.map(r => r.id));
+    return tied.every(r => r.lots && r.lots[key] != null) ? (r => -r.lots[key]) : (() => 0);
   };
   const steps = [h2hWins, () => r => r.diff, h2hDiff, () => r => r.pf, lotOf];
 
@@ -696,13 +710,14 @@ function computeStandings(entrants, matches){
    place-tiers first, then best-of-the-next-tier to fill.
    Partial-tier qualifiers are marked wildcard ("best 3rd" etc). */
 /* The lot a drawn block recorded for this exact set of teams, or null. Same
-   meta.lot / meta.lotFor pair the group standings use; the block key is the
-   sorted ids, so a lot drawn for one block is invisible to every other. */
+   keyed meta.lots map the group standings use; the key is the sorted ids, so a
+   lot drawn for one block is invisible to every other. */
 function lotsForBlock(ids){
-  const key = ids.slice().sort().join(",");
+  const key = blockKey(ids);
   const lots = ids.map(id => {
     const e = typeof entrantById === "function" ? entrantById(id) : null;
-    return (e && e.meta && e.meta.lotFor === key && e.meta.lot != null) ? e.meta.lot : null;
+    const v = e ? lotsOf(e)[key] : null;
+    return v == null ? null : +v;
   });
   return lots.every(v => v != null) ? lots : null;
 }
@@ -1927,8 +1942,13 @@ function liveStore(){
       return { tournament: (t.data && t.data[0]) || null, events: ev.data || [], entrants: en.data || [],
                matches: ma.data || [], log: lg.data || [] };
     },
-    verifyPin: pin => rpc("nairobi_verify_pin", { p_pin: pin }).then(r =>
-      r.ok && r.data === true ? { ok: true } : { ok: false, error: r.error || "Wrong PIN." }),
+    /* nairobi_unlock, not nairobi_verify_pin: the throttled entry point, and
+       the only PIN check anon can reach. Too many wrong PINs in a short window
+       and it refuses everything for a few minutes, which is why the message
+       says so rather than insisting the PIN is wrong. */
+    verifyPin: pin => rpc("nairobi_unlock", { p_pin: pin }).then(r =>
+      r.ok && r.data === true ? { ok: true }
+        : { ok: false, error: r.error || "Wrong PIN, or too many tries just now. Wait a few minutes and try again." }),
     changePin: (oldPin, newPin) => rpc("nairobi_change_admin_pin", { p_old: oldPin, p_new: newPin }),
     submitScore: (id, s1, s2, games) => rpc("nairobi_submit_score", { p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null }),
     adminSubmitScore: (pin, id, s1, s2, games, walkover, hadScore) => rpc("nairobi_admin_submit_score", { p_pin: pin, p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null, p_walkover: !!walkover, p_had_score: hadScore == null ? null : !!hadScore }),
@@ -3060,7 +3080,8 @@ async function drawLots(gname){
 }
 /* A seeding tier can dead heat across groups, where there is no head to head
    to fall back on and the group standings have nothing left to say. Same draw,
-   same meta.lot, a block key of its own. */
+   its own entry in meta.lots, so a group lot the same team is carrying is
+   untouched. */
 async function drawSeedLots(place){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
@@ -3076,15 +3097,21 @@ async function applyLots(ids){
     const j = Math.floor(Math.random() * (i + 1));
     [order[i], order[j]] = [order[j], order[i]];
   }
-  /* Stamp which block the draw settles. A lot with no block, or with another
-     block's, is ignored by the standings, so a draw that only half lands
-     leaves the tie flagged rather than half-applied. */
-  const lotFor = ids.slice().sort().join(",");
+  /* Stamp which block the draw settles, keyed by that block, so a team already
+     carrying a lot for a different tie keeps it. A block nothing was drawn for
+     is ignored by the standings, so a draw that only half lands leaves the tie
+     flagged rather than half-applied. */
+  const key = blockKey(ids);
   const failed = [];
   for(let i = 0; i < order.length; i++){
     const e = entrantById(order[i]);
     if (!e) continue;
-    const meta = Object.assign({}, e.meta || {}, { lot: i + 1, lotFor });
+    const lots = lotsOf(e);
+    lots[key] = i + 1;
+    /* Fold the legacy single slot into the map on the way past, so a team is
+       never carrying the same lot in two shapes. */
+    const meta = Object.assign({}, e.meta || {}, { lots });
+    delete meta.lot; delete meta.lotFor;
     const r = await store.adminSetEntrantMeta(state.adminPin, e.id, meta);
     if (!r.ok) failed.push(e.name);
   }
@@ -3094,7 +3121,11 @@ async function applyLots(ids){
     for(const id of order){
       const e = entrantById(id);
       if (!e || failed.includes(e.name)) continue;
-      const meta = Object.assign({}, e.meta || {});
+      /* Only this block's lot: rolling back a seeding draw must not wipe the
+         group draw the same team is also carrying. */
+      const lots = lotsOf(e);
+      delete lots[key];
+      const meta = Object.assign({}, e.meta || {}, { lots });
       delete meta.lot; delete meta.lotFor;
       try{ await store.adminSetEntrantMeta(state.adminPin, e.id, meta); }catch(_){}
     }
@@ -3107,14 +3138,33 @@ async function applyLots(ids){
 }
 /* The standings note promises a draw can be re-done; clearing the recorded
    lots is how: the tie flags again and Draw lots reappears. */
+/* Which of a team's lots belong to a tie inside one group: the blocks whose
+   every id sits in that group. A seeding dead heat spans groups, so its key
+   carries ids from elsewhere and is left alone. */
+function groupLotKeys(ev, gname){
+  const inGroup = new Set(data.entrants
+    .filter(e => e.event_id === ev.id && e.group_name === gname).map(e => e.id));
+  const keys = new Set();
+  data.entrants.filter(e => inGroup.has(e.id)).forEach(e => {
+    Object.keys(lotsOf(e)).forEach(k => {
+      if (k.split(",").every(id => inGroup.has(id))) keys.add(k);
+    });
+  });
+  return [...keys];
+}
 async function clearLots(gname){
   const ev = eventById(state.adminEventId);
   if (!ev) return;
-  const holders = data.entrants.filter(e => e.event_id === ev.id && e.group_name === gname && e.meta && e.meta.lot != null);
+  const keys = groupLotKeys(ev, gname);
+  const holders = data.entrants.filter(e => e.event_id === ev.id && e.group_name === gname &&
+    keys.some(k => lotsOf(e)[k] != null));
   if (!holders.length){ toast("No drawn lots in group " + gname + "."); return; }
   if (!confirm(swText("Clear the drawn lots for group " + gname + "? The tie is flagged again and can be re-drawn."))) return;
   for(const e of holders){
-    const meta = Object.assign({}, e.meta);
+    /* Only this group's blocks. A team that also has a seeding lot keeps it. */
+    const lots = lotsOf(e);
+    keys.forEach(k => { delete lots[k]; });
+    const meta = Object.assign({}, e.meta || {}, { lots });
     delete meta.lot; delete meta.lotFor;
     const r = await store.adminSetEntrantMeta(state.adminPin, e.id, meta);
     if (!r.ok){ toast(r.error); break; }
@@ -4961,7 +5011,8 @@ function renderAdmin(){
     /* Lots already drawn can be undone: the promise on the standings is that
        a draw can be re-done, and clearing is how. */
     const lotGroups = [...new Set(data.entrants
-      .filter(e => e.event_id === ev.id && e.meta && e.meta.lot != null)
+      .filter(e => e.event_id === ev.id && e.group_name &&
+        groupLotKeys(ev, e.group_name).some(k => lotsOf(e)[k] != null))
       .map(e => e.group_name))].sort();
     lotGroups.forEach(g => {
       h += '<p class="note">Group ' + esc(g) + ' was settled by drawn lots. ' +

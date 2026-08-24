@@ -122,6 +122,16 @@ create table if not exists nairobi_participants (
 
 create index if not exists nairobi_participants_order_idx on nairobi_participants (sort_order);
 
+-- ---------- PIN guessing ----------
+-- One row per failed unlock, so nairobi_unlock can cap how fast the four digit
+-- PIN can be walked. Desk-only like the roster: no grants, no policy, and out
+-- of the realtime publication.
+create table if not exists nairobi_pin_fails (
+  id bigserial primary key,
+  at timestamptz not null default now()
+);
+create index if not exists nairobi_pin_fails_at_idx on nairobi_pin_fails (at);
+
 -- ---------- score history ----------
 -- Every write to a score, kept so a correction is never silent. A score that
 -- changed after it was first entered is the one thing players argue about, and
@@ -148,6 +158,7 @@ alter table nairobi_events enable row level security;
 alter table nairobi_entrants enable row level security;
 alter table nairobi_matches enable row level security;
 alter table nairobi_participants enable row level security;
+alter table nairobi_pin_fails enable row level security;
 alter table nairobi_match_log enable row level security;
 
 drop policy if exists "public read nairobi_tournaments" on nairobi_tournaments;
@@ -178,9 +189,14 @@ grant select (id, name, settings, created_at) on nairobi_tournaments to anon, au
 -- policy is loosened by accident later. The functions below are SECURITY
 -- DEFINER, so they still reach it.
 revoke all on nairobi_participants from anon, authenticated;
+revoke all on nairobi_pin_fails from anon, authenticated;
 
 do $$ begin
   alter publication supabase_realtime drop table nairobi_participants;
+exception when others then null; end $$;
+
+do $$ begin
+  alter publication supabase_realtime drop table nairobi_pin_fails;
 exception when others then null; end $$;
 
 -- Same reason: realtime replays changed rows to subscribers, so leaving this
@@ -235,6 +251,54 @@ as $$
     where master_pin_hash is not null
       and master_pin_hash = crypt(p_pin, master_pin_hash)
   );
+$$;
+
+-- The public entry point the Admin tab calls to unlock, and the only PIN check
+-- anon can reach. Throttled, because the publishable key is in the page and a
+-- four digit PIN is ten thousand guesses.
+--
+-- The throttle deliberately lives HERE and not in nairobi_verify_pin. Every
+-- admin function checks the PIN, so a limit on that one would not merely slow a
+-- guesser down, it would stop the desk entering scores, and since it has to
+-- refuse the correct PIN too, anyone with the publishable key could shut the
+-- desk down with ten junk requests. That is a far easier attack than the one
+-- being defended against. Tripping this one only makes a NEW phone wait to
+-- unlock: phones already unlocked keep working, and so does every score.
+--
+-- Known limit, and the reason a longer PIN is the real fix: the admin functions
+-- answer "Wrong PIN." unthrottled, so a determined guesser can still use one of
+-- those as an oracle. This closes the obvious door, not every door.
+create or replace function nairobi_unlock(p_pin text)
+returns boolean
+language plpgsql volatile security definer set search_path = public, extensions
+as $$
+declare
+  fails int;
+  ok boolean;
+begin
+  select count(*) into fails
+    from nairobi_pin_fails
+   where at > now() - interval '10 minutes';
+  -- Ten wrong PINs in ten minutes is far past anything a desk produces by
+  -- mistyping, and it caps a guesser at sixty an hour. Refuse without looking
+  -- at the PIN, so the window is the only thing that opens the door.
+  if fails >= 10 then return false; end if;
+
+  ok := nairobi_verify_pin(p_pin);
+  if ok then
+    -- Getting in clears the slate, so one mistyped PIN never shortens the
+    -- allowance for the rest of the day.
+    -- WHERE is not optional, even here: supautils refuses an unqualified
+    -- DELETE at runtime, and this line only runs after a failed attempt, so
+    -- without it the first correct PIN following a mistype would error.
+    if fails > 0 then delete from nairobi_pin_fails where id is not null; end if;
+    return true;
+  end if;
+
+  delete from nairobi_pin_fails where at < now() - interval '1 day';
+  insert into nairobi_pin_fails default values;
+  return false;
+end;
 $$;
 
 create or replace function nairobi_change_admin_pin(p_old text, p_new text)
@@ -994,9 +1058,13 @@ language plpgsql security definer set search_path = public
 as $$
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- WHERE is not optional. Supabase loads supautils, whose safe-update guard
+  -- raises "UPDATE requires a WHERE clause" at RUNTIME, inside a SECURITY
+  -- DEFINER function, not only in the SQL editor. Without it this tick was dead
+  -- in production: it returned an error and changed nothing.
   update nairobi_tournaments
-  set settings = coalesce(settings, '{}'::jsonb)
-                 || jsonb_build_object('finals_sunday', coalesce(p_on, true));
+     set settings = coalesce(settings, '{}'::jsonb) || jsonb_build_object('finals_sunday', coalesce(p_on, true))
+   where id is not null;
   return 'OK';
 end;
 $$;
@@ -1008,9 +1076,10 @@ language plpgsql security definer set search_path = public
 as $$
 begin
   if not nairobi_verify_pin(p_pin) then return 'Wrong PIN.'; end if;
+  -- WHERE is not optional here either; see nairobi_admin_set_finals_sunday.
   update nairobi_tournaments
-  set settings = coalesce(settings, '{}'::jsonb)
-                 || jsonb_build_object('player_scores', coalesce(p_on, true));
+     set settings = coalesce(settings, '{}'::jsonb) || jsonb_build_object('player_scores', coalesce(p_on, true))
+   where id is not null;
   return 'OK';
 end;
 $$;
@@ -1152,14 +1221,23 @@ begin
       -- main court 1 or 2 passes the courts-restriction check below and pulls
       -- an Americano match on out of round order, leaving the main court free.
       and coalesce(e.settings ->> 'format', '') <> 'americano'
-      -- never a team that is already mid-game on another court
+      -- Never a PERSON already mid-game on another court. By player name, the
+      -- same test the assigner and the two manual placements use: an entrant
+      -- row is per event, so somebody entered in two events has a different id
+      -- in each and the old id-level test never fired for them, which let this
+      -- call a human onto a second court. The match being taken off does not
+      -- count: its players are the ones leaving.
       and not exists (
         select 1 from nairobi_matches oc
         join nairobi_events oe on oe.id = oc.event_id
+        join nairobi_entrants b1 on b1.id = oc.entrant1_id
+        join nairobi_entrants b2 on b2.id = oc.entrant2_id
+        join nairobi_entrants a1 on a1.id = mm.entrant1_id
+        join nairobi_entrants a2 on a2.id = mm.entrant2_id
         where oc.status = 'scheduled' and oc.court is not null and oc.id <> p_match_id
           and coalesce(oe.settings ->> 'format', '') <> 'americano'
-          and (oc.entrant1_id in (mm.entrant1_id, mm.entrant2_id)
-            or oc.entrant2_id in (mm.entrant1_id, mm.entrant2_id)))
+          and (string_to_array(b1.name, ' & ') || string_to_array(b2.name, ' & '))
+              && (string_to_array(a1.name, ' & ') || string_to_array(a2.name, ' & ')))
       and (
         not (e.settings ? 'courts')
         or jsonb_typeof(e.settings -> 'courts') <> 'array'
@@ -1497,7 +1575,13 @@ begin
                    or mm.bracket_round = (select max(x.bracket_round) from nairobi_matches x
                                           where x.event_id = mm.event_id and x.stage = 'knockout')));
 
-  v_winding := (v_running > 0 and v_left <= 3);
+  -- Nothing left unplayed, not "nearly nothing". This was <= 3, which let a
+  -- second batch come on while a first was still playing and split four courts
+  -- four ways. A batch with a match still to play keeps its courts; the desk
+  -- can always press Start to overlap them deliberately. Finals and third place
+  -- are excluded above while they are held for the last day, so an event down
+  -- to only those does not block the next batch.
+  v_winding := (v_running > 0 and v_left = 0);
   if v_running = 0 or v_winding then
     update nairobi_events e
     set active = true,
@@ -1516,8 +1600,8 @@ begin
       -- match already called and gone is worse than an idle court.
       and nairobi_ts_or_null(e.settings ->> 'start_time')
           between now() - interval '12 hours' and now() + interval '75 minutes'
-      -- A desk-set hold stops the idle-courts case, but three matches to go in
-      -- something actually running beats it: those courts are about to empty.
+      -- A desk-set hold stops the idle-courts case, but a running batch that
+      -- has finished beats it: those courts are empty now.
       and (v_winding
            or nairobi_ts_or_null(e.settings ->> 'delay_until') is null
            or nairobi_ts_or_null(e.settings ->> 'delay_until') <= now());
@@ -2071,7 +2155,11 @@ revoke execute on function nairobi_check_score(uuid, text, int, int, jsonb, bool
 revoke execute on function nairobi_ev_int_setting(uuid, text, int) from public, anon, authenticated;
 revoke execute on function nairobi_ev_bool_setting(uuid, text, boolean) from public, anon, authenticated;
 
-grant execute on function nairobi_verify_pin(text) to anon, authenticated;
+-- The unthrottled check is internal only now. Every admin function is SECURITY
+-- DEFINER, so they keep reaching it regardless of this revoke; the public gets
+-- nairobi_unlock, which counts failures.
+revoke execute on function nairobi_verify_pin(text) from public, anon, authenticated;
+grant execute on function nairobi_unlock(text) to anon, authenticated;
 grant execute on function nairobi_admin_set_player_scores(text, boolean) to anon, authenticated;
 grant execute on function nairobi_change_admin_pin(text, text) to anon, authenticated;
 grant execute on function nairobi_submit_score(uuid, int, int, jsonb) to anon, authenticated;
