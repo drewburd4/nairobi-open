@@ -1370,7 +1370,7 @@ function demoStore(){
       }
       return snap;
     },
-    async verifyPin(pin){ return checkPin(pin) ? ok() : fail("Wrong PIN."); },
+    async verifyPin(pin){ return checkPin(pin) ? ok() : Object.assign(fail("Wrong PIN."), { wrongPin: true }); },
     async changePin(){ return fail("PIN changes only work on the live site."); },
     async submitScore(matchId, s1, s2, games){
       const m = findMatch(matchId);
@@ -1947,8 +1947,12 @@ function liveStore(){
        and it refuses everything for a few minutes, which is why the message
        says so rather than insisting the PIN is wrong. */
     verifyPin: pin => rpc("nairobi_unlock", { p_pin: pin }).then(r =>
-      r.ok && r.data === true ? { ok: true }
-        : { ok: false, error: r.error || "Wrong PIN, or too many tries just now. Wait a few minutes and try again." }),
+      r.ok ? { ok: true }
+        /* wrongPin only when the server actually said so. A throttle, or a
+           dropped connection, must not convince a phone to forget a PIN that
+           was right: the restore path signs itself out on that flag. */
+        : { ok: false, error: r.error || "Could not check the PIN.",
+            wrongPin: r.error === "Wrong PIN." }),
     changePin: (oldPin, newPin) => rpc("nairobi_change_admin_pin", { p_old: oldPin, p_new: newPin }),
     submitScore: (id, s1, s2, games) => rpc("nairobi_submit_score", { p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null }),
     adminSubmitScore: (pin, id, s1, s2, games, walkover, hadScore) => rpc("nairobi_admin_submit_score", { p_pin: pin, p_match_id: id, p_score1: s1, p_score2: s2, p_games: games || null, p_walkover: !!walkover, p_had_score: hadScore == null ? null : !!hadScore }),
@@ -2483,6 +2487,9 @@ const SW_EXACT = {
   "A player name cannot contain \"&\".": "Jina la mchezaji haliwezi kuwa na \"&\".",
   "Numbers saved": "Namba zimehifadhiwa", "Numbers removed": "Namba zimeondolewa",
   "No backup saved on this device yet.": "Bado hakuna nakala rudufu kwenye simu hii.",
+  "Too many wrong PINs just now. Wait a few minutes and try again.":
+    "PIN nyingi zisizo sahihi kwa sasa. Subiri dakika chache kisha ujaribu tena.",
+  "Could not check the PIN.": "Imeshindwa kuthibitisha PIN.",
   "Type the current PIN first.": "Andika PIN ya sasa kwanza.",
   "That is already the PIN.": "Hiyo tayari ndiyo PIN.",
   "Could not change the PIN.": "Imeshindwa kubadilisha PIN.",
@@ -4322,6 +4329,13 @@ const bkChampTbd = '<div class="bkchamp-card tbd"><div class="bkchamp-trophy">�
 function renderBracket(){
   const ev = currentEvent();
   if (!ev) return noEventHtml("bracket");
+  /* Same gate as Schedule and Standings. Withholding only the PROJECTED
+     bracket was not enough: an event whose knockout had been generated before
+     its own pages were due would have shown players the real thing, names and
+     all, from a tab that is supposed to be closed. */
+  if (!state.adminPin && !eventPublished(ev))
+    return '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + '</span>' +
+      '<div class="empty">' + swText('The bracket will be released after the group stage is finished.') + '</div>';
   if (isAmericano(ev)){
     return '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + '</span>' +
       '<div class="empty">' + esc(ev.name) + ' has no bracket. It is decided on total points won, so the Standings tab is the result.</div>';
@@ -7316,7 +7330,12 @@ async function doChangePin(){
   const savedPin = safeSession("pb_admin_pin");
   if (savedPin){
     const r = await store.verifyPin(savedPin).catch(() => ({ ok: false }));
-    if (r.ok) state.adminPin = savedPin; else safeSession("pb_admin_pin", null);
+    /* Forget the saved PIN only when the server says it is wrong. A throttled
+       window, or a flaky connection at the venue, used to look identical to a
+       bad PIN here and would have quietly signed out every admin phone that
+       reloaded while it was shut. */
+    if (r.ok) state.adminPin = savedPin;
+    else if (r.wrongPin) safeSession("pb_admin_pin", null);
   }
   store.subscribe(() => reload(true));
   await reload();

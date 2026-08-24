@@ -268,13 +268,20 @@ $$;
 -- Known limit, and the reason a longer PIN is the real fix: the admin functions
 -- answer "Wrong PIN." unthrottled, so a determined guesser can still use one of
 -- those as an oracle. This closes the obvious door, not every door.
+-- Returning a bare boolean was not enough. Every phone re-checks its saved PIN
+-- on page load and the client signs itself out when that check fails, so a
+-- throttle trip would have logged out every admin phone that reloaded while the
+-- window was shut, then refused their re-entry too. Say WHICH it was:
+--   'OK'          unlocked
+--   'Wrong PIN.'  genuinely wrong, the client may forget its saved PIN
+--   anything else the window is shut; keep the saved PIN and wait
+drop function if exists nairobi_unlock(boolean);
 create or replace function nairobi_unlock(p_pin text)
-returns boolean
+returns text
 language plpgsql volatile security definer set search_path = public, extensions
 as $$
 declare
   fails int;
-  ok boolean;
 begin
   select count(*) into fails
     from nairobi_pin_fails
@@ -282,22 +289,21 @@ begin
   -- Ten wrong PINs in ten minutes is far past anything a desk produces by
   -- mistyping, and it caps a guesser at sixty an hour. Refuse without looking
   -- at the PIN, so the window is the only thing that opens the door.
-  if fails >= 10 then return false; end if;
+  if fails >= 10 then
+    return 'Too many wrong PINs just now. Wait a few minutes and try again.';
+  end if;
 
-  ok := nairobi_verify_pin(p_pin);
-  if ok then
+  if nairobi_verify_pin(p_pin) then
     -- Getting in clears the slate, so one mistyped PIN never shortens the
-    -- allowance for the rest of the day.
-    -- WHERE is not optional, even here: supautils refuses an unqualified
-    -- DELETE at runtime, and this line only runs after a failed attempt, so
-    -- without it the first correct PIN following a mistype would error.
+    -- allowance for the rest of the day. WHERE is not optional: supautils
+    -- refuses an unqualified DELETE at runtime.
     if fails > 0 then delete from nairobi_pin_fails where id is not null; end if;
-    return true;
+    return 'OK';
   end if;
 
   delete from nairobi_pin_fails where at < now() - interval '1 day';
   insert into nairobi_pin_fails default values;
-  return false;
+  return 'Wrong PIN.';
 end;
 $$;
 
