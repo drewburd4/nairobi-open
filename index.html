@@ -1049,10 +1049,13 @@ const EVENT_CATEGORIES = [
   "Masters Doubles (Men)", "Masters Doubles (Women)", "Masters Mixed Doubles"];
 
 function defaultEventSettings(){
-  /* win_by_two on by default (Drew, Aug 2026): group games play out win-by-2
+  /* Every group game runs to 15 (Drew, Aug 2026). Singles used to be the only
+     15 and doubles played to 21; a whole tournament of 21s costs more court
+     time than four days hold.
+     win_by_two on by default (Drew, Aug 2026): group games play out win-by-2
      like the knockouts, and an organiser unticks it for a day that must run
      to the clock. Explicit here so existing events keep whatever they have. */
-  return { points_to_group: 21, points_to_knockout: 11, best_of_group: 1, best_of_knockout: 3,
+  return { points_to_group: 15, points_to_knockout: 11, best_of_group: 1, best_of_knockout: 3,
     win_by_two: true, from_participants: true, advance_per_group: 2, knockout_size: "auto",
     group_size: 6, schedule_note: "" };
 }
@@ -2722,7 +2725,7 @@ const courtsCount = () => (data.tournament && data.tournament.settings && data.t
 const evSetting = (ev, key, dflt) => (ev && ev.settings && ev.settings[key] != null) ? ev.settings[key] : dflt;
 const matchPts = m => {
   const ev = eventById(m.event_id);
-  return evSetting(ev, m.stage === "knockout" ? "points_to_knockout" : "points_to_group", m.stage === "knockout" ? 11 : 21);
+  return evSetting(ev, m.stage === "knockout" ? "points_to_knockout" : "points_to_group", m.stage === "knockout" ? 11 : 15);
 };
 const matchBestOf = m => {
   const ev = eventById(m.event_id);
@@ -3151,7 +3154,7 @@ function fmtHours(mins){
 function eventDurationEstimate(ev, o){
   o = o || {};
   const pick = (v, dflt) => (v == null || v !== v ? dflt : v);
-  const pg = pick(o.pointsGroup, evSetting(ev, "points_to_group", 21));
+  const pg = pick(o.pointsGroup, evSetting(ev, "points_to_group", 15));
   const pk = pick(o.pointsKo, evSetting(ev, "points_to_knockout", 11));
   const bg = pick(o.boGroup, parseInt(evSetting(ev, "best_of_group", 1), 10) || 1);
   const bk = pick(o.boKo, parseInt(evSetting(ev, "best_of_knockout", 3), 10) || 1);
@@ -4500,7 +4503,7 @@ function renderAdmin(){
 
     h += '<h4>1 · Format and rules</h4>';
     h += '<div class="fieldrow">' +
-      '<div class="field"><label for="adm-ptg">Group games to</label><input id="adm-ptg" type="number" min="5" max="51" oninput="updateTimeEstimate()" value="' + esc(String(evSetting(ev, "points_to_group", 21))) + '"></div>' +
+      '<div class="field"><label for="adm-ptg">Group games to</label><input id="adm-ptg" type="number" min="5" max="51" oninput="updateTimeEstimate()" value="' + esc(String(evSetting(ev, "points_to_group", 15))) + '"></div>' +
       '<div class="field"><label for="adm-bog">Group format</label><select id="adm-bog" onchange="updateTimeEstimate()">' +
         [1,3,5].map(n => '<option value="' + n + '"' + (bog == n ? ' selected' : '') + '>Best of ' + n + '</option>').join("") + '</select></div>' +
       '<div class="field"><label for="adm-ptk">Knockout games to</label><input id="adm-ptk" type="number" min="5" max="51" oninput="updateTimeEstimate()" value="' + esc(String(evSetting(ev, "points_to_knockout", 11))) + '"></div>' +
@@ -4515,7 +4518,7 @@ function renderAdmin(){
       '<label style="display:inline-flex;align-items:center;gap:6px;font-weight:600">' +
       '<input type="checkbox" onchange="updateTimeEstimate()" id="adm-wb2"' + (evSetting(ev, "win_by_two", false) ? ' checked' : '') + '> Win by 2 in the group stage</label>' +
       '</div><p class="note" style="margin:2px 0 0">Off: a group game ends dead on the target, even at ' +
-      (evSetting(ev, "points_to_group", 21) - 1) + '-' + evSetting(ev, "points_to_group", 21) +
+      (evSetting(ev, "points_to_group", 15) - 1) + '-' + evSetting(ev, "points_to_group", 15) +
       ', which keeps the group stage a predictable length on shared courts. Knockout games always play win by 2.</p></div>' +
       '<div class="field"><label>Courts this event may use</label><div style="padding:2px 0 0">' +
       (function(){
@@ -5359,7 +5362,7 @@ function collectGames(bo){
 async function saveScore(matchId){
   const m = data.matches.find(x => x.id === matchId);
   const bo = m ? matchBestOf(m) : 1;
-  const pts = m ? matchPts(m) : 21;
+  const pts = m ? matchPts(m) : 15;
   const wb2 = m ? matchWinBy2(m) : false;
   /* What this screen believed when the modal OPENED (captured in openMatch):
      if it thought the match was unscored but a score has arrived since, the
@@ -5696,7 +5699,7 @@ function readEventSettings(ev){
      whatever is stored, so saving here can't roll back an edit someone else
      made to a different setting on another device. */
   const out = ({
-    points_to_group: num("adm-ptg", evSetting(ev, "points_to_group", 21), 5, 51, "Group games to"),
+    points_to_group: num("adm-ptg", evSetting(ev, "points_to_group", 15), 5, 51, "Group games to"),
     points_to_knockout: num("adm-ptk", evSetting(ev, "points_to_knockout", 11), 5, 51, "Knockout games to"),
     best_of_group: num("adm-bog", evSetting(ev, "best_of_group", 1), 1, 5, "Group format"),
     best_of_knockout: num("adm-bok", evSetting(ev, "best_of_knockout", 3), 1, 5, "Knockout format"),
@@ -6007,8 +6010,6 @@ async function addEvent(){
   const name = prompt(swText("Name for the new event:"));
   if (!name || !name.trim()) return;
   const meta = { name: name.trim(), sort_order: Math.max(0, ...data.events.map(e => e.sort_order || 0)) + 1, settings: defaultEventSettings() };
-  /* Singles are more tiring per point, so their group games run to 15, not 21. */
-  if (/singles/i.test(meta.name)) meta.settings.points_to_group = 15;
   const r = await store.adminReplaceEvent(state.adminPin, null, meta, [], []);
   if (!r.ok){ toast(r.error); return; }
   if (r.eventId) state.adminEventId = r.eventId;

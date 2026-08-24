@@ -46,7 +46,7 @@ create table if not exists nairobi_events (
   sort_order int not null default 0,
   stage text not null default 'group',        -- 'group' or 'knockout'
   active boolean not null default false,      -- true while feeding the courts
-  settings jsonb not null default '{"points_to_group": 21, "points_to_knockout": 11, "best_of_group": 1, "best_of_knockout": 3, "win_by_two": true, "from_participants": true, "advance_per_group": 2, "knockout_size": "auto", "group_size": 6, "schedule_note": ""}'::jsonb,
+  settings jsonb not null default '{"points_to_group": 15, "points_to_knockout": 11, "best_of_group": 1, "best_of_knockout": 3, "win_by_two": true, "from_participants": true, "advance_per_group": 2, "knockout_size": "auto", "group_size": 6, "schedule_note": ""}'::jsonb,
   created_at timestamptz not null default now()
 );
 
@@ -688,7 +688,7 @@ declare
   is_am boolean;
 begin
   pts := nairobi_ev_int_setting(p_event_id, case when p_stage = 'knockout' then 'points_to_knockout' else 'points_to_group' end,
-                                case when p_stage = 'knockout' then 11 else 21 end);
+                                case when p_stage = 'knockout' then 11 else 15 end);
   bo := nairobi_ev_int_setting(p_event_id, case when p_stage = 'knockout' then 'best_of_knockout' else 'best_of_group' end,
                                case when p_stage = 'knockout' then 3 else 1 end);
   -- Knockout games are always win-by-2; the setting governs only the group stage.
@@ -1849,7 +1849,7 @@ begin
   win_slot := case when p_retiree_id = m.entrant1_id then 2 else 1 end;
 
   pts := nairobi_ev_int_setting(m.event_id, case when m.stage = 'knockout' then 'points_to_knockout' else 'points_to_group' end,
-                                case when m.stage = 'knockout' then 11 else 21 end);
+                                case when m.stage = 'knockout' then 11 else 15 end);
   bo := nairobi_ev_int_setting(m.event_id, case when m.stage = 'knockout' then 'best_of_knockout' else 'best_of_group' end,
                                case when m.stage = 'knockout' then 3 else 1 end);
 
@@ -2126,15 +2126,15 @@ select 'Nairobi Open 2026', crypt(nairobi_seed_pin(), gen_salt('bf'))
 where not exists (select 1 from nairobi_tournaments);
 
 -- All category events, ready to fill with entrants from the Admin tab.
--- Singles group games run to 15 (more tiring per point); everything else to
--- 21. Knockouts everywhere default to best of 3 to 11, per the README.
+-- Every group game runs to 15. Knockouts everywhere default to best of 3 to
+-- 11, per the README.
 -- win_by_two and from_participants have to be spelled out here, not left to
 -- the column default: an event whose settings simply lack the key reads as
 -- off, which is how a fresh install used to arrive with no win-by-2 in the
 -- group stage and nothing to tick on the Participants tab.
 insert into nairobi_events (tournament_id, name, sort_order, settings)
 select t.id, v.name, v.ord,
-  ('{"points_to_group": ' || case when v.name ilike '%singles%' then 15 else 21 end ||
+  ('{"points_to_group": 15' ||
    ', "points_to_knockout": 11, "best_of_group": 1, "best_of_knockout": 3,' ||
    ' "win_by_two": true, "from_participants": true,' ||
    ' "advance_per_group": 2, "knockout_size": "auto", "group_size": 6, "schedule_note": ""}')::jsonb
