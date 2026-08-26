@@ -3384,20 +3384,48 @@ function eventStartDate(ev){
   const d = new Date(s);
   return isNaN(d.getTime()) ? null : d;
 }
-/* Before an event starts: its own queue position against the admin-set start
-   time, over the courts the event is allowed to use. */
+/* Before an event starts: where the match falls in the queue its batch will
+   form, drained onto whichever court frees first, the same walk the live board
+   does once play is on. Everything else starting on the same clock is in the
+   batch. Priced on its own queue alone, an event sharing the morning with
+   another read as if the whole building were its own, so two events at 8:00
+   both called their fifth match "8:17" when the woven queue puts it in the
+   third wave. One event starting by itself prices exactly as before. */
 function estimatedStartTime(m, ev){
   const start = eventStartDate(ev);
   if (!start) return null;
-  const sibs = data.matches
-    .filter(x => x.event_id === ev.id && x.status === "scheduled" &&
-      (!x.postponed || x.id === m.id) && x.entrant1_id && x.entrant2_id)
-    .sort((a, b) => a.play_order - b.play_order);
-  const pos = sibs.findIndex(x => x.id === m.id);
-  if (pos < 0) return null;
-  const allowed = ev.settings && Array.isArray(ev.settings.courts) && ev.settings.courts.length
-    ? ev.settings.courts.length : courtsCount();
-  return new Date(start.getTime() + Math.floor(pos / allowed) * expectedMatchMinutes(m) * 60000);
+  const key = evSetting(ev, "start_time", "");
+  const batch = publicEvents().filter(e => e.id === ev.id ||
+    (!e.active && !isAmericano(e) && evSetting(e, "start_time", "") === key));
+  if (!batch.some(e => e.id === ev.id)) batch.push(ev);
+  const sim = { events: batch.map(e => Object.assign({}, e, { active: true })), matches: data.matches };
+  const q = weavePending(sim);
+  const ahead = q.findIndex(x => x.id === m.id);
+  if (ahead < 0) return null;
+  const n = courtsCount();
+  const freeAt = [];
+  for(let c = 0; c < n; c++) freeAt.push(0);
+  const allowedOf = x => {
+    const e2 = sim.events.find(e => e.id === x.event_id);
+    const a = e2 && e2.settings && Array.isArray(e2.settings.courts) ? e2.settings.courts : [];
+    return a.length ? a : null;
+  };
+  const soonestFor = x => {
+    const allowed = allowedOf(x);
+    let k = -1;
+    for(let j = 0; j < n; j++){
+      if (allowed && allowed.indexOf(j + 1) === -1) continue;
+      if (k === -1 || freeAt[j] < freeAt[k]) k = j;
+    }
+    return k;
+  };
+  for(let i = 0; i < ahead; i++){
+    const k = soonestFor(q[i]);
+    if (k !== -1) freeAt[k] += expectedMatchMinutes(q[i]);
+  }
+  const mine = soonestFor(m);
+  if (mine === -1) return null;
+  return new Date(start.getTime() + freeAt[mine] * 60000);
 }
 function fmtWaitMin(w){
   const r = Math.max(5, Math.round(w / 5) * 5);
