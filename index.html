@@ -2957,10 +2957,18 @@ function nextToPublish(){
 /* What the courts board is waiting for: the next event due to actually play.
    The hour of grace stops a just-passed start time reading as "next". */
 function nextToStart(){
+  return upcomingEvents()[0] || null;
+}
+/* Everything still to come, soonest first, with the same hour of grace past a
+   start time. The board's quiet-state list used to take every event that was
+   not running, in tab order and capped at eight, so once Thursday's events
+   were done for the day (finals held for Sunday) they filled the top of the
+   list and Saturday and Sunday fell off the end. */
+function upcomingEvents(){
   const now = Date.now();
   return publicEvents()
     .filter(e => !e.active && eventStartDate(e) && eventStartDate(e).getTime() > now - 3600000)
-    .sort((a, b) => eventStartDate(a) - eventStartDate(b))[0] || null;
+    .sort((a, b) => eventStartDate(a) - eventStartDate(b) || a.sort_order - b.sort_order);
 }
 /* One event's own page, before it is due. The strip lists every event now, so
    this is the answer to "I tapped mine and it is empty": which event, and
@@ -2997,6 +3005,10 @@ function currentEvent(){
   if (sel && (state.adminPin || !isHidden(sel))) return sel;
   const act = activeEvents();
   if (act[0]) return act[0];
+  /* Nothing running: the next event to start is what the reader came for.
+     Tab order put a finished Thursday draw on the Schedule tab all evening. */
+  const nxt = nextToStart();
+  if (nxt) return nxt;
   /* A published one first, so the default lands on something with content;
      failing that the first event on the strip, which at least tells the reader
      when it is due. Never data.events, which would name a hidden event. */
@@ -4073,9 +4085,9 @@ function renderBoard(){
          know when to turn up, not how the preview window works. */
       const nxt = nextToStart();
       if (nxt) h += '<br>This page will activate ' + esc(whenText(eventStartDate(nxt))) + '.';
-      const upcoming = publicEvents().filter(e => !e.active && eventWhenLabel(e));
+      const upcoming = upcomingEvents();
       if (upcoming.length){
-        h += '<br><br>' + upcoming.slice(0, 8).map(e => esc(e.name) + ' · ' + esc(eventWhenLabel(e))).join('<br>');
+        h += '<br><br>' + upcoming.slice(0, 12).map(e => esc(e.name) + ' · ' + esc(eventWhenLabel(e))).join('<br>');
       }
       h += '</div>';
     }
