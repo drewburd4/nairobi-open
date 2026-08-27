@@ -739,13 +739,18 @@ function seedField(groupsStandings, adv, sizeOverride, order){
     const list = groupsStandings
       .map(g => g.rows[t] ? { row: g.rows[t], group: g.group } : null)
       .filter(Boolean)
-      .map(x => ({
-        entrantId: x.row.id, name: x.row.name, group: x.group, place: t + 1,
-        w: x.row.w, l: x.row.l,
-        winPct: x.row.p ? x.row.w / x.row.p : 0,
-        avgDiff: x.row.p ? x.row.diff / x.row.p : 0,
-        avgPf: x.row.p ? x.row.pf / x.row.p : 0
-      }))
+      .map(x => {
+        /* Groups of different sizes: compare on the cross-group record
+           (results against the larger groups' bottom teams set aside). */
+        const s = x.row.cross || x.row;
+        return {
+          entrantId: x.row.id, name: x.row.name, group: x.group, place: t + 1,
+          w: x.row.w, l: x.row.l,
+          winPct: s.p ? s.w / s.p : 0,
+          avgDiff: s.p ? s.diff / s.p : 0,
+          avgPf: s.p ? s.pf / s.p : 0
+        };
+      })
       .sort((a, b) => String(a.group).localeCompare(String(b.group)));
     /* Group letter order is a stated rule, so it needs no tiebreak at all. */
     if (byGroup) return list;
@@ -2118,6 +2123,10 @@ const SW_EXACT = {
   "This division has no rounds yet.": "Shindano hili halina raundi bado.",
   "← Back to the main draw": "← Rudi kwenye droo kuu",
   "tap a team for details": "gusa timu kuona maelezo",
+  "Groups differ in size, so for comparisons across groups the result against the last-placed team of the larger group is set aside; teams are then ranked on win percentage, then point difference per match, then points per match. Ties are settled by drawn lots.":
+    "Makundi yana ukubwa tofauti, kwa hivyo katika ulinganisho kati ya makundi matokeo dhidi ya timu ya mwisho ya kundi kubwa hayahesabiwi; kisha timu hupangwa kwa asilimia ya ushindi, kisha tofauti ya pointi kwa kila mechi, kisha pointi kwa kila mechi. Sare huamuliwa kwa kura.",
+  "Best next-placed teams are compared across groups on win percentage, then point difference per match, then points per match. Ties are settled by drawn lots.":
+    "Timu bora za nafasi zinazofuata hulinganishwa kati ya makundi kwa asilimia ya ushindi, kisha tofauti ya pointi kwa kila mechi, kisha pointi kwa kila mechi. Sare huamuliwa kwa kura.",
   "Every point you win counts, whoever you are partnered with":
     "Kila pointi unayoshinda inahesabika, bila kujali mwenzako ni nani",
   "Score already recorded. Spot a mistake? Ask at the desk and an organizer can fix it.":
@@ -2642,6 +2651,8 @@ const SW_PATTERNS = [
   [/^(\d+) of (\d+) matches in$/, "mechi $1 kati ya $2 zimeingia"],
   [/^Top (\d+) per group advance$/, "Bora $1 wa kila kundi wanafuzu"],
   [/^Top (\d+) per group advance plus (\d+) best next-placed$/, "Bora $1 wa kila kundi wanafuzu, pamoja na $2 bora wa nafasi zinazofuata"],
+  [/^Groups differ in size, so for comparisons across groups the results against the last (\d+) teams of the larger groups are set aside; teams are then ranked on win percentage, then point difference per match, then points per match\. Ties are settled by drawn lots\.$/,
+    "Makundi yana ukubwa tofauti, kwa hivyo katika ulinganisho kati ya makundi matokeo dhidi ya timu $1 za mwisho za makundi makubwa hayahesabiwi; kisha timu hupangwa kwa asilimia ya ushindi, kisha tofauti ya pointi kwa kila mechi, kisha pointi kwa kila mechi. Sare huamuliwa kwa kura."],
   [/^Best (\d+)(?:st|nd|rd|th)$/, "Bora wa $1"],
   [/^Games: (.+)$/, "Gemu: $1"],
   [/^Planned: (.+)$/, "Imepangwa: $1"],
@@ -3182,13 +3193,44 @@ async function clearLots(gname){
   }
   await reload();
 }
+/* Numbers for comparing teams ACROSS groups when the groups differ in size.
+   A bigger group's teams play one match more, and it is against that group's
+   weakest team, so raw win % and differential per match flatter them by
+   construction: a typical third is 1-2 in a group of four and 2-2 in a group
+   of five. For every cross-group comparison (seeding order inside a tier,
+   the best next-placed places) the results against the bottom (size minus
+   smallest size) teams of each larger group are set aside, the way UEFA and
+   the AFC rank third-placed teams out of unequal groups. Standings inside a
+   group are untouched: they still decide who finished where, including who
+   the bottom teams are. Equal groups drop nothing, so nothing changes for
+   them. Drew's call, Aug 2026. */
+function crossGroupRows(ev, gs){
+  const sizes = gs.map(g => g.rows.length).filter(n => n > 0);
+  const smallest = sizes.length ? Math.min.apply(null, sizes) : 0;
+  return gs.map(g => {
+    const extra = g.rows.length - smallest;
+    if (extra <= 0) return g;
+    const dropped = new Set(g.rows.slice(g.rows.length - extra).map(r => r.id));
+    const ents = data.entrants.filter(e => e.event_id === ev.id && e.group_name === g.group && !dropped.has(e.id));
+    const ms = data.matches.filter(m => m.event_id === ev.id && m.stage === "group" && m.group_name === g.group &&
+      !dropped.has(m.entrant1_id) && !dropped.has(m.entrant2_id));
+    const adj = {};
+    computeStandings(ents, ms).forEach(r => { adj[r.id] = r; });
+    return { group: g.group, rows: g.rows.map(r => adj[r.id] ? Object.assign({}, r, { cross: adj[r.id] }) : r) };
+  });
+}
 function seedFieldFor(ev){
   const groups = groupsOfEvent(ev);
-  const gs = groups.map(g => ({ group: g, rows: standingsFor(ev, g) }));
+  const raw = groups.map(g => ({ group: g, rows: standingsFor(ev, g) }));
+  const sizes = raw.map(g => g.rows.length).filter(n => n > 0);
+  const dropCount = sizes.length ? Math.max.apply(null, sizes) - Math.min.apply(null, sizes) : 0;
+  const gs = dropCount > 0 ? crossGroupRows(ev, raw) : raw;
   const ks = evSetting(ev, "knockout_size", "auto");
   const override = (ks === "auto" || !ks) ? null : parseInt(ks, 10);
-  return seedField(gs, evSetting(ev, "advance_per_group", 2), override,
-                   evSetting(ev, "seed_order", "performance"));
+  const field = seedField(gs, evSetting(ev, "advance_per_group", 2), override,
+                          evSetting(ev, "seed_order", "performance"));
+  field.dropCount = dropCount;
+  return field;
 }
 /* Blocks inside a seeding tier that nothing has separated. Same contract as
    wildcardTieFor: empty means the bracket can be seeded honestly. */
@@ -4275,6 +4317,15 @@ function renderStandings(){
   let h = '<span class="print-title">' + esc(data.tournament.name) + ' · ' + esc(ev.name) + ' · Standings</span>';
   h += '<div class="section-h"><h2>' + esc(ev.name) + '</h2><span class="hint">Top ' + adv + ' per group advance' +
     (field.wildcards ? ' plus ' + field.wildcards + ' best next-placed' : '') + ' · tap a team for details</span></div>';
+  /* How teams are compared across groups, in the one place players look for
+     it. Only when a comparison across groups can decide something. */
+  if (field.dropCount > 0){
+    h += '<p class="note">' + esc(swText(field.dropCount === 1
+      ? "Groups differ in size, so for comparisons across groups the result against the last-placed team of the larger group is set aside; teams are then ranked on win percentage, then point difference per match, then points per match. Ties are settled by drawn lots."
+      : "Groups differ in size, so for comparisons across groups the results against the last " + field.dropCount + " teams of the larger groups are set aside; teams are then ranked on win percentage, then point difference per match, then points per match. Ties are settled by drawn lots.")) + '</p>';
+  } else if (field.wildcards){
+    h += '<p class="note">' + esc(swText("Best next-placed teams are compared across groups on win percentage, then point difference per match, then points per match. Ties are settled by drawn lots.")) + '</p>';
+  }
   if (groups.length > 1){
     h += '<div class="subtabs" role="tablist">' +
       '<button class="subtab" aria-current="' + (f === "all") + '" onclick="setStandingsFilter(\'all\')">All</button>' +
