@@ -447,8 +447,12 @@ function groupSizes(n, target){
   const g = Math.max(1, Math.round(n / target));
   const base = Math.floor(n / g);
   const extra = n % g;
+  /* Odd slots go to the FIRST groups (13 teams in fours = 5, 4, 4), so the
+     straight deal below keeps landing the tail seed in A: with the extra slot
+     in the last group, A and B filled up after twelve and the 13th seed had
+     nowhere to go but C. Drew's call, Aug 2026. */
   const sizes = [];
-  for(let i = 0; i < g; i++) sizes.push(base + (i >= g - extra ? 1 : 0));
+  for(let i = 0; i < g; i++) sizes.push(base + (i < extra ? 1 : 0));
   return sizes;
 }
 
