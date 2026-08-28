@@ -772,15 +772,21 @@ function seedField(groupsStandings, adv, sizeOverride, order){
     }
     return ranked;
   };
+  /* Each tier is ranked once and reused: ranking a tier reports its dead heats
+     into seedTies, so the wildcard check and the third place pair below, which
+     read tiers the walk has already ranked, would otherwise report the same
+     tie twice. */
+  const tiers = [];
+  const tier = t => tiers[t] || (tiers[t] = tierList(t));
   const maxPlace = Math.max(0, ...groupsStandings.map(g => g.rows.length));
   const seeds = [];
   let size, guaranteed = 0;
   if (!sizeOverride){
-    for(let t = 0; t < adv && t < maxPlace; t++){ seeds.push(...tierList(t)); guaranteed++; }
+    for(let t = 0; t < adv && t < maxPlace; t++){ seeds.push(...tier(t)); guaranteed++; }
     size = nextPow2(Math.max(2, seeds.length));
     let t = adv;
     while(seeds.length < size && t < maxPlace){
-      for(const c of tierList(t)){
+      for(const c of tier(t)){
         if (seeds.length >= size) break;
         c.wildcard = true;
         seeds.push(c);
@@ -791,7 +797,7 @@ function seedField(groupsStandings, adv, sizeOverride, order){
     size = sizeOverride;
     let t = 0;
     while(seeds.length < size && t < maxPlace){
-      const list = tierList(t);
+      const list = tier(t);
       if (seeds.length + list.length <= size){
         seeds.push(...list); guaranteed++;
       } else {
@@ -811,21 +817,42 @@ function seedField(groupsStandings, adv, sizeOverride, order){
   let wildcardTie = null;
   const lastWc = seeds.filter(s => s.wildcard).slice(-1)[0];
   if (lastWc){
-    const tier = tierList(lastWc.place - 1);
+    const wcTier = tier(lastWc.place - 1);
     const inIds = new Set(seeds.map(s => s.entrantId));
     const eq = c => c.winPct === lastWc.winPct && c.avgDiff === lastWc.avgDiff && c.avgPf === lastWc.avgPf;
-    const outTied = tier.filter(c => !inIds.has(c.entrantId) && eq(c));
+    const outTied = wcTier.filter(c => !inIds.has(c.entrantId) && eq(c));
     if (outTied.length){
-      const inTied = tier.filter(c => inIds.has(c.entrantId) && eq(c));
+      const inTied = wcTier.filter(c => inIds.has(c.entrantId) && eq(c));
       wildcardTie = { names: inTied.concat(outTied).map(c => c.name) };
     }
   }
+  /* A two-slot bracket is a final and nothing else, so no beaten semifinalist
+     is left to play for third. The next two teams in this same order play it
+     instead: third and fourth of the group when one group sends its top two,
+     the two runners-up when two groups each send their winner. Fewer than two
+     left over means no match. Drew's rule, Aug 2026. */
+  let third = null;
+  if (size === 2 && seeds.length === 2){
+    const inField = new Set(seeds.map(s => s.entrantId));
+    const next = [];
+    for(let t = 0; t < maxPlace && next.length < 2; t++){
+      for(const c of tier(t)){
+        if (next.length >= 2) break;
+        if (!inField.has(c.entrantId)) next.push(c);
+      }
+    }
+    if (next.length === 2) third = next;
+  }
   /* Only a tie inside a tier that actually made the bracket can change who
-     plays whom, so tiers nobody qualified from are not worth stopping for. */
+     plays whom, so tiers nobody qualified from are not worth stopping for.
+     For the third place pair only a tie that decides who is IN it counts: the
+     two of them play each other, so a dead heat between them changes nothing. */
   const used = new Set(seeds.map(s => s.entrantId));
-  const ties = seedTies.filter(t => t.ids.some(id => used.has(id)));
+  const pairIds = new Set((third || []).map(c => c.entrantId));
+  const ties = seedTies.filter(t => t.ids.some(id => used.has(id)) ||
+    (t.ids.some(id => pairIds.has(id)) && !t.ids.every(id => pairIds.has(id))));
   return { seeds, size, guaranteed, wildcards: seeds.filter(s => s.wildcard).length,
-           wildcardTie, seedTies: ties };
+           wildcardTie, seedTies: ties, third };
 }
 
 function nextPow2(n){ let p = 1; while(p < n) p *= 2; return p; }
@@ -882,7 +909,7 @@ function roundLabelFor(bracketRound, totalRounds){
 }
 
 /* Builds all knockout rounds with linkage and resolves any byes immediately. */
-function buildBracket(eventId, seeds, startOrder){
+function buildBracket(eventId, seeds, startOrder, thirdPair){
   const size = nextPow2(Math.max(2, seeds.length));
   const pairs = bracketPairs(seeds);
   const totalRounds = Math.log2(size);
@@ -940,6 +967,20 @@ function buildBracket(eventId, seeds, startOrder){
     roundMatches[totalRounds - 2].forEach((sf, i) => {
       sf.loser_match_id = third.id;
       sf.loser_slot = i + 1;
+    });
+  } else if (totalRounds === 1 && Array.isArray(thirdPair) && thirdPair.length === 2){
+    /* No semifinals to feed it, so the pair seedField named (the next two
+       placed teams) is written in now. It queues after the final, where the
+       fed one sits too. */
+    ord += 10;
+    rows.push({
+      id: uid(), event_id: eventId, stage: "knockout", group_name: null,
+      round: totalRounds + 1, bracket_round: 0, bracket_pos: 0,
+      entrant1_id: thirdPair[0].entrantId, entrant2_id: thirdPair[1].entrantId,
+      score1: null, score2: null, games: null,
+      status: "scheduled", play_order: ord, postponed: false, court: null,
+      walkover: false, called_at: null, called_ack: false,
+      next_match_id: null, next_slot: null, loser_match_id: null, loser_slot: null
     });
   }
   return rows;
@@ -2253,6 +2294,8 @@ const SW_EXACT = {
   "Edit teams": "Hariri timu",
   "Played by the two beaten semifinalists. Both names appear once their semifinals are in.":
     "Inachezwa na waliopoteza nusu fainali wawili. Majina yote mawili yanaonekana nusu fainali zao zikiisha.",
+  "Played by the two teams that finished just behind the finalists in the group stage.":
+    "Inachezwa na timu mbili zilizomaliza nyuma tu ya wafainali katika hatua ya makundi.",
   "Finals": "Fainali",
   "Seeding": "Upangaji wa nafasi",
   "How bracket seeds are numbered": "Jinsi nafasi za mchujo zinavyopangwa",
@@ -3080,7 +3123,9 @@ function standingsFor(ev, gname){
 function unresolvedTiesAtCut(ev){
   const out = [];
   const field = seedFieldFor(ev);
-  const through = new Set(field.seeds.map(x => x.entrantId));
+  /* The third place pair qualifies for a match too, so a tie that decides who
+     is in it stops the draw the same way. */
+  const through = new Set(field.seeds.concat(field.third || []).map(x => x.entrantId));
   for(const g of groupsOfEvent(ev)){
     const rows = standingsFor(ev, g);
     const blocks = {};
@@ -4270,6 +4315,10 @@ function renderSchedule(){
       if (!list.length) continue;
       h += '<div class="roundblock"><h3>' + roundLabelFor(r, total) + '</h3>' + list.map(m => scheduleRow(m, true)).join("") + '</div>';
     }
+    /* The third place match hangs off the side of the tree (bracket_round 0),
+       so the round loop above never reaches it. */
+    const third = koMs.find(m => isThirdPlace(m) && matchesTerm(m));
+    if (third) h += '<div class="roundblock"><h3>Third place</h3>' + scheduleRow(third, true) + '</div>';
     return h;
   }
 
@@ -4297,6 +4346,8 @@ function renderSchedule(){
       if (!list.length) continue;
       h += '<div class="roundblock"><h3>' + roundLabelFor(r, koTotal) + '</h3>' + list.map(m => scheduleRow(m, true)).join("") + '</div>';
     }
+    const third = shownKo.find(isThirdPlace);
+    if (third) h += '<div class="roundblock"><h3>Third place</h3>' + scheduleRow(third, true) + '</div>';
   }
   h += '<p class="note">Matches run in this order, group A first, so everyone plays round 1 before round 2 starts. Played matches show their scores; tap a match for details. A score can be entered while the match is on a court, and corrections go through the desk.</p>';
   return h;
@@ -4477,7 +4528,9 @@ function renderBracket(){
       field.seeds.length + ' qualify for a ' + size + '-slot bracket' +
       (field.wildcards ? ', including ' + field.wildcards + ' wildcard' + (field.wildcards > 1 ? 's' : '') + ' from the next places' : '') +
       '. The real bracket is created when the desk confirms the group stage is finished' +
-      (totalRounds >= 2 ? ', along with a third place match between the two beaten semifinalists' : '') +
+      (totalRounds >= 2 ? ', along with a third place match between the two beaten semifinalists'
+        : field.third ? ', along with a third place match between ' + esc(field.third[0].group + field.third[0].place) +
+                        ' and ' + esc(field.third[1].group + field.third[1].place) : '') +
       '.</p>';
     return h;
   }
@@ -4560,7 +4613,9 @@ function renderBracket(){
       : '<div class="bkmatch bkflat">' + tRows + '</div>';
     if (state.adminPin && third.status === "scheduled")
       h += '<button class="btn small secondary" onclick="openSlotEditor(\'' + third.id + '\')">Edit teams</button>';
-    h += '<p class="note" style="margin:6px 0 0">Played by the two beaten semifinalists. Both names appear once their semifinals are in.</p>';
+    h += '<p class="note" style="margin:6px 0 0">' + (total >= 2
+      ? 'Played by the two beaten semifinalists. Both names appear once their semifinals are in.'
+      : 'Played by the two teams that finished just behind the finalists in the group stage.') + '</p>';
     h += '</div>';
   }
   h += '<p class="note">Winners move to the right, round by round, toward the champion. Tap a match to see or enter its result.' +
@@ -7235,7 +7290,7 @@ async function confirmGroupStage(){
   const field = seedFieldFor(ev);
   if (field.seeds.length < 2){ toast("Not enough qualifiers yet."); return; }
   const maxOrder = Math.max(0, ...data.matches.filter(m => m.event_id === ev.id).map(m => m.play_order || 0));
-  const rows = buildBracket(ev.id, field.seeds, maxOrder);
+  const rows = buildBracket(ev.id, field.seeds, maxOrder, field.third);
   const r = await store.adminGenerateBracket(state.adminPin, ev.id, rows);
   if (!r.ok){ toast(r.error); return; }
   autoBracketTried.delete(ev.id);
@@ -7278,7 +7333,7 @@ async function maybeAutoBracket(){
     const field = seedFieldFor(fresh);
     if (field.seeds.length < 2) continue;
     const maxOrder = Math.max(0, ...freshMs.map(m => m.play_order || 0));
-    const r = await store.adminGenerateBracket(state.adminPin, ev.id, buildBracket(ev.id, field.seeds, maxOrder));
+    const r = await store.adminGenerateBracket(state.adminPin, ev.id, buildBracket(ev.id, field.seeds, maxOrder, field.third));
     /* Only now is it "tried": marking it before the write meant one dropped
        request left the event with no bracket and no message, for good. */
     if (!r.ok){ toast(r.error || "Could not draw the bracket for " + ev.name + "."); continue; }
