@@ -553,20 +553,28 @@ function buildCatchupMatches(eventId, groupName, newId, memberIds, startRound, s
 
 /* Merge per-event pending lists into one queue. Court share is a blend
    (Drew's split, Aug 2026): 35% divided evenly between the running events and
-   65% by how many matches each still has, so a big draw still finishes sooner
-   but can't starve a small one down to a single court. Each match gets a
+   65% by how many matches each has, so a big draw still finishes sooner but
+   can't starve a small one down to a single court. Each match gets a
    fractional key (position + 0.5) / weight and the queue is those keys
    ascending (ties broken by event order); one event alone reduces to the old
    pure-proportional order exactly. Mirrors the frac in nairobi_assign_courts
-   and nairobi_admin_swap_out. */
+   and nairobi_admin_swap_out.
+   The lists hold EVERY match of each event, played and on-court ones included,
+   so a waiting match keeps the position it was promised all day; callers keep
+   only the courtReady ones. Weaving just the waiting matches restarted every
+   event at position 1 on each call and let the biggest draw take every court
+   that freed on its own. */
+const courtReady = m => m.status === "scheduled" && m.court == null && !m.held && !!(m.entrant1_id && m.entrant2_id);
 function weaveQueues(lists){
   const items = [];
-  const live = lists.filter(l => l.length);
+  /* an event with nothing a court can take (finished, or waiting on feeders)
+     leaves the weave, so it stops counting in the share */
+  const live = lists.filter(l => l.some(courtReady));
   const total = live.reduce((s, l) => s + l.length, 0);
   const evenShare = live.length ? total / live.length : 0;
   lists.forEach((list, e) => {
     const n = list.length;
-    if (!n) return;
+    if (!n || !live.includes(list)) return;
     const w = 0.35 * evenShare + 0.65 * n;
     for(let i = 0; i < n; i++) items.push({ m: list[i], e: e, key: (i + 0.5) / w });
   });
@@ -1035,9 +1043,9 @@ const dbIsAmericano = ev => !!(ev && ev.settings && ev.settings.format === "amer
 function weavePending(db){
   const act = db.events.filter(e => e.active && !dbIsAmericano(e)).sort((a, b) => a.sort_order - b.sort_order || String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id)));
   const lists = act.map(ev => db.matches
-    .filter(m => m.event_id === ev.id && m.status === "scheduled" && m.court == null && !m.held && m.entrant1_id && m.entrant2_id)
+    .filter(m => m.event_id === ev.id)
     .sort((a, b) => a.play_order - b.play_order));
-  return weaveQueues(lists);
+  return weaveQueues(lists).filter(courtReady);
 }
 /* Americano matches ready for a court: none of their players are on a court and
    it is the earliest unplayed match for each of them (the per-player gate, which
@@ -3345,9 +3353,9 @@ function onCourtMatchesAll(){
    the manual court-assign picker, or the wait estimates. */
 function pendingQueue(){
   const lists = activeEvents().filter(ev => !isAmericano(ev)).map(ev => data.matches
-    .filter(m => m.event_id === ev.id && m.status === "scheduled" && m.court == null && !m.held && m.entrant1_id && m.entrant2_id)
+    .filter(m => m.event_id === ev.id)
     .sort((a, b) => a.play_order - b.play_order));
-  return weaveQueues(lists);
+  return weaveQueues(lists).filter(courtReady);
 }
 /* Matches the desk pulled off court and is holding until both teams turn up. */
 /* Deliberately NOT filtered on the event being active: a held match whose

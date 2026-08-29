@@ -477,19 +477,29 @@ begin
   ) s where p is not null and btrim(p) <> '';
 
   -- Court share is a blend (Drew's split, Aug 2026): 35% divided evenly
-  -- between the running events and 65% by how many matches each still has, so
-  -- a big draw still finishes sooner but can't starve a small one down to a
-  -- single court. weight = 0.35 * (total/events) + 0.65 * own_count; one event
-  -- alone reduces to the old pure-proportional order exactly. Mirrored in the
+  -- between the running events and 65% by how many matches each has, so a big
+  -- draw still finishes sooner but can't starve a small one down to a single
+  -- court. weight = 0.35 * (total/events) + 0.65 * own_count; one event alone
+  -- reduces to the old pure-proportional order exactly. Mirrored in the
   -- client's weaveQueues and in nairobi_admin_swap_out below.
+  --
+  -- Every match of each running event is ranked, played and on-court ones
+  -- included, so a waiting match keeps the place the schedule tab promised it
+  -- all day. Ranking only the matches still waiting (as until 2026-08-29)
+  -- restarted every event at position 1 on each call, and the biggest draw won
+  -- every court that freed on its own: Friday's men's doubles took court after
+  -- court from the women's, and Sunday's 45-match men's singles would have let
+  -- the 10-match women's singles play once at 07:00 and then not until 10:45.
   for rec in
     select q.id, q.entrant1_id, q.entrant2_id, q.pnames, ev.settings as evsettings
     from (
       select qi.id, qi.event_id, qi.play_order, qi.entrant1_id, qi.entrant2_id, qi.pnames,
+             qi.status, qi.court, qi.held,
              ((qi.rn - 1) + 0.5)
                / (0.35 * (qi.total_n::numeric / max(qi.dr) over ()) + 0.65 * qi.ev_n) as frac
       from (
         select m2.id, m2.event_id, m2.play_order, m2.entrant1_id, m2.entrant2_id,
+               m2.status, m2.court, m2.held,
                (select array_agg(btrim(p)) from (
                   select unnest(string_to_array(e1.name, ' & ')) as p
                   union all
@@ -502,14 +512,20 @@ begin
         join nairobi_events e on e.id = m2.event_id and e.active
           -- archived leaves the app entirely; it must not be CALLED either
           and coalesce(e.settings ->> 'archived', '') <> 'true'
-        join nairobi_entrants e1 on e1.id = m2.entrant1_id
-        join nairobi_entrants e2 on e2.id = m2.entrant2_id
-        where m2.status = 'scheduled' and m2.court is null and not m2.held
-          and m2.entrant1_id is not null and m2.entrant2_id is not null
-          and coalesce(e.settings ->> 'format', '') <> 'americano'
+          -- an event with nothing a court can take (finished, or waiting on
+          -- feeders) leaves the weave, so it stops counting in the share
+          and exists (select 1 from nairobi_matches x
+                      where x.event_id = e.id and x.status = 'scheduled' and x.court is null and not x.held
+                        and x.entrant1_id is not null and x.entrant2_id is not null)
+        left join nairobi_entrants e1 on e1.id = m2.entrant1_id
+        left join nairobi_entrants e2 on e2.id = m2.entrant2_id
+        where coalesce(e.settings ->> 'format', '') <> 'americano'
       ) qi
     ) q
     join nairobi_events ev on ev.id = q.event_id
+    -- only a match a court can take comes out; everything above still counted
+    where q.status = 'scheduled' and q.court is null and not q.held
+      and q.entrant1_id is not null and q.entrant2_id is not null
     order by q.frac, ev.sort_order, q.play_order, q.id
   loop
     exit when array_length(free_courts, 1) is null;
@@ -1211,22 +1227,35 @@ begin
   -- actually showing as next. Ordering by position-within-event first would
   -- always pick the lowest sort_order event's front match, which starves every
   -- other running event whenever more than one is live.
-  with pending0 as (
-    select mm.id, e.sort_order, mm.play_order,
+  with ranked as (
+    -- Ranked over every match of each running event, played and on-court ones
+    -- included, exactly as nairobi_assign_courts does, so "next in line" is the
+    -- match the board promised next rather than the biggest draw's next match.
+    -- Never an Americano match: that pool is physically separate, and its
+    -- court numbers overlap the main draw's, so without this test a vacated
+    -- main court 1 or 2 passes the courts-restriction check below and pulls
+    -- an Americano match on out of round order, leaving the main court free.
+    select mm.id, mm.event_id, mm.status, mm.court, mm.held, mm.entrant1_id, mm.entrant2_id,
+           e.sort_order, mm.play_order, e.settings,
            row_number() over (partition by mm.event_id order by mm.play_order, mm.id) as rn,
            count(*) over (partition by mm.event_id) as ev_n,
            count(*) over () as total_n,
            dense_rank() over (order by mm.event_id) as dr
     from nairobi_matches mm
     join nairobi_events e on e.id = mm.event_id and e.active
-    where mm.status = 'scheduled' and mm.court is null and not mm.held
-      and mm.entrant1_id is not null and mm.entrant2_id is not null
-      and mm.id <> p_match_id
-      -- Never an Americano match: that pool is physically separate, and its
-      -- court numbers overlap the main draw's, so without this test a vacated
-      -- main court 1 or 2 passes the courts-restriction check below and pulls
-      -- an Americano match on out of round order, leaving the main court free.
-      and coalesce(e.settings ->> 'format', '') <> 'americano'
+      -- an event with nothing a court can take (finished, or waiting on
+      -- feeders) leaves the weave, so it stops counting in the share
+      and exists (select 1 from nairobi_matches x
+                  where x.event_id = e.id and x.status = 'scheduled' and x.court is null and not x.held
+                    and x.entrant1_id is not null and x.entrant2_id is not null)
+    where coalesce(e.settings ->> 'format', '') <> 'americano'
+  ), pending0 as (
+    select r.id, r.sort_order, r.play_order,
+           ((r.rn - 1) + 0.5) / (0.35 * (r.total_n::numeric / (select max(dr) from ranked)) + 0.65 * r.ev_n) as frac
+    from ranked r
+    where r.status = 'scheduled' and r.court is null and not r.held
+      and r.entrant1_id is not null and r.entrant2_id is not null
+      and r.id <> p_match_id
       -- Never a PERSON already mid-game on another court. By player name, the
       -- same test the assigner and the two manual placements use: an entrant
       -- row is per event, so somebody entered in two events has a different id
@@ -1238,23 +1267,21 @@ begin
         join nairobi_events oe on oe.id = oc.event_id
         join nairobi_entrants b1 on b1.id = oc.entrant1_id
         join nairobi_entrants b2 on b2.id = oc.entrant2_id
-        join nairobi_entrants a1 on a1.id = mm.entrant1_id
-        join nairobi_entrants a2 on a2.id = mm.entrant2_id
+        join nairobi_entrants a1 on a1.id = r.entrant1_id
+        join nairobi_entrants a2 on a2.id = r.entrant2_id
         where oc.status = 'scheduled' and oc.court is not null and oc.id <> p_match_id
           and coalesce(oe.settings ->> 'format', '') <> 'americano'
           and (string_to_array(b1.name, ' & ') || string_to_array(b2.name, ' & '))
               && (string_to_array(a1.name, ' & ') || string_to_array(a2.name, ' & ')))
       and (
-        not (e.settings ? 'courts')
-        or jsonb_typeof(e.settings -> 'courts') <> 'array'
-        or jsonb_array_length(e.settings -> 'courts') = 0
-        or m.court in (select (value)::int from jsonb_array_elements_text(e.settings -> 'courts') where value ~ '^[0-9]+$')
+        not (r.settings ? 'courts')
+        or jsonb_typeof(r.settings -> 'courts') <> 'array'
+        or jsonb_array_length(r.settings -> 'courts') = 0
+        or m.court in (select (value)::int from jsonb_array_elements_text(r.settings -> 'courts') where value ~ '^[0-9]+$')
       )
   ), pending as (
-    -- same 35% even / 65% by-remaining blend as nairobi_assign_courts
-    select id, sort_order, play_order,
-           ((rn - 1) + 0.5) / (0.35 * (total_n::numeric / max(dr) over ()) + 0.65 * ev_n) as frac
-    from pending0
+    -- same 35% even / 65% blend as nairobi_assign_courts
+    select id, sort_order, play_order, frac from pending0
   )
   select id into repl from pending order by frac, sort_order, play_order, id limit 1;
   if repl is null then return 'No other match is waiting, so it stays on court.'; end if;
