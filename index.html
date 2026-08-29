@@ -7377,12 +7377,16 @@ function csvCell(v){
 }
 /* Results export in the layout DUPR's club "Import Matches via CSV" reads
    (August 2026): a header row matched by name, matchType S/D, scoreType
-   (SIDEOUT: every event here is side-out scoring), event, date, four
-   playerX / playerXDuprId / playerXExternalId triplets and ten game columns,
-   blank where a game was not played. IDs come from the roster on the
-   Participants tab by name, then from the ids typed at draw time. A row with
-   an ID missing cannot import, so the download stops and says who. */
-const DUPR_HEAD = ["matchType", "scoreType", "event", "date",
+   (SIDEOUT: every event here is side-out scoring), event, date, location,
+   four playerX / playerXDuprId / playerXExternalId triplets and ten game
+   columns, blank where a game was not played. IDs come from the roster on
+   the Participants tab by name, then from the ids typed at draw time. A row
+   with an ID missing cannot import, so the download stops and says who.
+   DUPR's template calls location optional, but its database refuses a match
+   without one (the 2026-08-29 upload died on exactly that), so every row
+   carries the venue. */
+const DUPR_LOCATION = "Nairobi Pickleball Club, Nairobi, Kenya";
+const DUPR_HEAD = ["matchType", "scoreType", "event", "date", "location",
   "playerA1", "playerA1DuprId", "playerA1ExternalId", "playerA2", "playerA2DuprId", "playerA2ExternalId",
   "playerB1", "playerB1DuprId", "playerB1ExternalId", "playerB2", "playerB2DuprId", "playerB2ExternalId",
   "teamAGame1", "teamBGame1", "teamAGame2", "teamBGame2", "teamAGame3", "teamBGame3",
@@ -7455,7 +7459,7 @@ function duprExportRows(evs, roster){
     const a = side(m.entrant1_id), b = side(m.entrant2_id);
     const games = Array.isArray(m.games) && m.games.length ? m.games : [[m.score1, m.score2]];
     const stage = m.stage === "group" ? "Group " + (m.group_name || "") : koLabel(m);
-    const row = [doubles ? "D" : "S", "SIDEOUT", data.tournament.name + " - " + ev.name + " - " + stage, nairobiDate(when(m))]
+    const row = [doubles ? "D" : "S", "SIDEOUT", data.tournament.name + " - " + ev.name + " - " + stage, nairobiDate(when(m)), DUPR_LOCATION]
       .concat(a, b);
     for(let g = 0; g < 5; g++) row.push(games[g] ? games[g][0] : "", games[g] ? games[g][1] : "");
     rows.push(row);
