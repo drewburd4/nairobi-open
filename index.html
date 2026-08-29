@@ -2421,10 +2421,10 @@ const SW_EXACT = {
   "Not enough qualifiers yet.": "Bado hakuna waliofuzu wa kutosha.",
   "Bracket created": "Mchujo umeundwa", "Bracket updated": "Mchujo umesasishwa",
   "Export results": "Pakua matokeo",
-  "One row per played match, players split out of team names, one column pair per game. Made to copy into DUPR's club \"Import Matches via CSV\" template (download that template from the DUPR club dashboard; it wants each player's DUPR ID, so collect those with the roster).":
-    "Mstari mmoja kwa kila mechi iliyochezwa, wachezaji wametenganishwa kutoka majina ya timu, jozi moja ya safu wima kwa kila gemu. Imetengenezwa kunakiliwa kwenye kiolezo cha DUPR cha klabu \"Import Matches via CSV\" (pakua kiolezo hicho kutoka dashibodi ya klabu ya DUPR; kinahitaji DUPR ID ya kila mchezaji, hivyo zikusanye pamoja na orodha).",
-  "Download this event (CSV)": "Pakua shindano hili (CSV)",
-  "Download all events (CSV)": "Pakua mashindano yote (CSV)",
+  "One row per played match in the layout DUPR's club \"Import Matches via CSV\" reads: keep the header row and pick YYYY-MM-DD as the date format in DUPR. Every player needs a DUPR ID on the Participants tab; the download stops and names anyone without one. Walkovers are left out.":
+    "Mstari mmoja kwa kila mechi iliyochezwa katika mpangilio unaosomwa na \"Import Matches via CSV\" ya klabu ya DUPR: acha mstari wa vichwa na uchague YYYY-MM-DD kama muundo wa tarehe kwenye DUPR. Kila mchezaji anahitaji DUPR ID kwenye kichupo cha Washiriki; upakuaji husimama na kutaja yeyote asiye nayo. Walkover haziingizwi.",
+  "Download this event (DUPR CSV)": "Pakua shindano hili (DUPR CSV)",
+  "Download all events (DUPR CSV)": "Pakua mashindano yote (DUPR CSV)",
   "Download backup (JSON)": "Pakua nakala rudufu (JSON)",
   "Offline backup on this phone: none yet (a snapshot is kept automatically every 25 played matches).":
     "Nakala rudufu kwenye simu hii: bado hakuna (nakala huhifadhiwa kiotomatiki kila mechi 25 zilizochezwa).",
@@ -5211,9 +5211,9 @@ function renderAdmin(){
     }
 
     h += '<div class="divider"></div><h4>6 · Export results</h4>';
-    h += '<p class="note">One row per played match, players split out of team names, one column pair per game. Made to copy into DUPR\'s club "Import Matches via CSV" template (download that template from the DUPR club dashboard; it wants each player\'s DUPR ID, so collect those with the roster).</p>';
-    h += '<button class="btn small secondary" onclick="downloadResults(false)">Download this event (CSV)</button> ' +
-      '<button class="btn small secondary" onclick="downloadResults(true)">Download all events (CSV)</button>';
+    h += '<p class="note">One row per played match in the layout DUPR\'s club "Import Matches via CSV" reads: keep the header row and pick YYYY-MM-DD as the date format in DUPR. Every player needs a DUPR ID on the Participants tab; the download stops and names anyone without one. Walkovers are left out.</p>';
+    h += '<button class="btn small secondary" onclick="downloadResults(false)">Download this event (DUPR CSV)</button> ' +
+      '<button class="btn small secondary" onclick="downloadResults(true)">Download all events (DUPR CSV)</button>';
     h += (function(){
       const bk = readBackup();
       return '<p class="note" style="margin-top:10px">Offline backup on this phone: ' +
@@ -7367,80 +7367,135 @@ function csvCell(v){
   if (/^[=+\-@]/.test(v)) v = "'" + v;
   return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
 }
-/* Results export: one row per played match, team names split into players,
-   per-game score column pairs. Copies cleanly into DUPR's club CSV template. */
-function downloadResults(allEvents){
+/* Results export in the layout DUPR's club "Import Matches via CSV" reads
+   (August 2026): a header row matched by name, matchType S/D, scoreType
+   (SIDEOUT: every event here is side-out scoring), event, date, four
+   playerX / playerXDuprId / playerXExternalId triplets and ten game columns,
+   blank where a game was not played. IDs come from the roster on the
+   Participants tab by name, then from the ids typed at draw time. A row with
+   an ID missing cannot import, so the download stops and says who. */
+const DUPR_HEAD = ["matchType", "scoreType", "event", "date",
+  "playerA1", "playerA1DuprId", "playerA1ExternalId", "playerA2", "playerA2DuprId", "playerA2ExternalId",
+  "playerB1", "playerB1DuprId", "playerB1ExternalId", "playerB2", "playerB2DuprId", "playerB2ExternalId",
+  "teamAGame1", "teamBGame1", "teamAGame2", "teamBGame2", "teamAGame3", "teamBGame3",
+  "teamAGame4", "teamBGame4", "teamAGame5", "teamBGame5"];
+const normName = s => String(s || "").trim().toUpperCase().replace(/\s+/g, " ");
+/* True when one letter added, dropped or changed turns a into b. */
+function oneEditApart(a, b){
+  if (a === b) return true;
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let i = 0, j = 0, edits = 0;
+  while (i < a.length && j < b.length){
+    if (a[i] === b[j]){ i++; j++; continue; }
+    if (++edits > 1) return false;
+    if (a.length > b.length) i++; else if (a.length < b.length) j++; else { i++; j++; }
+  }
+  return edits + (a.length - i) + (b.length - j) <= 1;
+}
+/* Roster IDs by exact name. A roster name one typo away (the draw says
+   DHARMIR, the roster DHARMIN) is only reported as a hint, never used: an
+   ID on the wrong person is the one mistake DUPR cannot undo. */
+function duprIdLookup(roster){
+  const byName = new Map();
+  (roster || []).forEach(p => {
+    const n = normName(p.name), id = String(p.dupr_id || "").trim();
+    if (n && id && !byName.has(n)) byName.set(n, id);
+  });
+  return {
+    find: name => byName.get(normName(name)) || "",
+    near: name => { const n = normName(name); for (const k of byName.keys()) if (oneEditApart(n, k)) return k; return ""; }
+  };
+}
+const nairobiDate = iso => {
+  const d = new Date(iso || "");
+  if (isNaN(d)) return "";
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Nairobi", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
+};
+/* Rows in the order the scores were entered: DUPR rates matches in sequence,
+   and the printed schedule is not the order they were played. */
+function duprExportRows(evs, roster){
+  const ids = duprIdLookup(roster);
+  const when = m => { const l = matchLog(m.id); return String((l.length ? l[0].at : m.updated_at) || ""); };
+  const played = [];
+  evs.forEach(ev => {
+    if (isAmericano(ev)) return;
+    data.matches.filter(m => m.event_id === ev.id && m.status === "played" && m.score1 != null && !m.walkover)
+      .forEach(m => played.push([ev, m]));
+  });
+  played.sort((x, y) => when(x[1]).localeCompare(when(y[1])) || x[1].play_order - y[1].play_order);
+  const rows = [], missing = new Map(), unsplit = [];
+  played.forEach(([ev, m]) => {
+    const doubles = evIsDoubles(ev);
+    const side = id => {
+      const e = entrantById(id);
+      const name = (e && e.name) || "";
+      const parts = doubles ? splitPair(name) : [name.trim()];
+      if (doubles && name && parts.length !== 2) unsplit.push(name);
+      const typed = (e && e.meta && e.meta.duprIds) || [];
+      const out = [];
+      for(let i = 0; i < 2; i++){
+        const nm = (doubles || i === 0) ? (parts[i] || "") : "";
+        const did = nm ? (ids.find(nm) || String(typed[i] || "").trim()) : "";
+        if (nm && !did){
+          if (!missing.has(nm)) missing.set(nm, { events: new Set(), near: ids.near(nm) });
+          missing.get(nm).events.add(ev.name);
+        }
+        out.push(nm, did, "");
+      }
+      return out;
+    };
+    const a = side(m.entrant1_id), b = side(m.entrant2_id);
+    const games = Array.isArray(m.games) && m.games.length ? m.games : [[m.score1, m.score2]];
+    const stage = m.stage === "group" ? "Group " + (m.group_name || "") : koLabel(m);
+    const row = [doubles ? "D" : "S", "SIDEOUT", data.tournament.name + " - " + ev.name + " - " + stage, nairobiDate(when(m))]
+      .concat(a, b);
+    for(let g = 0; g < 5; g++) row.push(games[g] ? games[g][0] : "", games[g] ? games[g][1] : "");
+    rows.push(row);
+  });
+  return { rows, missing, unsplit: [...new Set(unsplit)] };
+}
+async function downloadResults(allEvents){
   const evs = allEvents
     ? data.events.slice().sort((a, b) => a.sort_order - b.sort_order || String(a.name).localeCompare(String(b.name)) || String(a.id).localeCompare(String(b.id)))
     : [eventById(state.adminEventId)].filter(Boolean);
-  const played = [];
-  evs.forEach(ev => {
-    data.matches
-      .filter(m => m.event_id === ev.id && m.status === "played" && m.score1 != null)
-      .sort((a, b) => (a.stage === b.stage ? a.play_order - b.play_order : a.stage === "group" ? -1 : 1))
-      .forEach(m => played.push([ev, m]));
-  });
-  if (!played.length){ toast("No played matches to export yet."); return; }
-  const maxGames = Math.max(1, ...played.map(([, m]) => Array.isArray(m.games) ? m.games.length : 1));
-  const head = ["Event", "Stage", "Date", "Format",
-    "Team 1 Player A", "Team 1 Player B", "Team 2 Player A", "Team 2 Player B",
-    /* DUPR identifies people by ID, which is the whole reason the entry grid
-       collects one per player; without these columns they were collected and
-       never used. */
-    "Team 1 Player A DUPR ID", "Team 1 Player B DUPR ID",
-    "Team 2 Player A DUPR ID", "Team 2 Player B DUPR ID"];
-  for(let g = 1; g <= maxGames; g++) head.push("Game " + g + " Team 1", "Game " + g + " Team 2");
-  head.push("Winner", "Notes");
-  const lines = [head.map(csvCell).join(",")];
-  /* Doubles teams are stored as one free-text name, so the export can only
-     split them on the documented " & ". Anything else lands as a single player
-     and would import into DUPR as the wrong person, so those rows get called
-     out rather than silently mangled. */
-  const unsplit = [];
-  played.forEach(([ev, m]) => {
-    const split = id => {
-      const name = entrantName(id) || "";
-      const parts = name.split(" & ");
-      /* a singles entrant has no " & " by design; only doubles rows are wrong */
-      if (parts.length < 2 && name && evIsDoubles(ev)) unsplit.push(name);
-      return [parts[0] || "", parts.slice(1).join(" & ") || ""];
-    };
-    const [a1, a2] = split(m.entrant1_id), [b1, b2] = split(m.entrant2_id);
-    /* Ids sit in the same order the names were entered, so they line up with
-       the split above. */
-    const idsOf = id => { const e = entrantById(id); const v = (e && e.meta && e.meta.duprIds) || []; return [v[0] || "", v[1] || ""]; };
-    const [ia1, ia2] = idsOf(m.entrant1_id), [ib1, ib2] = idsOf(m.entrant2_id);
-    const d = m.updated_at ? new Date(m.updated_at) : null;
-    const pad = n => String(n).padStart(2, "0");
-    const date = d && !isNaN(d) ? pad(d.getMonth() + 1) + "/" + pad(d.getDate()) + "/" + d.getFullYear() : "";
-    const row = [ev.name, m.stage === "group" ? "Group " + (m.group_name || "") : koLabel(m), date,
-      a2 || b2 ? "Doubles" : "Singles", a1, a2, b1, b2, ia1, ia2, ib1, ib2];
-    /* A walkover has no real games: score1/score2 are a placeholder, and in a
-       best-of event they are games won, not points. Leave the columns empty so
-       nothing imports as a played result. */
-    const games = m.walkover ? [] : (Array.isArray(m.games) && m.games.length ? m.games : [[m.score1, m.score2]]);
-    for(let g = 0; g < maxGames; g++) row.push(games[g] ? games[g][0] : "", games[g] ? games[g][1] : "");
-    row.push(entrantName(m.score1 > m.score2 ? m.entrant1_id : m.entrant2_id) || "",
-             m.walkover ? "Walkover" : m.retired ? "Retired: " + (entrantName(m.retired) || "") : "");
-    lines.push(row.map(csvCell).join(","));
-  });
-  const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+  if (!evs.length) return;
+  /* Read the roster fresh: an ID typed on the Participants tab a minute ago
+     must count, and this phone may never have opened that tab. */
+  const r = await store.adminListParticipants(state.adminPin);
+  if (!r.ok){ toast(r.error || "Could not load the participants list."); return; }
+  const out = duprExportRows(evs, r.data || []);
+  if (!out.rows.length){ toast("No played matches to export yet."); return; }
+  const what = allEvents ? "the whole file" : evs[0].name;
+  if (out.missing.size || out.unsplit.length){
+    const names = [...out.missing.keys()].sort().map(n => {
+      const x = out.missing.get(n);
+      return n + (allEvents ? " (" + [...x.events].join(", ") + ")" : "") +
+        (x.near ? " [the roster has " + x.near + "]" : "");
+    });
+    let msg = "Cannot download " + what + " for DUPR yet.";
+    if (names.length){
+      msg += "\n\n" + names.length + (names.length === 1 ? " player has" : " players have") + " no DUPR ID:\n" + names.join("\n") +
+        "\n\nEnter their DUPR IDs on the Participants tab (the name there must match the draw), then download " + what + " again.";
+    }
+    if (out.unsplit.length){
+      msg += "\n\nThese doubles entries have no \" & \" between the two names, so they cannot be split into players: " +
+        out.unsplit.join("; ") + ". Fix the names on the Entrants list first.";
+    }
+    alert(msg);
+    return;
+  }
+  const lines = [DUPR_HEAD.join(",")].concat(out.rows.map(row => row.map(csvCell).join(",")));
+  /* No byte-order mark: DUPR reads the column names, and a BOM glues itself
+     to the first one, which then reads as "matchType" missing. */
+  const blob = new Blob([lines.join("\r\n") + "\r\n"], { type: "text/csv;charset=utf-8" });
   const a = document.createElement("a");
   a.href = URL.createObjectURL(blob);
-  a.download = (allEvents ? "nairobi-open-results-all" : "nairobi-open-results-" +
-    (evs[0] ? evs[0].name.toLowerCase().replace(/[^a-z0-9]+/g, "-") : "event")) + ".csv";
+  a.download = (allEvents ? "nairobi-open-2026-all-events-dupr" : "nairobi-open-2026-" +
+    evs[0].name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") + "-dupr") + ".csv";
   document.body.appendChild(a);
   a.click();
   setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
-  const odd = [...new Set(unsplit)];
-  if (odd.length){
-    toast("CSV downloaded: " + (lines.length - 1) + " matches. " + odd.length +
-      " name" + (odd.length > 1 ? "s" : "") + " had no \" & \" to split on (" +
-      odd.slice(0, 3).join(", ") + (odd.length > 3 ? ", …" : "") +
-      "), so they exported as singles. Fix them before importing to DUPR.");
-  } else {
-    toast("CSV downloaded: " + (lines.length - 1) + " matches");
-  }
+  toast("DUPR CSV downloaded: " + out.rows.length + " matches");
 }
 async function doChangePin(){
   const oldEl = document.getElementById("adm-oldpin");
