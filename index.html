@@ -7433,10 +7433,16 @@ const nairobiDate = iso => {
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Africa/Nairobi", year: "numeric", month: "2-digit", day: "2-digit" }).format(d);
 };
 /* Rows in the order the scores were entered: DUPR rates matches in sequence,
-   and the printed schedule is not the order they were played. */
+   and the printed schedule is not the order they were played. A match was
+   played when its first real score went in, so a walkover the desk later
+   cleared (logged the evening before the match was actually played) does
+   not set its date. */
 function duprExportRows(evs, roster){
   const ids = duprIdLookup(roster);
-  const when = m => { const l = matchLog(m.id); return String((l.length ? l[0].at : m.updated_at) || ""); };
+  const when = m => {
+    const l = matchLog(m.id), s = l.filter(e => e.action === "score");
+    return String(((s.length ? s : l)[0] || {}).at || m.updated_at || "");
+  };
   const played = [];
   evs.forEach(ev => {
     if (isAmericano(ev)) return;
